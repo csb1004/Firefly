@@ -8,8 +8,8 @@ from openai import OpenAI
 
 load_dotenv()
 
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
 if not DISCORD_BOT_TOKEN:
     raise ValueError("DISCORD_BOT_TOKEN이 .env에 없습니다.")
@@ -18,7 +18,11 @@ if not OPENAI_API_KEY:
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
-PROMPT_FILE = Path("prompt.txt")
+DEFAULT_PROMPT_FILE = Path("prompt.txt")
+SPECIAL_PROMPT_FILE = Path("prompt_special.txt")
+
+# 여기에 특정 유저의 디스코드 ID 넣기
+SPECIAL_USER_ID = 393724092022390784
 
 LONG_SAM_LINE = (
     "지금당장떠나면아무도다치지않는다그러지않으면너희는모두죽어탐정놀이도이젠끝이다현실로돌아가면"
@@ -31,37 +35,15 @@ LONG_SAM_LINE = (
     "그러니내가사용할수있는수단도단하나뿐이다네게보여주기위한거야내전부를"
 )
 
-def load_system_prompt() -> str:
-    if not PROMPT_FILE.exists():
-        raise FileNotFoundError(
-            "prompt.txt 파일을 찾을 수 없습니다. bot.py와 같은 폴더에 만들어 주세요."
-        )
-    return PROMPT_FILE.read_text(encoding="utf-8").strip()
+def load_text_file(path: Path) -> str:
+    if not path.exists():
+        raise FileNotFoundError(f"{path} 파일을 찾을 수 없어.")
+    return path.read_text(encoding="utf-8").strip()
 
-SYSTEM_PROMPT = load_system_prompt()
-
-intents = discord.Intents.default()
-intents.message_content = True
-
-client = discord.Client(intents=intents)
-
-async def generate_reply(user_message: str) -> str:
-    if user_message.strip() == "그 긴거 해줘":
-        return LONG_SAM_LINE
-
-    response = await asyncio.to_thread(
-        client_openai.responses.create,
-        model="gpt-5.3-codex",
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ],
-    )
-
-    try:
-        return response.output_text.strip()
-    except Exception:
-        return "…미안. 지금은 답을 꺼내는 데 조금 문제가 생겼어."
+def get_system_prompt(user_id: int) -> str:
+    if user_id == SPECIAL_USER_ID:
+        return load_text_file(SPECIAL_PROMPT_FILE)
+    return load_text_file(DEFAULT_PROMPT_FILE)
 
 def clean_mention(message_content: str, bot_user_id: int) -> str:
     return (
@@ -70,6 +52,27 @@ def clean_mention(message_content: str, bot_user_id: int) -> str:
         .replace(f"<@!{bot_user_id}>", "")
         .strip()
     )
+
+intents = discord.Intents.default()
+intents.message_content = True
+client = discord.Client(intents=intents)
+
+async def generate_reply(user_message: str, user_id: int) -> str:
+    if user_message.strip() == "그 긴거 해줘":
+        return LONG_SAM_LINE
+
+    system_prompt = get_system_prompt(user_id)
+
+    response = await asyncio.to_thread(
+        client_openai.responses.create,
+        model="gpt-5.3-codex",
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+    )
+
+    return response.output_text.strip()
 
 @client.event
 async def on_ready():
@@ -89,7 +92,7 @@ async def on_message(message: discord.Message):
 
         async with message.channel.typing():
             try:
-                reply = await generate_reply(user_text)
+                reply = await generate_reply(user_text, message.author.id)
                 await message.channel.send(reply[:1900])
             except Exception as e:
                 print("오류:", e)
