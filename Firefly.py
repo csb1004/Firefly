@@ -566,7 +566,9 @@ async def on_message(message: discord.Message):
             if not new_nickname:
                 await message.channel.send("…호칭을 비워둘 수는 없어.")
                 return
-
+            if(message.author.id == SPECIAL_USER_ID):
+                await message.channel.send("…너는 특별한 호칭이 이미 정해져 있어서 바꿀 수 없어.")
+                return
             user_data["nickname"] = new_nickname
             update_user_data(message.author.id, user_data)
             await message.channel.send(f"응. 이제부터는 {new_nickname}(이)라고 불러볼게.")
@@ -577,10 +579,6 @@ async def on_message(message: discord.Message):
             else:
                 embed = create_help_embed()  # 기존 함수
 
-            await message.channel.send(embed=embed)
-            return
-        if user_text == "/도움말":
-            
             await message.channel.send(embed=embed)
             return
 
