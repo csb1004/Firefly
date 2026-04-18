@@ -399,6 +399,10 @@ async def on_message(message: discord.Message):
 
         user_data = get_user_data(message.author.id, message.author.display_name)
 
+        if message.author.id == SPECIAL_USER_ID and user_text == "/메모리파일":
+            await message.channel.send(file=discord.File("/data/memory.json"))
+            return
+
         if message.author.id == SPECIAL_USER_ID and user_text.startswith("/호감도설정 "):
             if not message.mentions:
                 await message.channel.send("…대상을 먼저 멘션해줘. 예: /호감도설정 @유저 75")
