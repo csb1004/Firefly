@@ -3,6 +3,7 @@ import re
 import json
 import asyncio
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 
 import discord
 from dotenv import load_dotenv
@@ -76,6 +77,56 @@ NEGATIVE_KEYWORDS = [
     "패버", "죽이고", "찢어", "망해", "망했", "저주", "혐성", "쓰레기"
 ]
 
+def set_user_affection(target_user_id: int, value: int) -> int:
+    all_data = load_memory()
+    key = str(target_user_id)
+
+    if key not in all_data:
+        all_data[key] = {
+            "name": "알 수 없음",
+            "nickname": "개척자",
+            "affection": DEFAULT_AFFECTION,
+            "last_seen": None,
+            "history": []
+        }
+
+    if target_user_id == SPECIAL_USER_ID:
+        all_data[key]["affection"] = 1004
+    else:
+        all_data[key]["affection"] = max(1, min(100, value))
+
+    save_memory(all_data)
+    return all_data[key]["affection"]
+
+
+def change_user_affection(target_user_id: int, delta: int) -> int:
+    all_data = load_memory()
+    key = str(target_user_id)
+
+    if key not in all_data:
+        all_data[key] = {
+            "name": "알 수 없음",
+            "nickname": "개척자",
+            "affection": DEFAULT_AFFECTION,
+            "last_seen": None,
+            "history": []
+        }
+
+    current = all_data[key].get("affection", DEFAULT_AFFECTION)
+
+    if target_user_id == SPECIAL_USER_ID:
+        all_data[key]["affection"] = 1004
+    else:
+        all_data[key]["affection"] = max(1, min(100, current + delta))
+
+    save_memory(all_data)
+    return all_data[key]["affection"]
+
+def get_current_time_text() -> str:
+    kst = timezone(timedelta(hours=9))
+    now = datetime.now(kst)
+    return now.strftime("%Y-%m-%d %H:%M:%S")
+
 def normalize_text(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"\s+", "", text)      # 공백 제거
@@ -133,20 +184,25 @@ def get_user_data(user_id: int, display_name: str) -> dict:
             "name": name,
             "nickname": nickname,
             "affection": affection,
+            "last_seen": None,
             "history": []
         }
         save_memory(all_data)
 
     user_data = all_data[key]
 
-    # 이름 최신화
-    if user_data.get("name") != display_name:
-        user_data["name"] = display_name
+    # 기존 데이터에 last_seen이 없을 수도 있으니 보정
+    if "last_seen" not in user_data:
+        user_data["last_seen"] = None
 
-    # 🔥 핵심: special_user 강제 고정
+    # 이름 최신화 (special_user는 고정 이름 유지)
     if user_id == SPECIAL_USER_ID:
+        user_data["name"] = SPECIAL_USER_NAME
         user_data["affection"] = 1004
         user_data["nickname"] = SPECIAL_USER_NICKNAME
+    else:
+        if user_data.get("name") != display_name:
+            user_data["name"] = display_name
 
     all_data[key] = user_data
     save_memory(all_data)
@@ -238,6 +294,8 @@ def build_system_prompt(user_id: int, user_data: dict) -> str:
     base_prompt = get_base_prompt(user_id)
     nickname = user_data.get("nickname", user_data.get("name", "너"))
     affection = int(user_data.get("affection", DEFAULT_AFFECTION))
+    current_time_text = get_current_time_text()
+    last_seen = user_data.get("last_seen", "없음")
     is_special_user = (user_id == SPECIAL_USER_ID)
 
     affection_text = get_affection_stage_text(affection, is_special_user)
@@ -255,6 +313,14 @@ def build_system_prompt(user_id: int, user_data: dict) -> str:
 - 하지만 모든 문장마다 반복하지 않는다.
 - 다정하게 부를 때, 위로할 때, 중요한 말을 할 때만 자연스럽게 사용한다.
 - 호칭이 들어가지 않아도 전체 말투는 친밀하게 유지한다.
+
+[시간 정보]
+- 현재 시각: {current_time_text}
+- 마지막 대화 시각: {last_seen}
+- 시간의 흐름을 자연스럽게 인지한다.
+- 아침, 낮, 저녁, 새벽에 따라 분위기를 조금 다르게 할 수 있다.
+- 오래만의 대화라면 그 느낌을 은근하게 반영할 수 있다.
+- 단, 시간을 기계적으로 읽어주지는 않는다.
 
 [호감도 단계 규칙]
 - {affection_text}
@@ -297,6 +363,7 @@ async def generate_reply(user_message: str, user_id: int, display_name: str) -> 
 
         user_data = add_history(user_data, "user", user_message)
         user_data = add_history(user_data, "assistant", reply)
+        user_data["last_seen"] = get_current_time_text()
         update_user_data(user_id, user_data)
 
         return reply
@@ -331,6 +398,63 @@ async def on_message(message: discord.Message):
             return
 
         user_data = get_user_data(message.author.id, message.author.display_name)
+
+        if message.author.id == SPECIAL_USER_ID and user_text.startswith("/호감도설정 "):
+            if not message.mentions:
+                await message.channel.send("…대상을 먼저 멘션해줘. 예: /호감도설정 @유저 75")
+                return
+
+            target_user = message.mentions[0]
+
+            parts = user_text.split()
+            if len(parts) < 3:
+                await message.channel.send("…숫자도 같이 적어줘. 예: /호감도설정 @유저 75")
+                return
+
+            try:
+                value = int(parts[-1])
+            except ValueError:
+                await message.channel.send("…호감도는 숫자로 적어줘.")
+                return
+
+            new_value = set_user_affection(target_user.id, value)
+
+            if target_user.id == SPECIAL_USER_ID:
+                await message.channel.send("…내 호감도는 건드릴 수 없어. 이미 1004로 고정이야.")
+            else:
+                await message.channel.send(
+                    f"…{target_user.display_name}의 호감도를 {new_value}로 맞춰뒀어."
+                )
+            return
+
+        if message.author.id == SPECIAL_USER_ID and user_text.startswith("/호감도증감 "):
+            if not message.mentions:
+                await message.channel.send("…대상을 먼저 멘션해줘. 예: /호감도증감 @유저 -10")
+                return
+
+            target_user = message.mentions[0]
+
+            parts = user_text.split()
+            if len(parts) < 3:
+                await message.channel.send("…증감할 숫자도 같이 적어줘. 예: /호감도증감 @유저 5")
+                return
+
+            try:
+                delta = int(parts[-1])
+            except ValueError:
+                await message.channel.send("…증감값은 숫자로 적어줘.")
+                return
+
+            new_value = change_user_affection(target_user.id, delta)
+
+            if target_user.id == SPECIAL_USER_ID:
+                await message.channel.send("…내 호감도는 그대로 1004야.")
+            else:
+                sign = "+" if delta >= 0 else ""
+                await message.channel.send(
+                    f"…{target_user.display_name}의 호감도를 {sign}{delta}만큼 조정했어. 지금은 {new_value}야."
+                )
+            return
 
         if user_text == "/호감도":
             if message.author.id == SPECIAL_USER_ID:
