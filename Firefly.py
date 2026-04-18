@@ -226,6 +226,96 @@ def add_history(user_data: dict, role: str, content: str) -> dict:
     user_data["history"] = history[-MAX_HISTORY:]
     return user_data
 
+def create_help_embed():
+    embed = discord.Embed(
+        title="반디 봇 도움말",
+        description="명령어 목록과 사용 방법이야.",
+        color=0x00FFFF
+    )
+
+    embed.add_field(
+        name="/도움말",
+        value="명령어 목록과 사용 방법을 보여줘.",
+        inline=False
+    )
+    embed.add_field(
+        name="/호감도",
+        value="현재 너에 대한 호감도를 확인해.",
+        inline=False
+    )
+    embed.add_field(
+        name="/초기화",
+        value="최근 대화 기억을 비워.",
+        inline=False
+    )
+    embed.add_field(
+        name="/호칭 [이름]",
+        value="너를 부를 호칭을 바꿔.\n예: `/호칭 민서야`",
+        inline=False
+    )
+    embed.add_field(
+        name="그 긴거 해줘",
+        value="샘의 긴 대사를 그대로 출력해.",
+        inline=False
+    )
+    embed.set_footer(text="반디 봇")
+    return embed
+
+def create_special_help_embed():
+    embed = discord.Embed(
+        title="반디 봇 도움말",
+        description="…너만 볼 수 있는 기능들이야.",
+        color=0x00FFFF
+    )
+
+    embed.add_field(
+        name="/도움말",
+        value="명령어 목록과 사용 방법을 보여줘.",
+        inline=False
+    )
+    embed.add_field(
+        name="/호감도",
+        value="현재 너에 대한 호감도를 확인해.\n너는 항상 1004로 고정돼.",
+        inline=False
+    )
+    embed.add_field(
+        name="/초기화",
+        value="최근 대화 기억을 비워.",
+        inline=False
+    )
+    embed.add_field(
+        name="/호칭 [이름]",
+        value="일반 사용자만 호칭을 바꿀 수 있어.\n너는 고정 호칭이라 바뀌지 않아.",
+        inline=False
+    )
+    embed.add_field(
+        name="그 긴거 해줘",
+        value="샘의 긴 대사를 그대로 출력해.",
+        inline=False
+    )
+    embed.add_field(
+        name="/호감도설정 @유저 [숫자]",
+        value="특정 사용자의 호감도를 원하는 값으로 설정해.\n예: `/호감도설정 @개척자 75`",
+        inline=False
+    )
+    embed.add_field(
+        name="/호감도증감 @유저 [숫자]",
+        value="특정 사용자의 호감도를 올리거나 내려.\n예: `/호감도증감 @개척자 -10`",
+        inline=False
+    )
+    embed.add_field(
+        name="/메모리보기",
+        value="현재 저장된 메모리 데이터를 텍스트로 확인해.",
+        inline=False
+    )
+    embed.add_field(
+        name="/메모리파일",
+        value="현재 저장된 memory.json 파일을 받아와.",
+        inline=False
+    )
+
+    embed.set_footer(text="…다른 사람에겐 비밀이야.")
+    return embed
 
 def adjust_affection(user_id: int, user_data: dict, user_message: str) -> dict:
     if user_id == SPECIAL_USER_ID:
@@ -486,41 +576,16 @@ async def on_message(message: discord.Message):
             update_user_data(message.author.id, user_data)
             await message.channel.send(f"응. 이제부터는 {new_nickname}(이)라고 불러볼게.")
             return
-        
         if user_text == "/도움말":
-            embed = discord.Embed(
-                title="반디 봇 도움말",
-                description="명령어 목록과 사용 방법이야.",
-                color=0x00FFFF
-            )
+            if message.author.id == SPECIAL_USER_ID:
+                embed = create_special_help_embed()
+            else:
+                embed = create_help_embed()  # 기존 함수
 
-            embed.add_field(
-                name="/도움말",
-                value="명령어 목록과 사용 방법을 보여줘.",
-                inline=False
-            )
-            embed.add_field(
-                name="/호감도",
-                value="현재 너에 대한 호감도를 확인해.",
-                inline=False
-            )
-            embed.add_field(
-                name="/초기화",
-                value="최근 대화 기억을 비워.",
-                inline=False
-            )
-            embed.add_field(
-                name="/호칭 [이름]",
-                value="너를 부를 호칭을 바꿔.\n예: `/호칭 민서야`",
-                inline=False
-            )
-            embed.add_field(
-                name="그 긴거 해줘",
-                value="샘의 긴 대사를 그대로 출력해.",
-                inline=False
-            )
-
-            embed.set_footer(text="반디 봇")
+            await message.channel.send(embed=embed)
+            return
+        if user_text == "/도움말":
+            
             await message.channel.send(embed=embed)
             return
 
