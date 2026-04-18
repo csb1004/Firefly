@@ -304,11 +304,6 @@ def create_special_help_embed():
         inline=False
     )
     embed.add_field(
-        name="/메모리보기",
-        value="현재 저장된 메모리 데이터를 텍스트로 확인해.",
-        inline=False
-    )
-    embed.add_field(
         name="/메모리파일",
         value="현재 저장된 memory.json 파일을 받아와.",
         inline=False
