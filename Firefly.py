@@ -23,7 +23,7 @@ client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
 DEFAULT_PROMPT_FILE = Path("prompt.txt")
 SPECIAL_PROMPT_FILE = Path("prompt_special.txt")
-MEMORY_FILE = Path("memory.json")
+MEMORY_FILE = Path("/data/memory.json")
 
 SPECIAL_USER_ID = 393724092022390784
 
