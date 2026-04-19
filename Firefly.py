@@ -308,8 +308,104 @@ def create_special_help_embed():
         value="현재 저장된 memory.json 파일을 받아와.",
         inline=False
     )
+    embed.add_field(
+        name="/유저정보 @유저",
+        value="특정 사용자의 정보를 확인해.",
+        inline=False
+    )
 
     embed.set_footer(text="…다른 사람에겐 비밀이야.")
+    return embed
+
+def create_user_info_embed(target_user: discord.User | discord.Member, user_data: dict):
+    embed = discord.Embed(
+        title="유저 정보",
+        description=f"{target_user.mention}의 현재 상태야.",
+        color=0x00FFFF
+    )
+
+    # 기본 정보
+    name = user_data.get("name", "없음")
+    nickname = user_data.get("nickname", "없음")
+    affection = int(user_data.get("affection", 0))
+    history = user_data.get("history", [])
+    last_seen = user_data.get("last_seen", None)
+
+    # 마지막 접속 시각 처리
+    if last_seen:
+        last_seen_text = last_seen
+    else:
+        last_seen_text = "기록 없음"
+
+    # 호감도 단계 설명
+    def get_affection_stage_text(affection: int) -> str:
+        if 1 <= affection <= 20:
+            return "쌀쌀맞은 상태"
+        elif 21 <= affection <= 40:
+            return "조금 쌀쌀맞은 상태"
+        elif 41 <= affection <= 60:
+            return "평범한 거리감"
+        elif 61 <= affection <= 80:
+            return "조금 친한 상태"
+        elif 81 <= affection <= 100:
+            return "친한 친구 수준"
+        elif affection == 1004:
+            return "특별한 존재"
+        return "알 수 없음"
+
+    stage_text = get_affection_stage_text(affection)
+
+    # 기본 필드
+    embed.add_field(name="이름", value=str(name), inline=False)
+    embed.add_field(name="호칭", value=str(nickname), inline=False)
+    embed.add_field(
+        name="호감도",
+        value=f"{affection} ({stage_text})",
+        inline=False
+    )
+    embed.add_field(
+        name="마지막 접속",
+        value=last_seen_text,
+        inline=False
+    )
+
+    # 최근 대화 정리
+    if history:
+        history_lines = []
+
+        for i, item in enumerate(history[-5:], start=1):  # 최근 5개만
+            role = item.get("role", "unknown")
+            content = item.get("content", "")
+
+            if role == "user":
+                role_name = "사용자"
+            elif role == "assistant":
+                role_name = "반디"
+            else:
+                role_name = role
+
+            # 텍스트 정리
+            content = content.replace("```", "'''").strip()
+            if len(content) > 100:
+                content = content[:100] + "..."
+
+            history_lines.append(f"{i}. [{role_name}] {content}")
+
+        history_text = "\n".join(history_lines)
+    else:
+        history_text = "최근 대화 기록이 없어."
+
+    # 길이 제한 대응
+    if len(history_text) > 1024:
+        history_text = history_text[:1000] + "\n..."
+
+    embed.add_field(
+        name="최근 대화",
+        value=history_text,
+        inline=False
+    )
+
+    embed.set_footer(text="반디 봇")
     return embed
 
 def adjust_affection(user_id: int, user_data: dict, user_message: str) -> dict:
@@ -486,6 +582,21 @@ async def on_message(message: discord.Message):
 
         if message.author.id == SPECIAL_USER_ID and user_text == "/메모리파일":
             await message.channel.send(file=discord.File("/data/memory.json"))
+            return
+
+        if message.author.id == SPECIAL_USER_ID and user_text.startswith("/유저정보"):
+            target_mentions = [m for m in message.mentions if m.id != client.user.id]
+
+            if not target_mentions:
+                await message.channel.send("…확인할 대상을 멘션해줘. 예: /유저정보 @개척자")
+                return
+
+            target_user = target_mentions[0]
+            display_name = getattr(target_user, "display_name", target_user.name)
+            target_data = get_user_data(target_user.id, display_name)
+
+            embed = create_user_info_embed(target_user, target_data)
+            await message.channel.send(embed=embed)
             return
 
         if message.author.id == SPECIAL_USER_ID and user_text.startswith("/호감도설정 "):
