@@ -909,6 +909,208 @@ async def on_ready():
     print(f"로그인됨: {client.user}")
 
 
+def is_special_user(user_id: int) -> bool:
+    return user_id == SPECIAL_USER_ID
+
+
+def get_target_mentions(message: discord.Message) -> list[discord.User | discord.Member]:
+    return [m for m in message.mentions if m.id != client.user.id]
+
+
+def parse_last_int_arg(text: str) -> int | None:
+    try:
+        return int(text.split()[-1])
+    except (IndexError, ValueError):
+        return None
+
+
+async def handle_mentioned_message(
+    message: discord.Message,
+    user_text: str,
+    user_data: dict,
+    room_key: str,
+    room_data: dict
+) -> None:
+    author_id = message.author.id
+    special_user = is_special_user(author_id)
+
+    if special_user and user_text == "/메모리파일":
+        await message.channel.send(file=discord.File("/data/memory.json"))
+        return
+
+    if special_user and user_text.startswith("/유저정보"):
+        target_mentions = get_target_mentions(message)
+
+        if not target_mentions:
+            await message.channel.send("…확인할 대상을 멘션해줘. 예: /유저정보 @개척자")
+            return
+
+        target_user = target_mentions[0]
+        display_name = getattr(target_user, "display_name", target_user.name)
+        target_data = get_user_data(target_user.id, display_name)
+
+        embed = create_user_info_embed(target_user, target_data)
+        await message.channel.send(embed=embed)
+        return
+
+    if special_user and user_text.startswith("/호감도설정 "):
+        target_mentions = get_target_mentions(message)
+
+        if not target_mentions:
+            await message.channel.send("…대상을 먼저 멘션해줘. 예: /호감도설정 @유저 75")
+            return
+
+        if len(user_text.split()) < 3:
+            await message.channel.send("…숫자도 같이 적어줘. 예: /호감도설정 @유저 75")
+            return
+
+        value = parse_last_int_arg(user_text)
+        if value is None:
+            await message.channel.send("…호감도는 숫자로 적어줘.")
+            return
+
+        target_user = target_mentions[0]
+        new_value = set_user_affection(target_user.id, value)
+
+        if target_user.id == SPECIAL_USER_ID:
+            await message.channel.send("…내 호감도는 건드릴 수 없어. 이미 1004로 고정이야.")
+        else:
+            await message.channel.send(
+                f"…{target_user.display_name}의 호감도를 {new_value}로 맞춰뒀어."
+            )
+        return
+
+    if special_user and user_text.startswith("/호감도증감 "):
+        target_mentions = get_target_mentions(message)
+
+        if not target_mentions:
+            await message.channel.send("…대상을 먼저 멘션해줘. 예: /호감도증감 @유저 -10")
+            return
+
+        if len(user_text.split()) < 3:
+            await message.channel.send("…증감할 숫자도 같이 적어줘. 예: /호감도증감 @유저 5")
+            return
+
+        delta = parse_last_int_arg(user_text)
+        if delta is None:
+            await message.channel.send("…증감값은 숫자로 적어줘.")
+            return
+
+        target_user = target_mentions[0]
+        new_value = change_user_affection(target_user.id, delta)
+
+        if target_user.id == SPECIAL_USER_ID:
+            await message.channel.send("…내 호감도는 그대로 1004야.")
+        else:
+            sign = "+" if delta >= 0 else ""
+            await message.channel.send(
+                f"…{target_user.display_name}의 호감도를 {sign}{delta}만큼 조정했어. 지금은 {new_value}야."
+            )
+        return
+
+    if user_text == "/호감도":
+        if special_user:
+            await message.channel.send("…너에 대한 마음은 굳이 세면 1004쯤 될 거야.")
+        else:
+            await message.channel.send(
+                f"…지금 {user_data.get('nickname', user_data.get('name', '너'))}에 대한 마음은 "
+                f"{user_data.get('affection', DEFAULT_AFFECTION)}/100 정도야."
+            )
+        return
+
+    if user_text == "/초기화":
+        user_data["history"] = []
+        update_user_data(author_id, user_data)
+        await message.channel.send("…응. 최근 대화는 비워뒀어.")
+        return
+
+    if user_text.startswith("/호칭 "):
+        new_nickname = user_text.replace("/호칭 ", "", 1).strip()
+        if not new_nickname:
+            await message.channel.send("…호칭을 비워둘 수는 없어.")
+            return
+        if special_user:
+            await message.channel.send("…너는 특별한 호칭이 이미 정해져 있어서 바꿀 수 없어.")
+            return
+
+        user_data["nickname"] = new_nickname
+        update_user_data(author_id, user_data)
+        await message.channel.send(f"응. 이제부터는 {new_nickname}(이)라고 불러볼게.")
+        return
+
+    if special_user and user_text.startswith("/인터넷모드 "):
+        value = user_text.replace("/인터넷모드 ", "", 1).strip().lower()
+
+        if value not in {"on", "off"}:
+            await message.channel.send("…on 또는 off로 적어줘.")
+            return
+
+        room_data["internet_mode"] = (value == "on")
+        update_room_data(room_key, room_data)
+
+        await message.channel.send(
+            f"…이 방의 인터넷 검색 모드를 {'켰어' if value == 'on' else '껐어'}."
+        )
+        return
+
+    if special_user and user_text.startswith("/단체모드 "):
+        value = user_text.replace("/단체모드 ", "", 1).strip().lower()
+
+        if value not in {"on", "off"}:
+            await message.channel.send("…on 또는 off로 적어줘.")
+            return
+
+        if value == "on":
+            room_data["group_mode"] = True
+            room_data["history"] = []
+            update_room_data(room_key, room_data)
+            await message.channel.send("…이 방의 단체 모드를 켰어. 지금부터의 대화만 기억할게.")
+        else:
+            room_data["group_mode"] = False
+            update_room_data(room_key, room_data)
+            await message.channel.send("…이 방의 단체 모드를 껐어.")
+
+        return
+
+    if special_user and user_text == "/방기억":
+        embed = create_room_history_embed(message, room_data)
+        await message.channel.send(embed=embed)
+        return
+
+    if special_user and user_text == "/방초기화":
+        room_data["history"] = []
+        update_room_data(room_key, room_data)
+        await message.channel.send("…이 방의 단체 기억을 비워뒀어.")
+        return
+
+    if special_user and user_text == "/방상태":
+        await message.channel.send(
+            f"…이 방 설정이야.\n"
+            f"- 인터넷 검색 모드: {'on' if room_data.get('internet_mode') else 'off'}\n"
+            f"- 단체 모드: {'on' if room_data.get('group_mode') else 'off'}\n"
+            f"- 저장된 방 대화 수: {len(room_data.get('history', []))}"
+        )
+        return
+
+    if user_text == "/도움말":
+        embed = create_special_help_embed() if special_user else create_help_embed()
+        await message.channel.send(embed=embed)
+        return
+
+    if user_text.startswith("/"):
+        await message.channel.send("없는 명령어야.")
+        return
+
+    async with message.channel.typing():
+        reply = await generate_reply(
+            user_message=user_text,
+            user_id=author_id,
+            display_name=message.author.display_name,
+            room_key=room_key,
+        )
+        await message.channel.send(reply[:1900])
+
+
 @client.event
 async def on_message(message: discord.Message):
     if message.author.bot:
@@ -925,182 +1127,13 @@ async def on_message(message: discord.Message):
 
         user_data = get_user_data(message.author.id, message.author.display_name)
 
-        if message.author.id == SPECIAL_USER_ID and user_text == "/메모리파일":
-            await message.channel.send(file=discord.File("/data/memory.json"))
-            return
-
-        if message.author.id == SPECIAL_USER_ID and user_text.startswith("/유저정보"):
-            target_mentions = [m for m in message.mentions if m.id != client.user.id]
-
-            if not target_mentions:
-                await message.channel.send("…확인할 대상을 멘션해줘. 예: /유저정보 @개척자")
-                return
-
-            target_user = target_mentions[0]
-            display_name = getattr(target_user, "display_name", target_user.name)
-            target_data = get_user_data(target_user.id, display_name)
-
-            embed = create_user_info_embed(target_user, target_data)
-            await message.channel.send(embed=embed)
-            return
-
-        if message.author.id == SPECIAL_USER_ID and user_text.startswith("/호감도설정 "):
-            if not message.mentions:
-                await message.channel.send("…대상을 먼저 멘션해줘. 예: /호감도설정 @유저 75")
-                return
-
-            target_user = message.mentions[0]
-
-            parts = user_text.split()
-            if len(parts) < 3:
-                await message.channel.send("…숫자도 같이 적어줘. 예: /호감도설정 @유저 75")
-                return
-
-            try:
-                value = int(parts[-1])
-            except ValueError:
-                await message.channel.send("…호감도는 숫자로 적어줘.")
-                return
-
-            new_value = set_user_affection(target_user.id, value)
-
-            if target_user.id == SPECIAL_USER_ID:
-                await message.channel.send("…내 호감도는 건드릴 수 없어. 이미 1004로 고정이야.")
-            else:
-                await message.channel.send(
-                    f"…{target_user.display_name}의 호감도를 {new_value}로 맞춰뒀어."
-                )
-            return
-
-        if message.author.id == SPECIAL_USER_ID and user_text.startswith("/호감도증감 "):
-            if not message.mentions:
-                await message.channel.send("…대상을 먼저 멘션해줘. 예: /호감도증감 @유저 -10")
-                return
-
-            target_user = message.mentions[0]
-
-            parts = user_text.split()
-            if len(parts) < 3:
-                await message.channel.send("…증감할 숫자도 같이 적어줘. 예: /호감도증감 @유저 5")
-                return
-
-            try:
-                delta = int(parts[-1])
-            except ValueError:
-                await message.channel.send("…증감값은 숫자로 적어줘.")
-                return
-
-            new_value = change_user_affection(target_user.id, delta)
-
-            if target_user.id == SPECIAL_USER_ID:
-                await message.channel.send("…내 호감도는 그대로 1004야.")
-            else:
-                sign = "+" if delta >= 0 else ""
-                await message.channel.send(
-                    f"…{target_user.display_name}의 호감도를 {sign}{delta}만큼 조정했어. 지금은 {new_value}야."
-                )
-            return
-
-        if user_text == "/호감도":
-            if message.author.id == SPECIAL_USER_ID:
-                await message.channel.send("…너에 대한 마음은 굳이 세면 1004쯤 될 거야.")
-            else:
-                await message.channel.send(
-                    f"…지금 {user_data.get('nickname', user_data.get('name', '너'))}에 대한 마음은 "
-                    f"{user_data.get('affection', DEFAULT_AFFECTION)}/100 정도야."
-                )
-            return
-
-        if user_text == "/초기화":
-            user_data["history"] = []
-            update_user_data(message.author.id, user_data)
-            await message.channel.send("…응. 최근 대화는 비워뒀어.")
-            return
-
-        if user_text.startswith("/호칭 "):
-            new_nickname = user_text.replace("/호칭 ", "", 1).strip()
-            if not new_nickname:
-                await message.channel.send("…호칭을 비워둘 수는 없어.")
-                return
-            if(message.author.id == SPECIAL_USER_ID):
-                await message.channel.send("…너는 특별한 호칭이 이미 정해져 있어서 바꿀 수 없어.")
-                return
-            user_data["nickname"] = new_nickname
-            update_user_data(message.author.id, user_data)
-            await message.channel.send(f"응. 이제부터는 {new_nickname}(이)라고 불러볼게.")
-            return
-        
-        if message.author.id == SPECIAL_USER_ID and user_text.startswith("/인터넷모드 "):
-            value = user_text.replace("/인터넷모드 ", "", 1).strip().lower()
-
-            if value not in {"on", "off"}:
-                await message.channel.send("…on 또는 off로 적어줘.")
-                return
-
-            room_data["internet_mode"] = (value == "on")
-            update_room_data(room_key, room_data)
-
-            await message.channel.send(
-                f"…이 방의 인터넷 검색 모드를 {'켰어' if value == 'on' else '껐어'}."
-            )
-            return
-
-        if message.author.id == SPECIAL_USER_ID and user_text.startswith("/단체모드 "):
-            value = user_text.replace("/단체모드 ", "", 1).strip().lower()
-
-            if value not in {"on", "off"}:
-                await message.channel.send("…on 또는 off로 적어줘.")
-                return
-
-            if value == "on":
-                room_data["group_mode"] = True
-                room_data["history"] = []
-                update_room_data(room_key, room_data)
-                await message.channel.send("…이 방의 단체 모드를 켰어. 지금부터의 대화만 기억할게.")
-            else:
-                room_data["group_mode"] = False
-                update_room_data(room_key, room_data)
-                await message.channel.send("…이 방의 단체 모드를 껐어.")
-
-            return
-
-        if message.author.id == SPECIAL_USER_ID and user_text == "/방기억":
-            embed = create_room_history_embed(message, room_data)
-            await message.channel.send(embed=embed)
-            return
-
-        if message.author.id == SPECIAL_USER_ID and user_text == "/방초기화":
-            room_data["history"] = []
-            update_room_data(room_key, room_data)
-            await message.channel.send("…이 방의 단체 기억을 비워뒀어.")
-            return
-
-        if message.author.id == SPECIAL_USER_ID and user_text == "/방상태":
-            await message.channel.send(
-                f"…이 방 설정이야.\n"
-                f"- 인터넷 검색 모드: {'on' if room_data.get('internet_mode') else 'off'}\n"
-                f"- 단체 모드: {'on' if room_data.get('group_mode') else 'off'}\n"
-                f"- 저장된 방 대화 수: {len(room_data.get('history', []))}"
-            )
-            return
-
-        if user_text == "/도움말":
-            if message.author.id == SPECIAL_USER_ID:
-                embed = create_special_help_embed()
-            else:
-                embed = create_help_embed()  # 기존 함수
-
-            await message.channel.send(embed=embed)
-            return
-
-        async with message.channel.typing():
-            reply = await generate_reply(
-                user_message=user_text,
-                user_id=message.author.id,
-                display_name=message.author.display_name,
-                room_key=room_key,
-            )
-            await message.channel.send(reply[:1900])
+        await handle_mentioned_message(
+            message=message,
+            user_text=user_text,
+            user_data=user_data,
+            room_key=room_key,
+            room_data=room_data,
+        )
 
 
 client.run(DISCORD_BOT_TOKEN)
