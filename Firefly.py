@@ -1098,7 +1098,7 @@ async def handle_mentioned_message(
         return
 
     if user_text.startswith("/"):
-        await message.channel.send("없는 명령어야.")
+        await message.channel.send("그 명령어는 잘 모르겠어. '/도움말'을 불러서 사용 가능한 명령어들을 확인해봐.")
         return
 
     async with message.channel.typing():
