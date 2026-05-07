@@ -10,8 +10,8 @@ from .embeds import (
     create_summary_embed,
     create_user_info_embed,
 )
-from .polls import create_poll_from_command
-from .storage import get_user_data, update_room_data, update_user_data
+from .polls import cancel_poll_tasks, create_poll_from_command
+from .storage import get_user_data, save_memory, update_room_data, update_user_data
 from .text_utils import parse_last_int_arg
 
 
@@ -85,6 +85,32 @@ async def handle_mentioned_message(
             await message.channel.send("…아직 저장된 메모리 파일이 없어.")
             return
         await message.channel.send(file=discord.File(str(MEMORY_FILE)))
+        return
+
+    memory_reset_command = next(
+        (
+            command
+            for command in ("/메모리초기화", "/메모리파일초기화")
+            if user_text == command or user_text.startswith(f"{command} ")
+        ),
+        None,
+    )
+    if memory_reset_command:
+        if not special_user:
+            await message.channel.send("…메모리 초기화는 특별 사용자만 사용할 수 있어.")
+            return
+
+        confirm_text = user_text.replace(memory_reset_command, "", 1).strip()
+        if confirm_text != "확인":
+            await message.channel.send(
+                "…메모리 파일 전체를 비우려면 `/메모리초기화 확인`이라고 다시 입력해줘. "
+                "개인 기억, 방 기억, 투표 예약이 모두 초기화돼."
+            )
+            return
+
+        save_memory({})
+        cancel_poll_tasks()
+        await message.channel.send("…응. 메모리 파일을 빈 상태로 초기화했어.")
         return
 
     if special_user and user_text.startswith("/유저정보"):

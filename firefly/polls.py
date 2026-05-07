@@ -362,6 +362,13 @@ def schedule_poll(client: discord.Client, poll: dict) -> None:
     _poll_tasks[message_id] = asyncio.create_task(_poll_countdown(client, poll))
 
 
+def cancel_poll_tasks() -> None:
+    for task in _poll_tasks.values():
+        if not task.done():
+            task.cancel()
+    _poll_tasks.clear()
+
+
 async def restore_poll_tasks(client: discord.Client) -> None:
     for poll in list(_active_polls().values()):
         if datetime.fromisoformat(poll["closes_at"]) <= _now_utc():
