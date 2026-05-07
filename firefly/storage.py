@@ -28,10 +28,12 @@ def load_memory() -> dict:
 
 def save_memory(data: dict) -> None:
     MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    MEMORY_FILE.write_text(
+    temp_file = MEMORY_FILE.with_name(f"{MEMORY_FILE.name}.tmp")
+    temp_file.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    temp_file.replace(MEMORY_FILE)
 
 
 def get_room_key(message: discord.Message) -> str:
@@ -143,12 +145,21 @@ def add_history(user_data: dict, role: str, content: str, **extra) -> dict:
     return user_data
 
 
-def record_room_user_message(message: discord.Message, room_key: str, room_data: dict) -> None:
+def record_room_user_message(
+    message: discord.Message,
+    room_key: str,
+    room_data: dict,
+    content: str | None = None,
+) -> bool:
     display_name = getattr(message.author, "display_name", message.author.name)
     user_data = get_user_data(message.author.id, display_name)
     user_data["last_seen"] = get_current_time_text()
     update_user_data(message.author.id, user_data)
-    content = clean_discord_content(message)
+    if content is None:
+        content = clean_discord_content(message)
+
+    if not content.strip():
+        return False
 
     room_data = add_room_history(
         room_data,
@@ -160,6 +171,7 @@ def record_room_user_message(message: discord.Message, room_key: str, room_data:
         affection=user_data.get("affection"),
     )
     update_room_data(room_key, room_data)
+    return True
 
 
 def record_room_bot_message(room_key: str, room_data: dict, content: str) -> None:

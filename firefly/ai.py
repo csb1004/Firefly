@@ -8,6 +8,7 @@ from .config import (
     DEFAULT_AFFECTION,
     DEFAULT_MODEL,
     OPENAI_API_KEY,
+    SPECIAL_USER_ID,
     SUMMARY_DEFAULT_LIMIT,
     WEB_SEARCH_MODEL,
 )
@@ -96,28 +97,36 @@ async def generate_reply(
         )
         reply = response.output_text.strip()
 
+        latest_user_data = get_user_data(user_id, display_name)
+        if user_id == SPECIAL_USER_ID:
+            latest_user_data["affection"] = 1004
+        else:
+            latest_affection = int(latest_user_data.get("affection", DEFAULT_AFFECTION))
+            latest_user_data["affection"] = max(1, min(100, latest_affection + applied_delta))
+
         if not group_mode:
-            user_data = add_history(user_data, "user", user_message)
-            user_data = add_history(
-                user_data,
+            latest_user_data = add_history(latest_user_data, "user", user_message)
+            latest_user_data = add_history(
+                latest_user_data,
                 "assistant",
                 reply,
                 affection_before=before_affection,
                 affection_delta=applied_delta,
-                affection_after=after_affection,
+                affection_after=latest_user_data.get("affection"),
             )
 
-        user_data["last_seen"] = get_current_time_text()
-        update_user_data(user_id, user_data)
+        latest_user_data["last_seen"] = get_current_time_text()
+        update_user_data(user_id, latest_user_data)
 
+        latest_room_data = get_room_data(room_key)
         room_data = add_room_history(
-            room_data,
+            latest_room_data,
             speaker_name=display_name,
             role="user",
             content=user_message,
             user_id=user_id,
-            nickname=user_data.get("nickname"),
-            affection=user_data.get("affection"),
+            nickname=latest_user_data.get("nickname"),
+            affection=latest_user_data.get("affection"),
         )
         room_data = add_room_history(
             room_data,

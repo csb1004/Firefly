@@ -10,8 +10,8 @@ from .storage import load_memory, save_memory
 
 KST = timezone(timedelta(hours=9))
 POLL_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-POLL_COMMAND_FORMAT = "`/투표 제목 | 항목수 | 항목1 | 항목2 | ... | 마감`"
-POLL_COMMAND_EXAMPLE = "`/투표 저녁 메뉴 | 3 | 치킨 | 피자 | 떡볶이 | 10분`"
+POLL_COMMAND_FORMAT = "`/투표 제목 | 항목수=개수 | 항목1 | 항목2 | ... | 마감`"
+POLL_COMMAND_EXAMPLE = "`/투표 저녁 메뉴 | 항목수=3 | 치킨 | 피자 | 떡볶이 | 10분`"
 POLL_DEADLINE_HELP = (
     "마감 포맷은 상대시간 `10분`/`2시간`/`1일`, 시각 `23:30`, "
     "날짜시각 `2026-05-07 23:30`, ISO `2026-05-07T23:30:00+09:00` 중 하나로 적어줘. "
@@ -100,14 +100,14 @@ def _parse_deadline(deadline_text: str) -> datetime:
     raise PollParseError(POLL_DEADLINE_HELP)
 
 
-def _parse_option_count(text: str) -> int | None:
+def _parse_option_count(text: str) -> tuple[int, bool] | None:
     normalized = text.strip().lower()
     if normalized.isdigit():
-        return int(normalized)
+        return int(normalized), False
 
     count_match = re.fullmatch(r"(항목수|항목개수|개수|count)\s*[:=]?\s*(\d+)", normalized)
     if count_match:
-        return int(count_match.group(2))
+        return int(count_match.group(2)), True
 
     return None
 
@@ -127,11 +127,18 @@ def parse_poll_command(user_text: str) -> PollSpec:
         )
 
     question = parts[0]
-    expected_option_count = _parse_option_count(parts[1])
-    if expected_option_count is None:
-        options = parts[1:-1]
-    else:
+    expected_option_count = None
+    parsed_option_count = _parse_option_count(parts[1])
+
+    if parsed_option_count is not None:
+        count, explicit_count = parsed_option_count
+        if explicit_count or (2 <= count <= len(POLL_EMOJIS) and len(parts) == count + 3):
+            expected_option_count = count
+
+    if expected_option_count is not None:
         options = parts[2:-1]
+    else:
+        options = parts[1:-1]
 
     deadline_text = parts[-1]
 

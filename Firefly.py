@@ -18,6 +18,10 @@ intents.reactions = True
 client = discord.Client(intents=intents)
 
 
+def _message_mentions_user(message: discord.Message, user: object) -> bool:
+    return any(getattr(mention, "id", None) == user.id for mention in message.mentions)
+
+
 @client.event
 async def on_ready():
     print(f"로그인됨: {client.user}")
@@ -37,7 +41,7 @@ async def on_message(message: discord.Message):
     room_key = get_room_key(message)
     room_data = get_room_data(room_key)
 
-    if client.user and client.user in message.mentions:
+    if client.user and _message_mentions_user(message, client.user):
         user_text = clean_discord_content(
             message,
             bot_user_id=client.user.id,
@@ -61,12 +65,15 @@ async def on_message(message: discord.Message):
         )
         return
 
-    if (
-        room_data.get("group_mode", False)
-        and message.content.strip()
-        and not is_command_text(message.content)
-    ):
-        record_room_user_message(message, room_key, room_data)
+    if room_data.get("group_mode", False):
+        content = clean_discord_content(message)
+        if content and not is_command_text(content):
+            record_room_user_message(
+                message,
+                room_key,
+                room_data,
+                content=content,
+            )
 
 
 client.run(DISCORD_BOT_TOKEN)
