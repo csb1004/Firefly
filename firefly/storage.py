@@ -13,7 +13,7 @@ from .config import (
     SPECIAL_USER_NAME,
     SPECIAL_USER_NICKNAME,
 )
-from .text_utils import get_current_time_text
+from .text_utils import clean_discord_content, get_current_time_text
 
 
 def load_memory() -> dict:
@@ -148,12 +148,13 @@ def record_room_user_message(message: discord.Message, room_key: str, room_data:
     user_data = get_user_data(message.author.id, display_name)
     user_data["last_seen"] = get_current_time_text()
     update_user_data(message.author.id, user_data)
+    content = clean_discord_content(message)
 
     room_data = add_room_history(
         room_data,
         speaker_name=display_name,
         role="user",
-        content=message.content,
+        content=content,
         user_id=message.author.id,
         nickname=user_data.get("nickname"),
         affection=user_data.get("affection"),

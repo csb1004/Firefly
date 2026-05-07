@@ -30,13 +30,70 @@ def get_base_prompt(user_id: int) -> str:
     return load_text_file(DEFAULT_PROMPT_FILE)
 
 
+def _compact_discord_spacing(text: str) -> str:
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"[ \t]*\n[ \t]*", "\n", text)
+    return text.strip()
+
+
 def clean_mention(message_content: str, bot_user_id: int) -> str:
-    return (
-        message_content
-        .replace(f"<@{bot_user_id}>", "")
-        .replace(f"<@!{bot_user_id}>", "")
-        .strip()
+    text = re.sub(rf"<@!?{re.escape(str(bot_user_id))}>", "", message_content)
+    return _compact_discord_spacing(text)
+
+
+def _mention_display_name(item: object, fallback: str) -> str:
+    return str(
+        getattr(
+            item,
+            "display_name",
+            getattr(item, "name", fallback),
+        )
     )
+
+
+def clean_discord_content(
+    message: object,
+    bot_user_id: int | None = None,
+    remove_bot_mention: bool = False,
+) -> str:
+    text = str(getattr(message, "content", ""))
+
+    users = {
+        str(getattr(user, "id")): _mention_display_name(user, str(getattr(user, "id", "")))
+        for user in getattr(message, "mentions", [])
+        if getattr(user, "id", None) is not None
+    }
+    channels = {
+        str(getattr(channel, "id")): _mention_display_name(channel, str(getattr(channel, "id", "")))
+        for channel in getattr(message, "channel_mentions", [])
+        if getattr(channel, "id", None) is not None
+    }
+    roles = {
+        str(getattr(role, "id")): _mention_display_name(role, str(getattr(role, "id", "")))
+        for role in getattr(message, "role_mentions", [])
+        if getattr(role, "id", None) is not None
+    }
+
+    bot_id = str(bot_user_id) if bot_user_id is not None else None
+
+    def replace_user_mention(match: re.Match) -> str:
+        user_id = match.group(1)
+        if remove_bot_mention and bot_id == user_id:
+            return ""
+        return f"@{users.get(user_id, user_id)}"
+
+    def replace_channel_mention(match: re.Match) -> str:
+        channel_id = match.group(1)
+        return f"#{channels.get(channel_id, channel_id)}"
+
+    def replace_role_mention(match: re.Match) -> str:
+        role_id = match.group(1)
+        return f"@{roles.get(role_id, role_id)}"
+
+    text = re.sub(r"<@!?(\d+)>", replace_user_mention, text)
+    text = re.sub(r"<#(\d+)>", replace_channel_mention, text)
+    text = re.sub(r"<@&(\d+)>", replace_role_mention, text)
+    return _compact_discord_spacing(text)
 
 
 def is_command_text(text: str) -> bool:

@@ -19,6 +19,29 @@ def is_special_user(user_id: int) -> bool:
     return user_id == SPECIAL_USER_ID
 
 
+SPECIAL_ONLY_COMMAND_PREFIXES = (
+    "/메모리파일",
+    "/메모리초기화",
+    "/메모리파일초기화",
+    "/유저정보",
+    "/호감도설정",
+    "/호감도증감",
+    "/투표",
+    "/인터넷모드",
+    "/단체모드",
+    "/방기억",
+    "/방초기화",
+    "/방상태",
+)
+
+
+def is_special_only_command(user_text: str) -> bool:
+    return any(
+        user_text == command or user_text.startswith(f"{command} ")
+        for command in SPECIAL_ONLY_COMMAND_PREFIXES
+    )
+
+
 def get_target_mentions(
     message: discord.Message,
     client_user: discord.ClientUser | discord.User | None,
@@ -276,6 +299,10 @@ async def handle_mentioned_message(
     if user_text == "/도움말":
         embed = create_special_help_embed() if special_user else create_help_embed()
         await message.channel.send(embed=embed)
+        return
+
+    if user_text.startswith("/") and not special_user and is_special_only_command(user_text):
+        await message.channel.send("…그 명령어는 특별 사용자만 사용할 수 있어.")
         return
 
     if user_text.startswith("/"):

@@ -9,7 +9,7 @@ from firefly.storage import (
     get_user_data,
     record_room_user_message,
 )
-from firefly.text_utils import clean_mention, is_command_text
+from firefly.text_utils import clean_discord_content, is_command_text
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -38,7 +38,11 @@ async def on_message(message: discord.Message):
     room_data = get_room_data(room_key)
 
     if client.user and client.user in message.mentions:
-        user_text = clean_mention(message.content, client.user.id)
+        user_text = clean_discord_content(
+            message,
+            bot_user_id=client.user.id,
+            remove_bot_mention=True,
+        )
 
         if not user_text:
             await message.channel.send("응, 불렀어?")
