@@ -1,0 +1,219 @@
+import asyncio
+
+from openai import APIError, OpenAI, RateLimitError
+
+from .affection import adjust_affection
+from .config import (
+    BOT_DISPLAY_NAME,
+    DEFAULT_AFFECTION,
+    DEFAULT_MODEL,
+    OPENAI_API_KEY,
+    SUMMARY_DEFAULT_LIMIT,
+    WEB_SEARCH_MODEL,
+)
+from .content import LONG_SAM_LINE
+from .prompts import (
+    build_group_context_prompt,
+    build_model_history,
+    build_room_model_history,
+    build_system_prompt,
+)
+from .storage import (
+    add_history,
+    add_room_history,
+    get_room_data,
+    get_user_data,
+    update_room_data,
+    update_user_data,
+)
+from .text_utils import get_current_time_text, is_command_text
+
+client_openai = OpenAI(api_key=OPENAI_API_KEY)
+
+
+async def generate_reply(
+    user_message: str,
+    user_id: int,
+    display_name: str,
+    room_key: str,
+) -> str:
+    if user_message.strip() == "그 긴거 해줘":
+        return LONG_SAM_LINE
+
+    user_data = get_user_data(user_id, display_name)
+    room_data = get_room_data(room_key)
+
+    group_mode = room_data.get("group_mode", False)
+    internet_mode = room_data.get("internet_mode", False)
+
+    before_affection = int(user_data.get("affection", DEFAULT_AFFECTION))
+    user_data = adjust_affection(user_id, user_data, user_message)
+    after_affection = int(user_data.get("affection", DEFAULT_AFFECTION))
+    applied_delta = after_affection - before_affection
+
+    system_prompt = build_system_prompt(user_id, user_data)
+
+    if group_mode:
+        group_context = build_group_context_prompt(
+            display_name=display_name,
+            user_id=user_id,
+            user_data=user_data,
+            room_data=room_data,
+        )
+        system_prompt = f"{system_prompt}\n\n{group_context}"
+
+    input_messages = [{"role": "system", "content": system_prompt}]
+
+    if group_mode:
+        input_messages.extend(build_room_model_history(room_data.get("history", [])))
+        input_messages.append({
+            "role": "user",
+            "content": (
+                f"[이름={display_name}, "
+                f"호칭={user_data.get('nickname')}, "
+                f"호감도={user_data.get('affection')}] {user_message}"
+            ),
+        })
+    else:
+        input_messages.extend(build_model_history(user_data.get("history", [])))
+        input_messages.append({
+            "role": "user",
+            "content": user_message,
+        })
+
+    try:
+        request_kwargs = {
+            "model": WEB_SEARCH_MODEL if internet_mode else DEFAULT_MODEL,
+            "input": input_messages,
+        }
+
+        if internet_mode:
+            request_kwargs["tools"] = [{"type": "web_search"}]
+
+        response = await asyncio.to_thread(
+            client_openai.responses.create,
+            **request_kwargs,
+        )
+        reply = response.output_text.strip()
+
+        if not group_mode:
+            user_data = add_history(user_data, "user", user_message)
+            user_data = add_history(
+                user_data,
+                "assistant",
+                reply,
+                affection_before=before_affection,
+                affection_delta=applied_delta,
+                affection_after=after_affection,
+            )
+
+        user_data["last_seen"] = get_current_time_text()
+        update_user_data(user_id, user_data)
+
+        room_data = add_room_history(
+            room_data,
+            speaker_name=display_name,
+            role="user",
+            content=user_message,
+            user_id=user_id,
+            nickname=user_data.get("nickname"),
+            affection=user_data.get("affection"),
+        )
+        room_data = add_room_history(
+            room_data,
+            speaker_name=BOT_DISPLAY_NAME,
+            role="assistant",
+            content=reply,
+        )
+        update_room_data(room_key, room_data)
+
+        return reply
+
+    except RateLimitError as e:
+        error_text = str(e)
+        if "insufficient_quota" in error_text:
+            return "…지금은 OpenAI API 사용 한도가 다 된 것 같아."
+        return "…지금은 요청이 조금 몰린 것 같아. 잠깐 뒤에 다시 불러줘."
+    except APIError as e:
+        print("APIError:", e)
+        return "…지금은 연결이 조금 불안정해."
+    except Exception as e:
+        print("오류:", e)
+        return "…미안. 지금은 조금 불안정해."
+
+
+def _format_summary_entries(entries: list[dict], limit: int) -> list[str]:
+    filtered = []
+    for item in entries:
+        content = item.get("content", "")
+        if not isinstance(content, str):
+            continue
+
+        content = content.strip()
+        if not content or is_command_text(content):
+            continue
+
+        speaker = item.get("speaker")
+        role = item.get("role", "unknown")
+
+        if speaker:
+            label = speaker
+        elif role == "assistant":
+            label = BOT_DISPLAY_NAME
+        else:
+            label = "사용자"
+
+        filtered.append(f"{label}: {content}")
+
+    return filtered[-limit:]
+
+
+async def summarize_conversation(
+    entries: list[dict],
+    scope_name: str,
+    limit: int = SUMMARY_DEFAULT_LIMIT,
+) -> tuple[str, int]:
+    lines = _format_summary_entries(entries, limit)
+    if not lines:
+        return "요약할 대화가 아직 없어.", 0
+
+    system_prompt = (
+        "너는 디스코드 대화를 짧고 정확하게 정리하는 도우미야. "
+        "명령어가 아닌 실제 대화 내용만 바탕으로 한국어로 요약해. "
+        "중요한 결정, 감정 흐름, 할 일, 미해결 질문이 있으면 구분해서 적어. "
+        "없는 항목은 억지로 만들지 마."
+    )
+    user_prompt = f"""
+[요약 대상]
+{scope_name}
+
+[최근 대화]
+{chr(10).join(lines)}
+
+[출력 형식]
+- 핵심 요약: 2~5문장
+- 결정/합의: 있으면 짧게
+- 남은 할 일/질문: 있으면 짧게
+""".strip()
+
+    try:
+        response = await asyncio.to_thread(
+            client_openai.responses.create,
+            model=DEFAULT_MODEL,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        return response.output_text.strip(), len(lines)
+    except RateLimitError as e:
+        error_text = str(e)
+        if "insufficient_quota" in error_text:
+            return "…지금은 OpenAI API 사용 한도가 다 된 것 같아서 요약을 만들 수 없어.", len(lines)
+        return "…요약 요청이 조금 몰린 것 같아. 잠깐 뒤에 다시 해줘.", len(lines)
+    except APIError as e:
+        print("Summary APIError:", e)
+        return "…요약 중 연결이 조금 불안정했어.", len(lines)
+    except Exception as e:
+        print("Summary error:", e)
+        return "…미안. 지금은 요약을 만들 수 없어.", len(lines)
