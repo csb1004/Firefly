@@ -4,6 +4,7 @@ from firefly.commands import handle_mentioned_message
 from firefly.config import DISCORD_BOT_TOKEN
 from firefly.polls import enforce_single_vote, restore_poll_tasks
 from firefly.storage import (
+    get_existing_room_data,
     get_room_data,
     get_room_key,
     get_user_data,
@@ -39,9 +40,10 @@ async def on_message(message: discord.Message):
         return
 
     room_key = get_room_key(message)
-    room_data = get_room_data(room_key)
+    bot_was_mentioned = client.user and _message_mentions_user(message, client.user)
 
-    if client.user and _message_mentions_user(message, client.user):
+    if bot_was_mentioned:
+        room_data = get_room_data(room_key)
         user_text = clean_discord_content(
             message,
             bot_user_id=client.user.id,
@@ -63,6 +65,10 @@ async def on_message(message: discord.Message):
             room_data=room_data,
             client=client,
         )
+        return
+
+    room_data = get_existing_room_data(room_key)
+    if room_data is None:
         return
 
     if room_data.get("group_mode", False):

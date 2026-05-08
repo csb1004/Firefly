@@ -10,7 +10,7 @@ from .embeds import (
     create_summary_embed,
     create_user_info_embed,
 )
-from .polls import cancel_poll_tasks, create_poll_from_command
+from .polls import cancel_poll_tasks, close_poll_from_command, create_poll_from_command
 from .storage import get_user_data, save_memory, update_room_data, update_user_data
 from .text_utils import parse_last_int_arg
 
@@ -26,6 +26,7 @@ SPECIAL_ONLY_COMMAND_PREFIXES = (
     "/유저정보",
     "/호감도설정",
     "/호감도증감",
+    "/투표마감",
     "/투표",
     "/인터넷모드",
     "/단체모드",
@@ -241,6 +242,14 @@ async def handle_mentioned_message(
             return
 
         await create_poll_from_command(message, user_text, client)
+        return
+
+    if user_text == "/투표마감":
+        if not special_user:
+            await message.channel.send("…투표 마감은 특별 사용자만 사용할 수 있어.")
+            return
+
+        await close_poll_from_command(message, client)
         return
 
     if user_text == "/요약" or user_text.startswith("/요약 "):

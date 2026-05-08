@@ -61,6 +61,18 @@ def get_room_data(room_key: str) -> dict:
     return room_data
 
 
+def get_existing_room_data(room_key: str) -> dict | None:
+    all_data = load_memory()
+    room_data = all_data.get(ROOMS_KEY, {}).get(room_key)
+    if not isinstance(room_data, dict):
+        return None
+
+    room_data.setdefault("internet_mode", False)
+    room_data.setdefault("group_mode", False)
+    room_data.setdefault("history", [])
+    return room_data
+
+
 def update_room_data(room_key: str, room_data: dict) -> None:
     all_data = load_memory()
     all_data.setdefault(ROOMS_KEY, {})[room_key] = room_data

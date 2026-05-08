@@ -195,6 +195,12 @@ def remove_poll(message_id: int | str) -> None:
     save_memory(all_data)
 
 
+def _cancel_poll_task(message_id: int | str) -> None:
+    task = _poll_tasks.pop(str(message_id), None)
+    if task and not task.done():
+        task.cancel()
+
+
 def _discord_timestamp(closes_at: datetime, style: str = "F") -> str:
     return f"<t:{int(closes_at.timestamp())}:{style}>"
 
@@ -205,6 +211,7 @@ def create_poll_embed(
     closes_at: datetime,
     author_name: str,
     closed: bool = False,
+    closed_by: str | None = None,
 ) -> discord.Embed:
     lines = [f"{POLL_EMOJIS[i]} {option}" for i, option in enumerate(options)]
     embed = discord.Embed(
@@ -218,11 +225,18 @@ def create_poll_embed(
         value=f"{_discord_timestamp(closes_at)} ({_discord_timestamp(closes_at, 'R')})",
         inline=False,
     )
+    if closed_by:
+        embed.add_field(name="상태", value=f"{closed_by}님이 조기 마감함", inline=False)
     embed.set_footer(text=f"생성자: {author_name} · 한 사람당 하나의 반응만 집계")
     return embed
 
 
-def create_result_embed(poll: dict, counts: list[int], total_votes: int) -> discord.Embed:
+def create_result_embed(
+    poll: dict,
+    counts: list[int],
+    total_votes: int,
+    closed_by: str | None = None,
+) -> discord.Embed:
     options = poll["options"]
     max_votes = max(counts) if counts else 0
     winners = [
@@ -248,7 +262,10 @@ def create_result_embed(poll: dict, counts: list[int], total_votes: int) -> disc
 
     result_text = "투표가 없었어." if not winners else " / ".join(winners)
     embed.add_field(name="최다 득표", value=result_text, inline=False)
-    embed.set_footer(text=f"총 {total_votes}표")
+    footer_text = f"총 {total_votes}표"
+    if closed_by:
+        footer_text += f" · 조기 마감: {closed_by}"
+    embed.set_footer(text=footer_text)
     return embed
 
 
@@ -319,10 +336,18 @@ async def tally_poll_votes(poll_message: discord.Message, option_count: int) -> 
     return counts, len(counted_users)
 
 
-async def finalize_poll(client: discord.Client, message_id: int | str) -> None:
+async def finalize_poll(
+    client: discord.Client,
+    message_id: int | str,
+    closed_by: str | None = None,
+) -> bool:
     poll = get_poll(message_id)
     if not poll:
-        return
+        return False
+
+    remove_poll(message_id)
+    _poll_tasks.pop(str(message_id), None)
+    finalized = False
 
     try:
         poll_message = await _fetch_poll_message(client, poll)
@@ -335,9 +360,13 @@ async def finalize_poll(client: discord.Client, message_id: int | str) -> None:
             closes_at=closes_at,
             author_name=poll.get("author_name", "알 수 없음"),
             closed=True,
+            closed_by=closed_by,
         )
         await poll_message.edit(embed=closed_embed)
-        await poll_message.channel.send(embed=create_result_embed(poll, counts, total_votes))
+        await poll_message.channel.send(
+            embed=create_result_embed(poll, counts, total_votes, closed_by)
+        )
+        finalized = True
     except discord.NotFound:
         pass
     except discord.Forbidden:
@@ -345,8 +374,36 @@ async def finalize_poll(client: discord.Client, message_id: int | str) -> None:
     except Exception as e:
         print("Poll finalize error:", e)
     finally:
-        remove_poll(message_id)
         _poll_tasks.pop(str(message_id), None)
+    return finalized
+
+
+async def close_poll_from_command(
+    message: discord.Message,
+    client: discord.Client,
+) -> None:
+    reference = getattr(message, "reference", None)
+    message_id = getattr(reference, "message_id", None)
+    if message_id is None:
+        await message.channel.send("…마감할 투표 메시지에 답장으로 `/투표마감`을 입력해줘.")
+        return
+
+    poll = get_poll(message_id)
+    if not poll:
+        await message.channel.send("…답장한 메시지는 진행 중인 투표가 아니야.")
+        return
+
+    if int(poll["channel_id"]) != message.channel.id:
+        await message.channel.send("…투표가 열린 채널에서 답장으로 마감해줘.")
+        return
+
+    closed_by = getattr(message.author, "display_name", message.author.name)
+    _cancel_poll_task(message_id)
+    closed = await finalize_poll(client, message_id, closed_by=closed_by)
+    if not closed:
+        await message.channel.send(
+            "…투표를 마감하려 했지만 메시지를 찾지 못했거나 권한이 부족했어. 저장된 투표 예약은 정리했어."
+        )
 
 
 async def _poll_countdown(client: discord.Client, poll: dict) -> None:
