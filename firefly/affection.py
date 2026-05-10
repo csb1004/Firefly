@@ -1,6 +1,6 @@
 from .config import DEFAULT_AFFECTION, SPECIAL_USER_ID
 from .content import NEGATIVE_KEYWORDS, POSITIVE_KEYWORDS
-from .storage import load_memory, save_memory
+from .storage import update_memory
 from .text_utils import normalize_text
 
 
@@ -18,30 +18,32 @@ def _ensure_user_entry(all_data: dict, target_user_id: int) -> dict:
 
 
 def set_user_affection(target_user_id: int, value: int) -> int:
-    all_data = load_memory()
-    user_data = _ensure_user_entry(all_data, target_user_id)
+    def mutate(all_data: dict) -> int:
+        user_data = _ensure_user_entry(all_data, target_user_id)
 
-    if target_user_id == SPECIAL_USER_ID:
-        user_data["affection"] = 1004
-    else:
-        user_data["affection"] = max(1, min(100, value))
+        if target_user_id == SPECIAL_USER_ID:
+            user_data["affection"] = 1004
+        else:
+            user_data["affection"] = max(1, min(100, value))
 
-    save_memory(all_data)
-    return user_data["affection"]
+        return user_data["affection"]
+
+    return update_memory(mutate)
 
 
 def change_user_affection(target_user_id: int, delta: int) -> int:
-    all_data = load_memory()
-    user_data = _ensure_user_entry(all_data, target_user_id)
-    current = user_data.get("affection", DEFAULT_AFFECTION)
+    def mutate(all_data: dict) -> int:
+        user_data = _ensure_user_entry(all_data, target_user_id)
+        current = user_data.get("affection", DEFAULT_AFFECTION)
 
-    if target_user_id == SPECIAL_USER_ID:
-        user_data["affection"] = 1004
-    else:
-        user_data["affection"] = max(1, min(100, current + delta))
+        if target_user_id == SPECIAL_USER_ID:
+            user_data["affection"] = 1004
+        else:
+            user_data["affection"] = max(1, min(100, current + delta))
 
-    save_memory(all_data)
-    return user_data["affection"]
+        return user_data["affection"]
+
+    return update_memory(mutate)
 
 
 def adjust_affection(user_id: int, user_data: dict, user_message: str) -> dict:

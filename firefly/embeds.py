@@ -43,7 +43,8 @@ def create_special_help_embed() -> discord.Embed:
         ("/호칭 [이름]", "일반 사용자만 호칭을 바꿀 수 있어.\n너는 고정 호칭이라 바뀌지 않아."),
         (
             "/투표 제목 | 항목수=개수 | 항목... | 마감",
-            f"특별 사용자 전용 반응 투표를 열어.\n형식: {POLL_COMMAND_FORMAT}\n예: {POLL_COMMAND_EXAMPLE}\n{POLL_DEADLINE_HELP}",
+            f"특별 사용자 전용 반응 투표를 열고 @everyone으로 알려.\n"
+            f"형식: {POLL_COMMAND_FORMAT}\n예: {POLL_COMMAND_EXAMPLE}\n{POLL_DEADLINE_HELP}",
         ),
         ("/투표마감", "진행 중인 투표 메시지에 답장으로 입력하면 바로 집계하고 마감해."),
         ("/요약 [개인/방] [개수]", "명령어를 제외하고 최근 대화를 요약해."),

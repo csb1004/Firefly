@@ -2,7 +2,7 @@ import discord
 
 from firefly.commands import handle_mentioned_message
 from firefly.config import DISCORD_BOT_TOKEN
-from firefly.polls import enforce_single_vote, restore_poll_tasks
+from firefly.polls import enforce_single_vote, refresh_poll_vote_count, restore_poll_tasks
 from firefly.storage import (
     get_existing_room_data,
     get_room_data,
@@ -32,6 +32,11 @@ async def on_ready():
 @client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     await enforce_single_vote(client, payload)
+
+
+@client.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    await refresh_poll_vote_count(client, payload)
 
 
 @client.event

@@ -19,6 +19,10 @@ def is_special_user(user_id: int) -> bool:
     return user_id == SPECIAL_USER_ID
 
 
+def matches_command(user_text: str, command: str) -> bool:
+    return user_text == command or user_text.startswith(f"{command} ")
+
+
 SPECIAL_ONLY_COMMAND_PREFIXES = (
     "/메모리파일",
     "/메모리초기화",
@@ -37,10 +41,7 @@ SPECIAL_ONLY_COMMAND_PREFIXES = (
 
 
 def is_special_only_command(user_text: str) -> bool:
-    return any(
-        user_text == command or user_text.startswith(f"{command} ")
-        for command in SPECIAL_ONLY_COMMAND_PREFIXES
-    )
+    return any(matches_command(user_text, command) for command in SPECIAL_ONLY_COMMAND_PREFIXES)
 
 
 def get_target_mentions(
@@ -115,7 +116,7 @@ async def handle_mentioned_message(
         (
             command
             for command in ("/메모리초기화", "/메모리파일초기화")
-            if user_text == command or user_text.startswith(f"{command} ")
+            if matches_command(user_text, command)
         ),
         None,
     )
@@ -236,7 +237,7 @@ async def handle_mentioned_message(
         await message.channel.send(f"응. 이제부터는 {new_nickname}(이)라고 불러볼게.")
         return
 
-    if user_text == "/투표" or user_text.startswith("/투표 "):
+    if matches_command(user_text, "/투표"):
         if not special_user:
             await message.channel.send("…투표 기능은 특별 사용자만 사용할 수 있어.")
             return
@@ -244,7 +245,7 @@ async def handle_mentioned_message(
         await create_poll_from_command(message, user_text, client)
         return
 
-    if user_text == "/투표마감":
+    if matches_command(user_text, "/투표마감"):
         if not special_user:
             await message.channel.send("…투표 마감은 특별 사용자만 사용할 수 있어.")
             return

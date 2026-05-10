@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from .config import POLLS_KEY
-from .storage import load_memory, save_memory
+from .storage import load_memory, update_memory
 
 KST = timezone(timedelta(hours=9))
 POLL_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
@@ -173,14 +173,14 @@ def parse_poll_command(user_text: str) -> PollSpec:
 
 
 def _active_polls() -> dict:
-    all_data = load_memory()
-    return all_data.setdefault(POLLS_KEY, {})
+    return load_memory().get(POLLS_KEY, {})
 
 
 def _save_poll(poll: dict) -> None:
-    all_data = load_memory()
-    all_data.setdefault(POLLS_KEY, {})[str(poll["message_id"])] = poll
-    save_memory(all_data)
+    def mutate(all_data: dict) -> None:
+        all_data.setdefault(POLLS_KEY, {})[str(poll["message_id"])] = poll
+
+    update_memory(mutate)
 
 
 def get_poll(message_id: int | str) -> dict | None:
@@ -189,10 +189,11 @@ def get_poll(message_id: int | str) -> dict | None:
 
 
 def remove_poll(message_id: int | str) -> None:
-    all_data = load_memory()
-    polls = all_data.setdefault(POLLS_KEY, {})
-    polls.pop(str(message_id), None)
-    save_memory(all_data)
+    def mutate(all_data: dict) -> None:
+        polls = all_data.setdefault(POLLS_KEY, {})
+        polls.pop(str(message_id), None)
+
+    update_memory(mutate)
 
 
 def _cancel_poll_task(message_id: int | str) -> None:
@@ -205,6 +206,35 @@ def _discord_timestamp(closes_at: datetime, style: str = "F") -> str:
     return f"<t:{int(closes_at.timestamp())}:{style}>"
 
 
+def _missing_poll_permissions(message: discord.Message) -> list[str]:
+    guild = getattr(message, "guild", None)
+    channel = getattr(message, "channel", None)
+    bot_member = getattr(guild, "me", None)
+
+    if guild is None or bot_member is None or not hasattr(channel, "permissions_for"):
+        return []
+
+    permissions = channel.permissions_for(bot_member)
+    required_permissions = (
+        ("send_messages", "메시지 보내기"),
+        ("add_reactions", "반응 추가"),
+        ("read_message_history", "메시지 기록 보기"),
+        ("mention_everyone", "@everyone 멘션"),
+    )
+    return [
+        label
+        for attr, label in required_permissions
+        if hasattr(permissions, attr) and not getattr(permissions, attr)
+    ]
+
+
+def _everyone_allowed_mentions():
+    allowed_mentions = getattr(discord, "AllowedMentions", None)
+    if allowed_mentions is None:
+        return None
+    return allowed_mentions(everyone=True)
+
+
 def create_poll_embed(
     question: str,
     options: list[str],
@@ -212,6 +242,8 @@ def create_poll_embed(
     author_name: str,
     closed: bool = False,
     closed_by: str | None = None,
+    closed_at: datetime | None = None,
+    total_votes: int | None = None,
 ) -> discord.Embed:
     lines = [f"{POLL_EMOJIS[i]} {option}" for i, option in enumerate(options)]
     embed = discord.Embed(
@@ -220,13 +252,23 @@ def create_poll_embed(
         color=0x00FFFF if not closed else 0x888888,
     )
     embed.add_field(name="주제", value=question, inline=False)
-    embed.add_field(
-        name="마감",
-        value=f"{_discord_timestamp(closes_at)} ({_discord_timestamp(closes_at, 'R')})",
-        inline=False,
-    )
+    if closed:
+        embed.add_field(
+            name="종료",
+            value=_discord_timestamp(closed_at or closes_at),
+            inline=False,
+        )
+    else:
+        embed.add_field(
+            name="마감",
+            value=f"{_discord_timestamp(closes_at)} ({_discord_timestamp(closes_at, 'R')})",
+            inline=False,
+        )
     if closed_by:
         embed.add_field(name="상태", value=f"{closed_by}님이 조기 마감함", inline=False)
+    if total_votes is not None:
+        prefix = "총" if closed else "현재"
+        embed.add_field(name="참여", value=f"{prefix} {total_votes}명", inline=False)
     embed.set_footer(text=f"생성자: {author_name} · 한 사람당 하나의 반응만 집계")
     return embed
 
@@ -280,19 +322,40 @@ async def create_poll_from_command(
         await message.channel.send(str(e))
         return
 
+    missing_permissions = _missing_poll_permissions(message)
+    if missing_permissions:
+        await message.channel.send(
+            "…투표를 열려면 봇에게 이 권한이 필요해: "
+            + ", ".join(missing_permissions)
+        )
+        return
+
     author_name = getattr(message.author, "display_name", message.author.name)
     embed = create_poll_embed(
         question=spec.question,
         options=spec.options,
         closes_at=spec.closes_at,
         author_name=author_name,
+        total_votes=0,
     )
-    poll_message = await message.channel.send(embed=embed)
+    send_kwargs = {
+        "content": "@everyone",
+        "embed": embed,
+    }
+    allowed_mentions = _everyone_allowed_mentions()
+    if allowed_mentions is not None:
+        send_kwargs["allowed_mentions"] = allowed_mentions
+
+    poll_message = await message.channel.send(**send_kwargs)
 
     try:
         for emoji in POLL_EMOJIS[: len(spec.options)]:
             await poll_message.add_reaction(emoji)
     except discord.Forbidden:
+        try:
+            await poll_message.delete()
+        except (discord.Forbidden, discord.NotFound):
+            pass
         await message.channel.send("…반응을 추가할 권한이 없어서 투표를 열 수 없어.")
         return
 
@@ -336,6 +399,42 @@ async def tally_poll_votes(poll_message: discord.Message, option_count: int) -> 
     return counts, len(counted_users)
 
 
+async def refresh_poll_vote_count(
+    client: discord.Client,
+    payload: discord.RawReactionActionEvent,
+) -> None:
+    if client.user and payload.user_id == client.user.id:
+        return
+
+    poll = get_poll(payload.message_id)
+    if not poll:
+        return
+
+    if str(payload.emoji) not in set(POLL_EMOJIS[: len(poll["options"])]):
+        return
+
+    try:
+        poll_message = await _fetch_poll_message(client, poll)
+        _, total_votes = await tally_poll_votes(poll_message, len(poll["options"]))
+        poll = get_poll(payload.message_id)
+        if not poll:
+            return
+
+        closes_at = datetime.fromisoformat(poll["closes_at"])
+        embed = create_poll_embed(
+            question=poll["question"],
+            options=poll["options"],
+            closes_at=closes_at,
+            author_name=poll.get("author_name", "알 수 없음"),
+            total_votes=total_votes,
+        )
+        await poll_message.edit(embed=embed)
+    except (discord.NotFound, discord.Forbidden):
+        return
+    except Exception as e:
+        print("Poll count refresh error:", e)
+
+
 async def finalize_poll(
     client: discord.Client,
     message_id: int | str,
@@ -361,6 +460,8 @@ async def finalize_poll(
             author_name=poll.get("author_name", "알 수 없음"),
             closed=True,
             closed_by=closed_by,
+            closed_at=_now_utc() if closed_by else closes_at,
+            total_votes=total_votes,
         )
         await poll_message.edit(embed=closed_embed)
         await poll_message.channel.send(
@@ -471,6 +572,8 @@ async def enforce_single_vote(
             reaction_emoji = str(reaction.emoji)
             if reaction_emoji in valid_emojis and reaction_emoji != selected_emoji:
                 await reaction.remove(user)
+
+        await refresh_poll_vote_count(client, payload)
     except (discord.NotFound, discord.Forbidden):
         return
     except Exception as e:

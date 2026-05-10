@@ -1,4 +1,5 @@
 import json
+from threading import RLock
 
 import discord
 
@@ -15,8 +16,10 @@ from .config import (
 )
 from .text_utils import clean_discord_content, get_current_time_text
 
+_MEMORY_LOCK = RLock()
 
-def load_memory() -> dict:
+
+def _read_memory_unlocked() -> dict:
     if not MEMORY_FILE.exists():
         return {}
 
@@ -26,7 +29,7 @@ def load_memory() -> dict:
         return {}
 
 
-def save_memory(data: dict) -> None:
+def _write_memory_unlocked(data: dict) -> None:
     MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
     temp_file = MEMORY_FILE.with_name(f"{MEMORY_FILE.name}.tmp")
     temp_file.write_text(
@@ -36,6 +39,67 @@ def save_memory(data: dict) -> None:
     temp_file.replace(MEMORY_FILE)
 
 
+def load_memory() -> dict:
+    with _MEMORY_LOCK:
+        return _read_memory_unlocked()
+
+
+def save_memory(data: dict) -> None:
+    with _MEMORY_LOCK:
+        _write_memory_unlocked(data)
+
+
+def update_memory(mutator):
+    with _MEMORY_LOCK:
+        data = _read_memory_unlocked()
+        result = mutator(data)
+        _write_memory_unlocked(data)
+        return result
+
+
+def _new_room_data() -> dict:
+    return {
+        "internet_mode": False,
+        "group_mode": False,
+        "history": [],
+    }
+
+
+def _normalize_room_data(room_data: dict) -> dict:
+    room_data.setdefault("internet_mode", False)
+    room_data.setdefault("group_mode", False)
+    room_data.setdefault("history", [])
+    return room_data
+
+
+def _new_user_data(user_id: int, display_name: str) -> dict:
+    affection = 1004 if user_id == SPECIAL_USER_ID else DEFAULT_AFFECTION
+    name = SPECIAL_USER_NAME if user_id == SPECIAL_USER_ID else display_name
+    nickname = SPECIAL_USER_NICKNAME if user_id == SPECIAL_USER_ID else "개척자"
+
+    return {
+        "name": name,
+        "nickname": nickname,
+        "affection": affection,
+        "last_seen": None,
+        "history": [],
+    }
+
+
+def _normalize_user_data(user_id: int, display_name: str, user_data: dict) -> dict:
+    user_data.setdefault("last_seen", None)
+    user_data.setdefault("history", [])
+
+    if user_id == SPECIAL_USER_ID:
+        user_data["name"] = SPECIAL_USER_NAME
+        user_data["affection"] = 1004
+        user_data["nickname"] = SPECIAL_USER_NICKNAME
+    elif user_data.get("name") != display_name:
+        user_data["name"] = display_name
+
+    return user_data
+
+
 def get_room_key(message: discord.Message) -> str:
     guild_id = message.guild.id if message.guild else 0
     channel_id = message.channel.id
@@ -43,22 +107,12 @@ def get_room_key(message: discord.Message) -> str:
 
 
 def get_room_data(room_key: str) -> dict:
-    all_data = load_memory()
-    rooms = all_data.setdefault(ROOMS_KEY, {})
+    def mutate(all_data: dict) -> dict:
+        rooms = all_data.setdefault(ROOMS_KEY, {})
+        room_data = rooms.setdefault(room_key, _new_room_data())
+        return _normalize_room_data(room_data)
 
-    if room_key not in rooms:
-        rooms[room_key] = {
-            "internet_mode": False,
-            "group_mode": False,
-            "history": [],
-        }
-        save_memory(all_data)
-
-    room_data = rooms[room_key]
-    room_data.setdefault("internet_mode", False)
-    room_data.setdefault("group_mode", False)
-    room_data.setdefault("history", [])
-    return room_data
+    return update_memory(mutate)
 
 
 def get_existing_room_data(room_key: str) -> dict | None:
@@ -66,17 +120,14 @@ def get_existing_room_data(room_key: str) -> dict | None:
     room_data = all_data.get(ROOMS_KEY, {}).get(room_key)
     if not isinstance(room_data, dict):
         return None
-
-    room_data.setdefault("internet_mode", False)
-    room_data.setdefault("group_mode", False)
-    room_data.setdefault("history", [])
-    return room_data
+    return _normalize_room_data(room_data)
 
 
 def update_room_data(room_key: str, room_data: dict) -> None:
-    all_data = load_memory()
-    all_data.setdefault(ROOMS_KEY, {})[room_key] = room_data
-    save_memory(all_data)
+    def mutate(all_data: dict) -> None:
+        all_data.setdefault(ROOMS_KEY, {})[room_key] = _normalize_room_data(room_data)
+
+    update_memory(mutate)
 
 
 def add_room_history(
@@ -102,47 +153,21 @@ def add_room_history(
 
 
 def get_user_data(user_id: int, display_name: str) -> dict:
-    all_data = load_memory()
     key = str(user_id)
 
-    if key not in all_data:
-        affection = 1004 if user_id == SPECIAL_USER_ID else DEFAULT_AFFECTION
-        name = SPECIAL_USER_NAME if user_id == SPECIAL_USER_ID else display_name
-        nickname = SPECIAL_USER_NICKNAME if user_id == SPECIAL_USER_ID else "개척자"
+    def mutate(all_data: dict) -> dict:
+        user_data = all_data.setdefault(key, _new_user_data(user_id, display_name))
+        return _normalize_user_data(user_id, display_name, user_data)
 
-        all_data[key] = {
-            "name": name,
-            "nickname": nickname,
-            "affection": affection,
-            "last_seen": None,
-            "history": [],
-        }
-        save_memory(all_data)
-
-    user_data = all_data[key]
-    user_data.setdefault("last_seen", None)
-    user_data.setdefault("history", [])
-
-    if user_id == SPECIAL_USER_ID:
-        user_data["name"] = SPECIAL_USER_NAME
-        user_data["affection"] = 1004
-        user_data["nickname"] = SPECIAL_USER_NICKNAME
-    elif user_data.get("name") != display_name:
-        user_data["name"] = display_name
-
-    all_data[key] = user_data
-    save_memory(all_data)
-    return user_data
+    return update_memory(mutate)
 
 
 def update_user_data(user_id: int, user_data: dict) -> None:
-    all_data = load_memory()
+    def mutate(all_data: dict) -> None:
+        display_name = str(user_data.get("name", "알 수 없음"))
+        all_data[str(user_id)] = _normalize_user_data(user_id, display_name, user_data)
 
-    if user_id == SPECIAL_USER_ID:
-        user_data["affection"] = 1004
-
-    all_data[str(user_id)] = user_data
-    save_memory(all_data)
+    update_memory(mutate)
 
 
 def add_history(user_data: dict, role: str, content: str, **extra) -> dict:
@@ -173,6 +198,7 @@ def record_room_user_message(
     if not content.strip():
         return False
 
+    room_data = get_room_data(room_key)
     room_data = add_room_history(
         room_data,
         speaker_name=display_name,
