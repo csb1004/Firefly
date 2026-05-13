@@ -1,6 +1,7 @@
 import asyncio
 import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit, urlunsplit
 
 import discord
 
@@ -19,6 +20,10 @@ NEWS_COMMAND_PREFIX = "/최신 소식"
 NEWS_COMMAND_ALIASES = ("/최신 소식", "/최신소식")
 TOPIC_COMMAND_PREFIX = "/주제"
 NEWS_MESSAGE_LIMIT = 1900
+NEWS_DELIVERED_ITEM_LIMIT = 200
+NEWS_PROMPT_RECENT_ITEM_LIMIT = 40
+URL_PATTERN = re.compile(r"https?://[^\s<>()\]]+", re.IGNORECASE)
+NEWS_FIELD_LABELS = ("무슨 일", "왜 중요해", "확인 링크")
 
 _news_task: asyncio.Task | None = None
 
@@ -45,6 +50,7 @@ def _default_news_settings() -> dict:
         "minute": NEWS_DEFAULT_MINUTE,
         "topics": list(NEWS_DEFAULT_TOPICS),
         "subscribers": {},
+        "delivered_items": [],
         "last_delivered_window_end": None,
     }
 
@@ -76,6 +82,10 @@ def _normalize_news_settings(settings: dict | None) -> dict:
     if not isinstance(subscribers, dict):
         subscribers = {}
 
+    delivered_items = settings.get("delivered_items")
+    if not isinstance(delivered_items, list):
+        delivered_items = []
+
     normalized_subscribers = {}
     for user_id, subscriber in subscribers.items():
         if not isinstance(subscriber, dict):
@@ -93,6 +103,7 @@ def _normalize_news_settings(settings: dict | None) -> dict:
     settings["minute"] = minute
     settings["topics"] = topics
     settings["subscribers"] = normalized_subscribers
+    settings["delivered_items"] = _normalize_delivered_items(delivered_items)
     settings.setdefault("last_delivered_window_end", None)
     return settings
 
@@ -108,6 +119,173 @@ def _dedupe_topics(topics: list[str]) -> list[str]:
         result.append(normalized)
         seen.add(key)
     return result
+
+
+def _clean_report_title(title: str) -> str:
+    title = re.sub(r"[*_`#]+", "", title).strip()
+    title = re.sub(r"\s+", " ", title)
+    return title[:180]
+
+
+def _is_field_heading(text: str) -> bool:
+    title = _clean_report_title(text)
+    return any(title.startswith(label) for label in NEWS_FIELD_LABELS)
+
+
+def _numbered_item_matches(report: str) -> list[re.Match]:
+    return [
+        match
+        for match in re.finditer(r"(?m)^\s*\d+\.\s+(.+)$", report)
+        if not _is_field_heading(match.group(1))
+    ]
+
+
+def _canonical_url(url: str) -> str:
+    url = url.rstrip(".,;:!?)]}>\"'")
+    parsed = urlsplit(url)
+    scheme = parsed.scheme.lower()
+    netloc = parsed.netloc.lower()
+    path = parsed.path.rstrip("/")
+    return urlunsplit((scheme, netloc, path, parsed.query, ""))
+
+
+def _extract_urls(text: str) -> list[str]:
+    urls = []
+    seen = set()
+    for match in URL_PATTERN.finditer(text):
+        url = _canonical_url(match.group(0))
+        if not url or url in seen:
+            continue
+        urls.append(url)
+        seen.add(url)
+    return urls
+
+
+def _normalize_delivered_items(items: list) -> list[dict]:
+    normalized_items = []
+    seen = set()
+
+    for item in items[-NEWS_DELIVERED_ITEM_LIMIT:]:
+        if not isinstance(item, dict):
+            continue
+
+        url = str(item.get("url") or "").strip()
+        title = _clean_report_title(str(item.get("title") or ""))
+        key = _canonical_url(url) if url else title.casefold()
+
+        if not key or key in seen:
+            continue
+
+        normalized_items.append({
+            "title": title or "제목 없음",
+            "url": _canonical_url(url) if url else "",
+            "sent_at": item.get("sent_at"),
+            "window_end": item.get("window_end"),
+        })
+        seen.add(key)
+
+    return normalized_items
+
+
+def _extract_delivered_items(report: str, window_end: datetime) -> list[dict]:
+    item_matches = _numbered_item_matches(report)
+    sent_at = _now_kst().isoformat()
+    window_end_text = window_end.isoformat()
+    items = []
+
+    if not item_matches:
+        return [
+            {
+                "title": "제목 없음",
+                "url": url,
+                "sent_at": sent_at,
+                "window_end": window_end_text,
+            }
+            for url in _extract_urls(report)
+        ]
+
+    for index, match in enumerate(item_matches):
+        block_start = match.start()
+        block_end = item_matches[index + 1].start() if index + 1 < len(item_matches) else len(report)
+        block = report[block_start:block_end]
+        title = _clean_report_title(match.group(1))
+
+        for url in _extract_urls(block):
+            items.append({
+                "title": title or "제목 없음",
+                "url": url,
+                "sent_at": sent_at,
+                "window_end": window_end_text,
+            })
+
+    return _normalize_delivered_items(items)
+
+
+def _recent_sent_item_lines(settings: dict) -> list[str]:
+    delivered_items = settings.get("delivered_items", [])
+    lines = []
+
+    for item in delivered_items[-NEWS_PROMPT_RECENT_ITEM_LIMIT:]:
+        title = item.get("title", "제목 없음")
+        url = item.get("url", "")
+        if url:
+            lines.append(f"{title} | {url}")
+        else:
+            lines.append(str(title))
+
+    return lines
+
+
+def _delivered_url_set(settings: dict) -> set[str]:
+    return {
+        item.get("url", "")
+        for item in settings.get("delivered_items", [])
+        if item.get("url")
+    }
+
+
+def _drop_previously_sent_items(report: str, settings: dict) -> str:
+    delivered_urls = _delivered_url_set(settings)
+    if not delivered_urls:
+        return report.strip()
+
+    item_matches = _numbered_item_matches(report)
+    if not item_matches:
+        urls = set(_extract_urls(report))
+        return "" if urls & delivered_urls else report.strip()
+
+    intro = report[: item_matches[0].start()].strip()
+    kept_blocks = []
+
+    for index, match in enumerate(item_matches):
+        block_start = match.start()
+        block_end = item_matches[index + 1].start() if index + 1 < len(item_matches) else len(report)
+        block = report[block_start:block_end].strip()
+        block_urls = set(_extract_urls(block))
+
+        if block_urls & delivered_urls:
+            continue
+
+        kept_blocks.append(block)
+
+    if not kept_blocks:
+        return ""
+
+    renumbered_blocks = []
+    for index, block in enumerate(kept_blocks, start=1):
+        renumbered_blocks.append(re.sub(r"^\s*\d+\.\s+", f"{index}. ", block, count=1))
+
+    parts = [intro, *renumbered_blocks] if intro else renumbered_blocks
+    return "\n\n".join(part for part in parts if part).strip()
+
+
+def _empty_news_report(window_start: datetime, window_end: datetime, topics: list[str]) -> str:
+    return (
+        f"{_format_kst(window_start)}부터 {_format_kst(window_end)}까지, "
+        f"주제: {', '.join(topics)}\n\n"
+        "오늘 새로 보낼 만한 소식은 찾지 못했어. "
+        "이미 보낸 내용과 겹치는 항목은 제외해뒀어."
+    )
 
 
 def get_news_settings() -> dict:
@@ -610,10 +788,17 @@ def _due_window(settings: dict, now: datetime) -> tuple[datetime, datetime] | No
     return today - timedelta(days=1), today
 
 
-def _mark_window_delivered(window_end: datetime) -> None:
+def _mark_window_delivered(window_end: datetime, report: str) -> None:
+    delivered_items = _extract_delivered_items(report, window_end)
+
     def mutate(settings: dict) -> None:
         settings["last_delivered_window_end"] = window_end.isoformat()
         settings["last_delivered_at"] = _now_kst().isoformat()
+        existing_items = settings.setdefault("delivered_items", [])
+        settings["delivered_items"] = _normalize_delivered_items([
+            *existing_items,
+            *delivered_items,
+        ])
 
     _update_news_settings(mutate)
 
@@ -667,13 +852,18 @@ async def deliver_daily_news(client: discord.Client) -> bool:
         topics=settings["topics"],
         window_start_text=_format_kst(window_start),
         window_end_text=_format_kst(window_end),
+        previously_sent_items=_recent_sent_item_lines(settings),
     )
     if not report:
         print("Daily news digest was not generated; delivery will be retried later.")
         return False
 
+    report = _drop_previously_sent_items(report, settings)
+    if not report:
+        report = _empty_news_report(window_start, window_end, settings["topics"])
+
     await _send_digest_to_subscribers(client, report, subscribers)
-    _mark_window_delivered(window_end)
+    _mark_window_delivered(window_end, report)
     return True
 
 

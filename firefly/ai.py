@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 from openai import APIError, OpenAI, RateLimitError
 
@@ -31,6 +32,24 @@ from .storage import (
 from .text_utils import get_current_time_text, is_command_text, load_text_file
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
+
+NEWS_FIELD_LABELS = ("무슨 일", "왜 중요해", "확인 링크")
+
+
+def _normalize_news_digest_format(text: str) -> str:
+    field_pattern = "|".join(re.escape(label) for label in NEWS_FIELD_LABELS)
+
+    def replace_field_number(match: re.Match) -> str:
+        indent, bold_open, label, bold_close = match.groups()
+        bold_open = bold_open or ""
+        bold_close = bold_close or ""
+        return f"{indent}- {bold_open}{label}{bold_close}:"
+
+    return re.sub(
+        rf"(?m)^(\s*)\d+\.\s*(\*\*)?({field_pattern})(\*\*)?\s*:",
+        replace_field_number,
+        text.strip(),
+    )
 
 
 async def generate_reply(
@@ -233,8 +252,15 @@ async def generate_daily_news_digest(
     topics: list[str],
     window_start_text: str,
     window_end_text: str,
+    previously_sent_items: list[str] | None = None,
 ) -> str | None:
     topic_text = ", ".join(topics)
+    previously_sent_items = previously_sent_items or []
+    previously_sent_text = (
+        "\n".join(f"- {item}" for item in previously_sent_items)
+        if previously_sent_items
+        else "없음"
+    )
     system_prompt = load_text_file(NEWS_PROMPT_FILE)
     user_prompt = f"""
 [조회 기간]
@@ -243,10 +269,14 @@ async def generate_daily_news_digest(
 [관심 주제]
 {topic_text}
 
+[이미 전달한 소식]
+{previously_sent_text}
+
 [요청]
 위 기간에 공개되거나 보도된 최신 소식 중, 관심 주제와 관련된 중요한 소식만 웹 검색으로 확인해서 정리해줘.
 각 항목에는 반드시 확인 가능한 링크를 붙여줘.
 확실한 링크와 날짜 근거가 부족하면 항목에서 제외해줘.
+이미 전달한 소식과 같은 사건, 같은 링크, 같은 발표는 제외해줘.
 """.strip()
 
     try:
@@ -259,7 +289,7 @@ async def generate_daily_news_digest(
             ],
             tools=[{"type": "web_search"}],
         )
-        return response.output_text.strip()
+        return _normalize_news_digest_format(response.output_text)
     except RateLimitError as e:
         error_text = str(e)
         if "insufficient_quota" in error_text:
