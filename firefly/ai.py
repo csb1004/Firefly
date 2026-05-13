@@ -7,6 +7,7 @@ from .config import (
     BOT_DISPLAY_NAME,
     DEFAULT_AFFECTION,
     DEFAULT_MODEL,
+    NEWS_PROMPT_FILE,
     OPENAI_API_KEY,
     SPECIAL_USER_ID,
     SUMMARY_DEFAULT_LIMIT,
@@ -27,7 +28,7 @@ from .storage import (
     update_room_data,
     update_user_data,
 )
-from .text_utils import get_current_time_text, is_command_text
+from .text_utils import get_current_time_text, is_command_text, load_text_file
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -226,3 +227,49 @@ async def summarize_conversation(
     except Exception as e:
         print("Summary error:", e)
         return "…미안. 지금은 요약을 만들 수 없어.", len(lines)
+
+
+async def generate_daily_news_digest(
+    topics: list[str],
+    window_start_text: str,
+    window_end_text: str,
+) -> str | None:
+    topic_text = ", ".join(topics)
+    system_prompt = load_text_file(NEWS_PROMPT_FILE)
+    user_prompt = f"""
+[조회 기간]
+{window_start_text}부터 {window_end_text}까지, 한국 시간 기준.
+
+[관심 주제]
+{topic_text}
+
+[요청]
+위 기간에 공개되거나 보도된 최신 소식 중, 관심 주제와 관련된 중요한 소식만 웹 검색으로 확인해서 정리해줘.
+각 항목에는 반드시 확인 가능한 링크를 붙여줘.
+확실한 링크와 날짜 근거가 부족하면 항목에서 제외해줘.
+""".strip()
+
+    try:
+        response = await asyncio.to_thread(
+            client_openai.responses.create,
+            model=WEB_SEARCH_MODEL,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            tools=[{"type": "web_search"}],
+        )
+        return response.output_text.strip()
+    except RateLimitError as e:
+        error_text = str(e)
+        if "insufficient_quota" in error_text:
+            print("Daily news quota exhausted.")
+        else:
+            print("Daily news rate limited:", e)
+        return None
+    except APIError as e:
+        print("Daily news APIError:", e)
+        return None
+    except Exception as e:
+        print("Daily news error:", e)
+        return None

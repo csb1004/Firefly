@@ -2,6 +2,7 @@ import discord
 
 from firefly.commands import handle_mentioned_message
 from firefly.config import DISCORD_BOT_TOKEN
+from firefly.news import handle_news_command, is_news_command_text, start_daily_news_task
 from firefly.polls import enforce_single_vote, refresh_poll_vote_count, restore_poll_tasks
 from firefly.storage import (
     get_existing_room_data,
@@ -27,6 +28,7 @@ def _message_mentions_user(message: discord.Message, user: object) -> bool:
 async def on_ready():
     print(f"로그인됨: {client.user}")
     await restore_poll_tasks(client)
+    start_daily_news_task(client)
 
 
 @client.event
@@ -46,6 +48,15 @@ async def on_message(message: discord.Message):
 
     room_key = get_room_key(message)
     bot_was_mentioned = client.user and _message_mentions_user(message, client.user)
+    raw_content = clean_discord_content(message)
+
+    if not bot_was_mentioned and is_news_command_text(raw_content):
+        await handle_news_command(
+            message=message,
+            user_text=raw_content,
+            client=client,
+        )
+        return
 
     if bot_was_mentioned:
         room_data = get_room_data(room_key)

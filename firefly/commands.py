@@ -10,6 +10,12 @@ from .embeds import (
     create_summary_embed,
     create_user_info_embed,
 )
+from .news import (
+    cancel_daily_news_task,
+    handle_news_command,
+    is_news_command_text,
+    start_daily_news_task,
+)
 from .polls import cancel_poll_tasks, close_poll_from_command, create_poll_from_command
 from .storage import get_user_data, save_memory, update_room_data, update_user_data
 from .text_utils import parse_last_int_arg
@@ -37,6 +43,13 @@ SPECIAL_ONLY_COMMAND_PREFIXES = (
     "/방기억",
     "/방초기화",
     "/방상태",
+    "/최신 소식 시간",
+    "/최신 소식 목록",
+    "/최신 소식 상태",
+    "/주제 추가",
+    "/주제 제거",
+    "/주제 설정",
+    "/주제 변경",
 )
 
 
@@ -105,6 +118,10 @@ async def handle_mentioned_message(
     author_id = message.author.id
     special_user = is_special_user(author_id)
 
+    if is_news_command_text(user_text):
+        await handle_news_command(message, user_text, client)
+        return
+
     if special_user and user_text == "/메모리파일":
         if not MEMORY_FILE.exists():
             await message.channel.send("…아직 저장된 메모리 파일이 없어.")
@@ -135,6 +152,8 @@ async def handle_mentioned_message(
 
         save_memory({})
         cancel_poll_tasks()
+        cancel_daily_news_task()
+        start_daily_news_task(client)
         await message.channel.send("…응. 메모리 파일을 빈 상태로 초기화했어.")
         return
 

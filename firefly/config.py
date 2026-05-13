@@ -53,6 +53,12 @@ MAX_ROOM_MODEL_HISTORY = 12
 SUMMARY_DEFAULT_LIMIT = 30
 
 POLLS_KEY = "__polls__"
+DAILY_NEWS_KEY = "__daily_news__"
+
+NEWS_PROMPT_FILE = _resolve_project_path(os.getenv("NEWS_PROMPT_FILE", "prompt_news.txt"))
+NEWS_DEFAULT_HOUR = 9
+NEWS_DEFAULT_MINUTE = 0
+NEWS_DEFAULT_TOPICS = ["인공지능", "프로그래밍"]
 
 DEFAULT_MODEL = "gpt-5.3-codex"
 WEB_SEARCH_MODEL = "gpt-5.4"
