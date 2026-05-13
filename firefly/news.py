@@ -415,7 +415,11 @@ async def _send_private(user: discord.User | discord.Member, content: str) -> bo
 
 
 async def _send_command_feedback(message: discord.Message, content: str) -> None:
-    await _send_private(message.author, content)
+    try:
+        for chunk in _split_discord_message(content):
+            await message.channel.send(chunk)
+    except Exception as e:
+        print("Daily news command feedback error:", e)
 
 
 def _split_discord_message(text: str, limit: int = NEWS_MESSAGE_LIMIT) -> list[str]:
@@ -613,22 +617,22 @@ async def _handle_add_command(
     settings = get_news_settings()
     delivery_time = _format_delivery_time(settings["hour"], settings["minute"])
     topics = ", ".join(settings["topics"])
-    confirmation = (
-        f"최신 소식을 매일 {delivery_time}에 개인 메시지로 보내줄게.\n"
-        f"지금 주제는 {topics} 쪽이야."
-    )
-
-    if not await _send_private(target_user, confirmation):
-        if target_user.id == message.author.id:
-            print("Daily news subscription skipped because confirmation DM failed.")
-        else:
-            await _send_command_feedback(message, "…대상에게 개인 메시지를 보낼 수 없어서 목록에 추가하지 않았어.")
-        return
-
     created = _add_subscriber(target_user)
-    if target_user.id != message.author.id:
+
+    if target_user.id == message.author.id:
+        status = "최신 소식 받는 사람 목록에 추가했어" if created else "이미 최신 소식 받는 사람 목록에 있었어"
+        await _send_command_feedback(
+            message,
+            f"…응. 너를 {status}.\n"
+            f"정기 소식은 매일 {delivery_time}에 개인 메시지로 보낼게. 지금 주제는 {topics} 쪽이야.",
+        )
+    else:
         status = "추가했어" if created else "이미 목록에 있었어"
-        await _send_command_feedback(message, f"…{_subscriber_name(target_user)}은(는) {status}.")
+        await _send_command_feedback(
+            message,
+            f"…{_subscriber_name(target_user)}은(는) {status}.\n"
+            f"정기 소식은 매일 {delivery_time}에 개인 메시지로 보낼게. 지금 주제는 {topics} 쪽이야.",
+        )
 
 
 async def _handle_remove_command(
