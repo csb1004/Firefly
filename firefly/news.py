@@ -23,7 +23,10 @@ NEWS_MESSAGE_LIMIT = 1900
 NEWS_DELIVERED_ITEM_LIMIT = 200
 NEWS_PROMPT_RECENT_ITEM_LIMIT = 40
 URL_PATTERN = re.compile(r"https?://[^\s<>()\]]+", re.IGNORECASE)
+REPORT_ITEM_PATTERN = re.compile(r"(?m)^\s*(?:\[\d+\]|\d+\.)\s+(.+)$")
+REPORT_ITEM_PREFIX_PATTERN = re.compile(r"^\s*(?:\[\d+\]|\d+\.)\s+")
 NEWS_FIELD_LABELS = ("무슨 일", "왜 중요해", "확인 링크")
+NEWS_HISTORY_CLEAR_COMMANDS = {"중복초기화", "중복삭제", "기록초기화", "중복기록초기화"}
 
 _news_task: asyncio.Task | None = None
 
@@ -132,12 +135,24 @@ def _is_field_heading(text: str) -> bool:
     return any(title.startswith(label) for label in NEWS_FIELD_LABELS)
 
 
-def _numbered_item_matches(report: str) -> list[re.Match]:
+def _report_item_matches(report: str) -> list[re.Match]:
     return [
         match
-        for match in re.finditer(r"(?m)^\s*\d+\.\s+(.+)$", report)
+        for match in REPORT_ITEM_PATTERN.finditer(report)
         if not _is_field_heading(match.group(1))
     ]
+
+
+def _iter_report_item_blocks(report: str) -> list[tuple[re.Match, str]]:
+    matches = _report_item_matches(report)
+    blocks = []
+
+    for index, match in enumerate(matches):
+        block_start = match.start()
+        block_end = matches[index + 1].start() if index + 1 < len(matches) else len(report)
+        blocks.append((match, report[block_start:block_end].strip()))
+
+    return blocks
 
 
 def _canonical_url(url: str) -> str:
@@ -188,12 +203,12 @@ def _normalize_delivered_items(items: list) -> list[dict]:
 
 
 def _extract_delivered_items(report: str, window_end: datetime) -> list[dict]:
-    item_matches = _numbered_item_matches(report)
+    item_blocks = _iter_report_item_blocks(report)
     sent_at = _now_kst().isoformat()
     window_end_text = window_end.isoformat()
     items = []
 
-    if not item_matches:
+    if not item_blocks:
         return [
             {
                 "title": "제목 없음",
@@ -204,10 +219,7 @@ def _extract_delivered_items(report: str, window_end: datetime) -> list[dict]:
             for url in _extract_urls(report)
         ]
 
-    for index, match in enumerate(item_matches):
-        block_start = match.start()
-        block_end = item_matches[index + 1].start() if index + 1 < len(item_matches) else len(report)
-        block = report[block_start:block_end]
+    for match, block in item_blocks:
         title = _clean_report_title(match.group(1))
 
         for url in _extract_urls(block):
@@ -249,18 +261,15 @@ def _drop_previously_sent_items(report: str, settings: dict) -> str:
     if not delivered_urls:
         return report.strip()
 
-    item_matches = _numbered_item_matches(report)
-    if not item_matches:
+    item_blocks = _iter_report_item_blocks(report)
+    if not item_blocks:
         urls = set(_extract_urls(report))
         return "" if urls & delivered_urls else report.strip()
 
-    intro = report[: item_matches[0].start()].strip()
+    intro = report[: item_blocks[0][0].start()].strip()
     kept_blocks = []
 
-    for index, match in enumerate(item_matches):
-        block_start = match.start()
-        block_end = item_matches[index + 1].start() if index + 1 < len(item_matches) else len(report)
-        block = report[block_start:block_end].strip()
+    for _, block in item_blocks:
         block_urls = set(_extract_urls(block))
 
         if block_urls & delivered_urls:
@@ -273,7 +282,9 @@ def _drop_previously_sent_items(report: str, settings: dict) -> str:
 
     renumbered_blocks = []
     for index, block in enumerate(kept_blocks, start=1):
-        renumbered_blocks.append(re.sub(r"^\s*\d+\.\s+", f"{index}. ", block, count=1))
+        renumbered_blocks.append(
+            REPORT_ITEM_PREFIX_PATTERN.sub(f"[{index}] ", block, count=1)
+        )
 
     parts = [intro, *renumbered_blocks] if intro else renumbered_blocks
     return "\n\n".join(part for part in parts if part).strip()
@@ -286,6 +297,15 @@ def _empty_news_report(window_start: datetime, window_end: datetime, topics: lis
         "오늘 새로 보낼 만한 소식은 찾지 못했어. "
         "이미 보낸 내용과 겹치는 항목은 제외해뒀어."
     )
+
+
+def _clear_delivered_items() -> int:
+    def mutate(settings: dict) -> int:
+        count = len(settings.get("delivered_items", []))
+        settings["delivered_items"] = []
+        return count
+
+    return _update_news_settings(mutate)
 
 
 def get_news_settings() -> dict:
@@ -568,6 +588,7 @@ def _status_text(settings: dict, requester_id: int, full_list: bool = False) -> 
     if full_list:
         subscriber_lines = _subscriber_lines(settings)
         lines.append(f"- 받는 사람 수: {len(subscribers)}명")
+        lines.append(f"- 중복 기록 수: {len(settings.get('delivered_items', []))}개")
         lines.append("")
         lines.append("[받는 사람]")
         lines.extend(subscriber_lines or ["아직 없어."])
@@ -714,6 +735,35 @@ async def _handle_topic_command(
     await _send_command_feedback(message, f"…{result}.\n지금 주제: {', '.join(topics)}")
 
 
+async def _handle_history_clear_command(
+    message: discord.Message,
+    raw_text: str,
+    special_user: bool,
+) -> None:
+    action, _, confirm_text = raw_text.partition(" ")
+
+    if action not in NEWS_HISTORY_CLEAR_COMMANDS:
+        return
+
+    if not special_user:
+        await _send_command_feedback(message, "…최신 소식 중복 기록 삭제는 특별 사용자만 할 수 있어.")
+        return
+
+    if confirm_text.strip() != "확인":
+        await _send_command_feedback(
+            message,
+            "…최신 소식 중복 기록만 비우려면 `/최신 소식 중복초기화 확인`이라고 다시 입력해줘. "
+            "수신자, 주제, 발송 시간은 그대로 둘게.",
+        )
+        return
+
+    removed_count = _clear_delivered_items()
+    await _send_command_feedback(
+        message,
+        f"…응. 최신 소식 중복 기록 {removed_count}개를 비웠어. 수신자와 설정은 그대로야.",
+    )
+
+
 async def handle_news_command(
     message: discord.Message,
     user_text: str,
@@ -753,6 +803,13 @@ async def handle_news_command(
         else:
             await _send_command_feedback(message, _status_text(get_news_settings(), message.author.id, False))
         return True
+
+    if news_prefix:
+        raw_text = _strip_prefix(user_text, news_prefix)
+        action = raw_text.split(maxsplit=1)[0] if raw_text else ""
+        if action in NEWS_HISTORY_CLEAR_COMMANDS:
+            await _handle_history_clear_command(message, raw_text, special_user)
+            return True
 
     if user_text == TOPIC_COMMAND_PREFIX or user_text.startswith(f"{TOPIC_COMMAND_PREFIX} "):
         await _handle_topic_command(message, user_text, special_user)

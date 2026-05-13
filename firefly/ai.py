@@ -45,11 +45,22 @@ def _normalize_news_digest_format(text: str) -> str:
         bold_close = bold_close or ""
         return f"{indent}- {bold_open}{label}{bold_close}:"
 
-    return re.sub(
+    text = re.sub(
         rf"(?m)^(\s*)\d+\.\s*(\*\*)?({field_pattern})(\*\*)?\s*:",
         replace_field_number,
         text.strip(),
     )
+
+    item_index = 0
+
+    def replace_ordered_item(match: re.Match) -> str:
+        nonlocal item_index
+        item_index += 1
+        title = match.group(1).strip()
+        return f"[{item_index}] {title}"
+
+    text = re.sub(r"(?m)^\s*\d+\.\s+(.+)$", replace_ordered_item, text)
+    return re.sub(r"\n+(?=\[\d+\]\s+)", "\n\n", text).strip()
 
 
 async def generate_reply(
