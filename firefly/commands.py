@@ -1,7 +1,7 @@
 import discord
 
 from .affection import change_user_affection, set_user_affection
-from .ai import generate_reply, summarize_conversation
+from .ai import generate_reply, summarize_conversation, summarize_voice_recording
 from .config import DEFAULT_AFFECTION, MEMORY_FILE, SPECIAL_USER_ID, SUMMARY_DEFAULT_LIMIT
 from .embeds import (
     create_help_embed,
@@ -19,6 +19,14 @@ from .news import (
 from .polls import cancel_poll_tasks, close_poll_from_command, create_poll_from_command
 from .storage import get_user_data, save_memory, update_room_data, update_user_data
 from .text_utils import parse_last_int_arg
+from .voice import start_voice_recording, stop_voice_recording
+from .voice_records import (
+    VoiceRecordNotFound,
+    format_recording_list,
+    get_recording_path,
+    list_recordings,
+    read_transcript_entries,
+)
 
 
 def is_special_user(user_id: int) -> bool:
@@ -30,6 +38,9 @@ def matches_command(user_text: str, command: str) -> bool:
 
 
 SPECIAL_ONLY_COMMAND_PREFIXES = (
+    "/기록",
+    "/기록중지",
+    "/대화목록",
     "/메모리파일",
     "/메모리초기화",
     "/메모리파일초기화",
@@ -55,6 +66,8 @@ SPECIAL_ONLY_COMMAND_PREFIXES = (
     "/주제 설정",
     "/주제 변경",
 )
+
+SUMMARY_SCOPE_TOKENS = {"방", "단체", "채널", "room", "channel", "개인", "나", "dm", "user"}
 
 
 def is_special_only_command(user_text: str) -> bool:
@@ -111,6 +124,57 @@ async def _send_summary(
         await message.channel.send(embed=create_summary_embed(title, summary, used_count))
 
 
+def _command_arg(user_text: str, command: str) -> str:
+    return user_text.replace(command, "", 1).strip()
+
+
+def _summary_recording_filename(user_text: str) -> str | None:
+    arg = _command_arg(user_text, "/요약")
+    if not arg:
+        return None
+
+    first = arg.split()[0]
+    if first.lower() in SUMMARY_SCOPE_TOKENS or first.isdigit():
+        return None
+    return first
+
+
+async def _send_recording_list(message: discord.Message) -> None:
+    records = list_recordings()
+    await message.channel.send(format_recording_list(records))
+
+
+async def _send_recording_summary(message: discord.Message, filename: str) -> None:
+    try:
+        entries = read_transcript_entries(filename)
+    except VoiceRecordNotFound:
+        await message.channel.send("…그 이름의 통화 기록 파일을 찾지 못했어. `/대화목록`으로 파일명을 확인해줘.")
+        return
+
+    async with message.channel.typing():
+        summary, used_count = await summarize_voice_recording(entries, filename)
+        await message.channel.send(
+            embed=create_summary_embed(f"통화 기록 요약: {filename}", summary, used_count)
+        )
+
+
+async def _send_memory_or_recording_file(message: discord.Message, filename: str | None = None) -> None:
+    if not filename:
+        if not MEMORY_FILE.exists():
+            await message.channel.send("…아직 저장된 메모리 파일이 없어.")
+            return
+        await message.channel.send(file=discord.File(str(MEMORY_FILE)))
+        return
+
+    try:
+        path = get_recording_path(filename)
+    except VoiceRecordNotFound:
+        await message.channel.send("…그 이름의 통화 기록 파일을 찾지 못했어. `/대화목록`으로 파일명을 확인해줘.")
+        return
+
+    await message.channel.send(file=discord.File(str(path), filename=path.name))
+
+
 async def handle_mentioned_message(
     message: discord.Message,
     user_text: str,
@@ -126,11 +190,42 @@ async def handle_mentioned_message(
         await handle_news_command(message, user_text, client)
         return
 
-    if special_user and user_text == "/메모리파일":
-        if not MEMORY_FILE.exists():
-            await message.channel.send("…아직 저장된 메모리 파일이 없어.")
+    if matches_command(user_text, "/기록"):
+        if not special_user:
+            await message.channel.send("…통화 기록은 특별 사용자만 사용할 수 있어.")
             return
-        await message.channel.send(file=discord.File(str(MEMORY_FILE)))
+
+        _, response_text, _ = await start_voice_recording(
+            client,
+            user=message.author,
+            text_channel=message.channel,
+        )
+        await message.channel.send(response_text)
+        return
+
+    if matches_command(user_text, "/기록중지"):
+        if not special_user:
+            await message.channel.send("…통화 기록은 특별 사용자만 사용할 수 있어.")
+            return
+
+        if message.guild is None:
+            await message.channel.send("…서버 안에서만 기록을 멈출 수 있어.")
+            return
+
+        _, response_text, _ = await stop_voice_recording(message.guild.id)
+        await message.channel.send(response_text)
+        return
+
+    if matches_command(user_text, "/대화목록"):
+        if not special_user:
+            await message.channel.send("…통화 기록 목록은 특별 사용자만 볼 수 있어.")
+            return
+        await _send_recording_list(message)
+        return
+
+    if special_user and matches_command(user_text, "/메모리파일"):
+        filename = _command_arg(user_text, "/메모리파일") or None
+        await _send_memory_or_recording_file(message, filename)
         return
 
     memory_reset_command = next(
@@ -277,6 +372,14 @@ async def handle_mentioned_message(
         return
 
     if user_text == "/요약" or user_text.startswith("/요약 "):
+        recording_filename = _summary_recording_filename(user_text)
+        if recording_filename:
+            if not special_user:
+                await message.channel.send("…통화 기록 요약은 특별 사용자만 사용할 수 있어.")
+                return
+            await _send_recording_summary(message, recording_filename)
+            return
+
         await _send_summary(message, user_text, user_data, room_data)
         return
 

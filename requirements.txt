@@ -1,4 +1,9 @@
 discord.py
+discord-ext-voice-recv
+PyNaCl
+davey
 openai
 python-dotenv
 tzdata
+websockets
+audioop-lts; python_version >= "3.13"

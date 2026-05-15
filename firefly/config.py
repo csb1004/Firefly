@@ -22,19 +22,33 @@ def _resolve_project_path(value: str | Path) -> Path:
     return BASE_DIR / path
 
 
+def _resolve_data_dir() -> Path:
+    env_value = os.getenv("DATA_DIR", "").strip()
+    if env_value:
+        return _resolve_project_path(env_value)
+
+    default_data_dir = Path("/data")
+    if default_data_dir.is_absolute() and default_data_dir.exists():
+        return default_data_dir
+
+    return BASE_DIR / "data"
+
+
+def _resolve_memory_file(data_dir: Path) -> Path:
+    env_value = os.getenv("MEMORY_FILE", "").strip()
+    if env_value:
+        return _resolve_project_path(env_value)
+    return data_dir / "memory.json"
+
+
 DISCORD_BOT_TOKEN = _get_required_env("DISCORD_BOT_TOKEN")
 OPENAI_API_KEY = _get_required_env("OPENAI_API_KEY")
 
 DEFAULT_PROMPT_FILE = _resolve_project_path(os.getenv("DEFAULT_PROMPT_FILE", "prompt.txt"))
 SPECIAL_PROMPT_FILE = _resolve_project_path(os.getenv("SPECIAL_PROMPT_FILE", "prompt_special.txt"))
 
-_memory_path = Path(os.getenv("MEMORY_FILE", "/data/memory.json"))
-if not _memory_path.is_absolute():
-    MEMORY_FILE = BASE_DIR / _memory_path
-elif _memory_path.parent.exists():
-    MEMORY_FILE = _memory_path
-else:
-    MEMORY_FILE = BASE_DIR / "memory.json"
+DATA_DIR = _resolve_data_dir()
+MEMORY_FILE = _resolve_memory_file(DATA_DIR)
 
 SPECIAL_USER_ID = 393724092022390784
 SPECIAL_USER_NAME = "상범"
@@ -62,3 +76,23 @@ NEWS_DEFAULT_TOPICS = ["인공지능", "프로그래밍"]
 
 DEFAULT_MODEL = "gpt-5.3-codex"
 WEB_SEARCH_MODEL = "gpt-5.4"
+VOICE_TRANSCRIPTION_MODEL = os.getenv("VOICE_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
+VOICE_FALLBACK_TRANSCRIPTION_MODEL = os.getenv(
+    "VOICE_FALLBACK_TRANSCRIPTION_MODEL",
+    "gpt-4o-mini-transcribe",
+)
+VOICE_REALTIME_TRANSCRIPTION_URL = os.getenv(
+    "VOICE_REALTIME_TRANSCRIPTION_URL",
+    "wss://api.openai.com/v1/realtime?intent=transcription",
+)
+VOICE_SUMMARY_MODEL = os.getenv("VOICE_SUMMARY_MODEL", "gpt-4.1-mini")
+VOICE_SUMMARY_FALLBACK_MODEL = os.getenv("VOICE_SUMMARY_FALLBACK_MODEL", "gpt-4.1-mini")
+VOICE_TRANSCRIPT_LANGUAGE = os.getenv("VOICE_TRANSCRIPT_LANGUAGE", "ko")
+VOICE_RECORDINGS_DIR = DATA_DIR / "voice_records"
+VOICE_RECORDING_RETENTION_DAYS = int(os.getenv("VOICE_RECORDING_RETENTION_DAYS", "7"))
+VOICE_SUMMARY_CHUNK_CHARS = int(os.getenv("VOICE_SUMMARY_CHUNK_CHARS", "50000"))
+VOICE_TRANSCRIBER_QUEUE_SIZE = int(os.getenv("VOICE_TRANSCRIBER_QUEUE_SIZE", "250"))
+VOICE_TRANSCRIPTION_COMMIT_SECONDS = float(os.getenv("VOICE_TRANSCRIPTION_COMMIT_SECONDS", "6.0"))
+VOICE_TRANSCRIPTION_IDLE_COMMIT_SECONDS = float(os.getenv("VOICE_TRANSCRIPTION_IDLE_COMMIT_SECONDS", "2.0"))
+VOICE_TRANSCRIPTION_MIN_COMMIT_MS = int(os.getenv("VOICE_TRANSCRIPTION_MIN_COMMIT_MS", "300"))
+VOICE_FALLBACK_SESSION_MAX_SECONDS = float(os.getenv("VOICE_FALLBACK_SESSION_MAX_SECONDS", "120"))

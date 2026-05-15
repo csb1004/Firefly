@@ -2,5 +2,6 @@
 .env
 .venv
 memory.json
+data/
 __pycache__/
 *.pyc
