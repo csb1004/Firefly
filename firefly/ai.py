@@ -37,6 +37,7 @@ from .text_utils import get_current_time_text, is_command_text, load_text_file
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
 NEWS_FIELD_LABELS = ("무슨 일", "왜 중요해", "확인 링크")
+NEWS_OMITTED_FIELD_LABELS = ("왜 중요해",)
 
 
 def _is_model_not_found_error(error: APIError) -> bool:
@@ -68,6 +69,15 @@ def _normalize_news_digest_format(text: str) -> str:
         return f"[{item_index}] {title}"
 
     text = re.sub(r"(?m)^\s*\d+\.\s+(.+)$", replace_ordered_item, text)
+    omitted_pattern = "|".join(re.escape(label) for label in NEWS_OMITTED_FIELD_LABELS)
+    if omitted_pattern:
+        text = re.sub(
+            rf"(?m)^\s*-\s*(?:\*\*)?(?:{omitted_pattern})(?:\*\*)?\s*:.*(?:\n(?!\s*(?:-|\[\d+\])\s).*)*",
+            "",
+            text,
+        )
+
+    text = re.sub(r"\n{3,}", "\n\n", text)
     return re.sub(r"\n+(?=\[\d+\]\s+)", "\n\n", text).strip()
 
 
@@ -427,10 +437,11 @@ async def generate_daily_news_digest(
 {previously_sent_text}
 
 [요청]
-위 기간에 공개되거나 보도된 최신 소식 중, 관심 주제와 관련된 중요한 소식만 웹 검색으로 확인해서 정리해줘.
+위 기간에 공개되거나 보도된 최신 소식 중, 관심 주제와 관련되고 사실 확인 가능한 소식만 웹 검색으로 확인해서 정리해줘.
 각 항목에는 반드시 확인 가능한 링크를 붙여줘.
 확실한 링크와 날짜 근거가 부족하면 항목에서 제외해줘.
 이미 전달한 소식과 같은 사건, 같은 링크, 같은 발표는 제외해줘.
+중요한 이유나 해석은 쓰지 말고, 확인된 사실만 간결하게 써줘.
 """.strip()
 
     try:

@@ -874,10 +874,23 @@ def _mark_subscriber_sent(user_id: int) -> None:
 
 
 async def _send_digest_to_subscribers(
-    client: discord.Client,
     report: str,
+    recipients: list[tuple[int, discord.User | discord.Member]],
+) -> int:
+    sent_count = 0
+    for user_id, user in recipients:
+        sent = await _send_private(user, report)
+        if sent:
+            _mark_subscriber_sent(user_id)
+            sent_count += 1
+    return sent_count
+
+
+async def _resolve_news_recipients(
+    client: discord.Client,
     subscribers: dict,
-) -> None:
+) -> list[tuple[int, discord.User | discord.Member]]:
+    recipients = []
     for user_id_text in list(subscribers.keys()):
         try:
             user_id = int(user_id_text)
@@ -892,9 +905,9 @@ async def _send_digest_to_subscribers(
                 print(f"Daily news subscriber not reachable: {user_id}")
                 continue
 
-        sent = await _send_private(user, report)
-        if sent:
-            _mark_subscriber_sent(user_id)
+        recipients.append((user_id, user))
+
+    return recipients
 
 
 async def deliver_daily_news(client: discord.Client) -> bool:
@@ -906,6 +919,10 @@ async def deliver_daily_news(client: discord.Client) -> bool:
     now = _now_kst()
     window = _due_window(settings, now)
     if window is None:
+        return False
+
+    recipients = await _resolve_news_recipients(client, subscribers)
+    if not recipients:
         return False
 
     window_start, window_end = window
@@ -923,7 +940,7 @@ async def deliver_daily_news(client: discord.Client) -> bool:
     if not report:
         report = _empty_news_report(window_start, window_end, settings["topics"])
 
-    await _send_digest_to_subscribers(client, report, subscribers)
+    await _send_digest_to_subscribers(report, recipients)
     _mark_window_delivered(window_end, report)
     return True
 
