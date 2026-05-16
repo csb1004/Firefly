@@ -2,6 +2,15 @@ import discord
 
 from .affection import change_user_affection, set_user_affection
 from .ai import generate_reply, summarize_conversation, summarize_voice_recording
+from .commands_parser import (
+    SPECIAL_ONLY_COMMAND_PREFIXES,
+    SUMMARY_SCOPE_TOKENS,
+    command_arg,
+    is_special_only_command,
+    matches_command,
+    parse_summary_args,
+    summary_recording_filename,
+)
 from .config import DEFAULT_AFFECTION, MEMORY_FILE, SPECIAL_USER_ID, SUMMARY_DEFAULT_LIMIT
 from .embeds import (
     create_help_embed,
@@ -33,47 +42,6 @@ def is_special_user(user_id: int) -> bool:
     return user_id == SPECIAL_USER_ID
 
 
-def matches_command(user_text: str, command: str) -> bool:
-    return user_text == command or user_text.startswith(f"{command} ")
-
-
-SPECIAL_ONLY_COMMAND_PREFIXES = (
-    "/기록",
-    "/기록중지",
-    "/대화목록",
-    "/메모리파일",
-    "/메모리초기화",
-    "/메모리파일초기화",
-    "/유저정보",
-    "/호감도설정",
-    "/호감도증감",
-    "/투표마감",
-    "/투표",
-    "/인터넷모드",
-    "/단체모드",
-    "/방기억",
-    "/방초기화",
-    "/방상태",
-    "/최신 소식 시간",
-    "/최신 소식 목록",
-    "/최신 소식 상태",
-    "/최신 소식 중복초기화",
-    "/최신 소식 중복삭제",
-    "/최신 소식 기록초기화",
-    "/최신 소식 중복기록초기화",
-    "/주제 추가",
-    "/주제 제거",
-    "/주제 설정",
-    "/주제 변경",
-)
-
-SUMMARY_SCOPE_TOKENS = {"방", "단체", "채널", "room", "channel", "개인", "나", "dm", "user"}
-
-
-def is_special_only_command(user_text: str) -> bool:
-    return any(matches_command(user_text, command) for command in SPECIAL_ONLY_COMMAND_PREFIXES)
-
-
 def get_target_mentions(
     message: discord.Message,
     client_user: discord.ClientUser | discord.User | None,
@@ -84,20 +52,7 @@ def get_target_mentions(
 
 
 def _parse_summary_args(user_text: str, room_data: dict) -> tuple[str, int]:
-    args = user_text.replace("/요약", "", 1).strip().split()
-    scope = "room" if room_data.get("group_mode") else "user"
-    limit = SUMMARY_DEFAULT_LIMIT
-
-    for token in args:
-        normalized = token.lower()
-        if normalized in {"방", "단체", "채널", "room", "channel"}:
-            scope = "room"
-        elif normalized in {"개인", "나", "dm", "user"}:
-            scope = "user"
-        elif normalized.isdigit():
-            limit = max(1, min(80, int(normalized)))
-
-    return scope, limit
+    return parse_summary_args(user_text, room_data)
 
 
 async def _send_summary(
@@ -125,18 +80,11 @@ async def _send_summary(
 
 
 def _command_arg(user_text: str, command: str) -> str:
-    return user_text.replace(command, "", 1).strip()
+    return command_arg(user_text, command)
 
 
 def _summary_recording_filename(user_text: str) -> str | None:
-    arg = _command_arg(user_text, "/요약")
-    if not arg:
-        return None
-
-    first = arg.split()[0]
-    if first.lower() in SUMMARY_SCOPE_TOKENS or first.isdigit():
-        return None
-    return first
+    return summary_recording_filename(user_text)
 
 
 async def _send_recording_list(message: discord.Message) -> None:
