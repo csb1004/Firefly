@@ -7,3 +7,4 @@ python-dotenv
 tzdata
 websockets
 audioop-lts; python_version >= "3.13"
+pytest
