@@ -18,6 +18,19 @@ mandatory Superpowers workflow.
   continue without the Superpowers workflow and use the matching Compound
   Engineering skill instead.
 
+## Installed Agent Skills
+
+The `.agents/skills/` directory contains shared local skills installed for this
+project. Treat these files as executable agent instructions, not application
+runtime code.
+
+- `caveman`: optional compressed response style. Use level `full` when the user
+  asks for normal caveman mode. Do not apply it to code, commit messages, PR
+  text, security warnings, destructive confirmations, or places where terse
+  wording could make ordering ambiguous.
+- Keep installed skill changes separate from Firefly runtime refactors when
+  reviewing diffs; they affect agent behavior, not Discord bot behavior.
+
 <!-- BEGIN COMPOUND CODEX TOOL MAP -->
 ## Compound Codex Tool Mapping (Claude Compatibility)
 

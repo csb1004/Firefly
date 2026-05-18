@@ -1,7 +1,10 @@
-# 환경변수 파일 제외
 .env
+.env.*
+!.env.example
 .venv
 memory.json
 data/
 __pycache__/
 *.pyc
+.pytest_cache/
+.gstack/
