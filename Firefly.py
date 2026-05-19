@@ -241,6 +241,11 @@ async def bot_status_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/봇상태", ephemeral=True)
 
 
+@tree.command(name="관리상태", description="메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 특별 사용자 전용.")
+async def admin_status_slash(interaction: discord.Interaction):
+    await _run_text_command_slash(interaction, "/관리상태", ephemeral=True)
+
+
 @tree.command(name="요약", description="최근 개인/방 대화 또는 통화 기록 파일을 요약해요.")
 @app_commands.rename(target="대상", limit="개수")
 @app_commands.describe(

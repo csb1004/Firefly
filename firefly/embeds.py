@@ -2,26 +2,31 @@ import discord
 
 from .affection import get_affection_stage_label
 from .config import DEFAULT_AFFECTION
-from .polls import POLL_COMMAND_EXAMPLE, POLL_COMMAND_FORMAT, POLL_DEADLINE_HELP
 from .text_utils import clamp_text, is_command_text
+
+
+POLL_HELP_TEXT = (
+    "`/투표 제목 | 선택지개수 | 선택지1 | 선택지2 | 마감`\n"
+    "마감 예: `10분`, `2시간`, `23:30`, `2026-05-07 23:30`"
+)
 
 
 def create_help_embed() -> discord.Embed:
     embed = discord.Embed(
         title="반디 봇 도움말",
-        description="명령어 목록과 사용 방법이야.",
+        description="사용 가능한 명령어 목록이야.",
         color=0x00FFFF,
     )
 
     fields = [
         ("/도움말", "명령어 목록과 사용 방법을 보여줘."),
-        ("/호감도", "현재 너에 대한 호감도를 확인해."),
-        ("/초기화", "최근 대화 기억을 비워."),
-        ("/호칭 [이름]", "너를 부를 호칭을 바꿔.\n예: `/호칭 민서야`"),
-        ("/요약 [개인/방] [개수]", "최근 대화를 요약해. 단체 모드에서는 방 대화도 요약할 수 있어."),
-        ("/최신 소식 [받기/그만/상태]", "기술 소식 개인 메시지 구독을 관리해."),
+        ("/호감도", "현재 너에 대한 반디의 호감도를 확인해."),
+        ("/초기화", "최근 개인 대화 기억을 비워."),
+        ("/호칭 [이름]", "반디가 너를 부를 호칭을 바꿔."),
+        ("/요약 [개인/방] [개수]", "최근 개인 대화나 방 대화를 요약해."),
+        ("/최신소식 [받기/그만/상태]", "기술 소식 개인 메시지 구독을 관리해."),
         ("/주제 목록", "최신 소식 주제를 확인해."),
-        ("그 긴거 해줘", "샘의 긴 대사를 그대로 출력해."),
+        ("그 긴거 해줘", "등록된 긴 문장을 그대로 출력해."),
     ]
 
     for name, value in fields:
@@ -34,46 +39,52 @@ def create_help_embed() -> discord.Embed:
 def create_special_help_embed() -> discord.Embed:
     embed = discord.Embed(
         title="반디 봇 도움말",
-        description="…너만 볼 수 있는 기능들도 같이 적어둘게.",
+        description="특별 사용자 전용 명령어까지 포함한 목록이야.",
         color=0x00FFFF,
     )
 
     fields = [
-        ("/도움말", "명령어 목록과 사용 방법을 보여줘."),
-        ("/기본", "`/호감도`, `/초기화`, `/호칭 [이름]`, `그 긴거 해줘`"),
         (
-            "/투표 [생성/마감]",
-            f"`/투표 제목 | 항목수=개수 | 항목... | 마감`, `/투표마감`\n"
-            f"예: {POLL_COMMAND_EXAMPLE}\n{POLL_DEADLINE_HELP}",
-        ),
-        ("/요약 [개인/방/파일이름]", "최근 개인/방 대화 또는 저장된 통화 기록 파일을 요약해."),
-        ("/통화 기록", "`/기록`, `/기록중지`, `/대화목록`, `/메모리파일 [파일이름]`"),
-        (
-            "/최신 소식 [받기/그만/시간/목록/상태]",
-            "기술 소식 수신자와 발송 시간을 관리해. `@유저`를 붙이면 다른 사람도 관리 가능해.",
+            "기본",
+            "`/도움말`, `/호감도`, `/초기화`, `/호칭 [이름]`, `/요약 [개인/방] [개수]`",
         ),
         (
-            "/최신 소식 [중복초기화/중복삭제/기록초기화]",
-            "이미 보낸 소식 기록을 정리해. 초기화류는 뒤에 `확인`을 붙여.",
+            "통화 기록",
+            "`/기록`, `/기록중지`, `/대화목록`, `/요약 [파일명]`\n"
+            "`/기록검색 [파일명] 질문`, `/녹음검색 [파일명] 질문`",
         ),
-        ("/주제 [목록/추가/제거/설정]", "최신 소식 주제를 관리해. 예: `/주제 추가 강화학습`"),
-        ("/유저 관리", "`/유저정보 @유저`, `/호감도설정 @유저 [숫자]`, `/호감도증감 @유저 [숫자]`"),
         (
-            "/메모리 [파일/초기화]",
-            "`/메모리파일 [파일이름]`, `/메모리초기화 확인`, `/메모리파일초기화 확인`",
+            "투표",
+            f"`/투표`, `/투표마감 [메시지ID]`\n{POLL_HELP_TEXT}",
         ),
-        ("/방 관리", "`/인터넷모드 [on/off]`, `/단체모드 [on/off]`, `/방상태`, `/방기억`, `/방초기화`"),
+        (
+            "뉴스",
+            "`/최신소식 받기`, `/최신소식 그만`, `/최신소식 상태`, `/최신소식 목록`, `/최신소식 시간 [HH:MM]`\n"
+            "`/최신소식 중복초기화 확인`, `/최신소식 중복삭제 확인`, `/최신소식 기록초기화 확인`, `/최신소식 중복기록초기화 확인`",
+        ),
+        (
+            "뉴스 주제",
+            "`/주제 목록`, `/주제 추가 [주제]`, `/주제 제거 [주제]`, `/주제 설정 [목록]`, `/주제 변경 [목록]`",
+        ),
+        (
+            "유저 관리",
+            "`/유저정보 @유저`, `/호감도설정 @유저 [숫자]`, `/호감도증감 @유저 [숫자]`",
+        ),
+        (
+            "메모리",
+            "`/메모리파일 [파일명]`, `/메모리초기화 확인`, `/메모리파일초기화 확인`",
+        ),
+        (
+            "방/봇 관리",
+            "`/인터넷모드 [on/off]`, `/단체모드 [on/off]`, `/방상태`, `/방기억`, `/방초기화`\n"
+            "`/봇상태`, `/관리상태`",
+        ),
     ]
-
-    fields.append((
-        "/기록검색 [파일명] 질문",
-        "저장된 통화 기록에서 필요한 발언을 검색해서 요약해. `/녹음검색`도 같은 기능이야.",
-    ))
 
     for name, value in fields:
         embed.add_field(name=name, value=value, inline=False)
 
-    embed.set_footer(text="…다른 사람에겐 비밀이야.")
+    embed.set_footer(text="다른 사람에게는 비밀이어야 해.")
     return embed
 
 
@@ -93,7 +104,7 @@ def create_room_history_embed(message: discord.Message, room_data: dict) -> disc
 
     lines = []
     for i, item in enumerate(history[-8:], start=1):
-        speaker = item.get("speaker", "누군가")
+        speaker = item.get("speaker", "알 수 없음")
         role = item.get("role", "unknown")
         content = item.get("content", "").replace("```", "'''").strip()
         nickname = item.get("nickname")
@@ -144,7 +155,7 @@ def create_user_info_embed(target_user: discord.User | discord.Member, user_data
     embed.add_field(name="이름", value=str(name), inline=False)
     embed.add_field(name="호칭", value=str(nickname), inline=False)
     embed.add_field(name="호감도", value=f"{affection} ({stage_text})", inline=False)
-    embed.add_field(name="마지막 접속", value=last_seen, inline=False)
+    embed.add_field(name="마지막 대화", value=last_seen, inline=False)
 
     history_lines = []
     for i, item in enumerate(history[-5:], start=1):
@@ -166,7 +177,7 @@ def create_user_info_embed(target_user: discord.User | discord.Member, user_data
             delta_text = ""
             if delta is not None:
                 sign = "+" if delta >= 0 else ""
-                delta_text = f" (호감도: {before} → {after}, {sign}{delta})"
+                delta_text = f" (호감도 {before} -> {after}, {sign}{delta})"
 
             history_lines.append(f"{i}. [반디] {content}{delta_text}")
         else:
