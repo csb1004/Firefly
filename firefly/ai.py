@@ -24,6 +24,7 @@ from .prompts import (
     build_room_model_history,
     build_system_prompt,
 )
+from .relationship_events import RELATIONSHIP_EVENTS_KEY, build_relationship_event_context
 from .storage import (
     add_history,
     add_room_history,
@@ -33,6 +34,7 @@ from .storage import (
     update_user_data,
 )
 from .text_utils import get_current_time_text, is_command_text, load_text_file
+from .voice_search import format_voice_search_context
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -101,7 +103,11 @@ async def generate_reply(
     after_affection = int(user_data.get("affection", DEFAULT_AFFECTION))
     applied_delta = after_affection - before_affection
 
+    relationship_context = build_relationship_event_context(user_data, user_message)
+    relationship_events = dict(user_data.get(RELATIONSHIP_EVENTS_KEY, {}))
     system_prompt = build_system_prompt(user_id, user_data)
+    if relationship_context:
+        system_prompt = f"{system_prompt}\n\n{relationship_context}"
 
     if group_mode:
         group_context = build_group_context_prompt(
@@ -147,6 +153,8 @@ async def generate_reply(
         reply = response.output_text.strip()
 
         latest_user_data = get_user_data(user_id, display_name)
+        if relationship_events:
+            latest_user_data[RELATIONSHIP_EVENTS_KEY] = relationship_events
         if user_id == SPECIAL_USER_ID:
             latest_user_data["affection"] = 1004
         else:
@@ -410,6 +418,64 @@ async def summarize_voice_recording(
     except Exception as e:
         print("Voice summary error:", e)
         return "…미안. 지금은 통화 요약을 만들 수 없어.", len(lines)
+
+
+async def summarize_voice_search(
+    entries: list[dict],
+    recording_name: str,
+    query: str,
+    *,
+    matched_count: int = 0,
+) -> tuple[str, int]:
+    context = format_voice_search_context(entries)
+    if not context:
+        return "해당 통화 기록에서 살펴볼 전사 내용이 아직 없어.", 0
+
+    system_prompt = (
+        "너는 디스코드 통화 전사에서 사용자의 질문과 관련된 발언만 찾아 답하는 한국어 기록 검색 도우미야. "
+        "전사에 근거가 있는 내용만 말하고, 누가 말했는지와 맥락을 짧게 정리해. "
+        "근거가 약하면 추측하지 말고 기록상으로는 확실하지 않다고 말해."
+    )
+    user_prompt = f"""
+[통화 기록 파일]
+{recording_name}
+
+[검색 질문]
+{query}
+
+[직접 키워드 매칭 수]
+{matched_count}
+
+[관련 전사 발췌]
+{context}
+
+[출력 형식]
+- 답: 질문에 대한 결론을 1~3문장으로
+- 근거: 누가 어떤 취지로 말했는지 bullet로
+- 확인 필요: 기록만으로 부족한 부분이 있으면 짧게
+""".strip()
+
+    try:
+        response = await asyncio.to_thread(
+            client_openai.responses.create,
+            model=VOICE_SUMMARY_MODEL,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        return response.output_text.strip(), len(entries)
+    except RateLimitError as e:
+        error_text = str(e)
+        if "insufficient_quota" in error_text:
+            return "OpenAI API 사용 한도가 부족해서 통화 검색 요약을 만들 수 없어.", len(entries)
+        return "요청이 잠시 몰린 것 같아. 조금 뒤에 다시 시도해줘.", len(entries)
+    except APIError as e:
+        print("Voice search APIError:", e)
+        return "통화 검색 요약 중 OpenAI 연결이 불안정했어.", len(entries)
+    except Exception as e:
+        print("Voice search error:", e)
+        return "지금은 통화 검색 요약을 만들 수 없어.", len(entries)
 
 
 async def generate_daily_news_digest(

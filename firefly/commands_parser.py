@@ -1,3 +1,4 @@
+from .command_registry import registered_special_only_prefixes
 from .config import SUMMARY_DEFAULT_LIMIT
 
 
@@ -34,6 +35,7 @@ SPECIAL_ONLY_COMMAND_PREFIXES = (
     "/주제 설정",
     "/주제 변경",
 )
+SPECIAL_ONLY_COMMAND_PREFIXES = SPECIAL_ONLY_COMMAND_PREFIXES + registered_special_only_prefixes()
 
 ROOM_SUMMARY_SCOPE_TOKENS = {"방", "단체", "채널", "room", "channel"}
 USER_SUMMARY_SCOPE_TOKENS = {"개인", "나", "dm", "user"}

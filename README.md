@@ -55,6 +55,11 @@ Optional:
 - Voice recordings are stored under `data/voice_records/` by default.
 - The `/메모리파일` command can send the current memory file or a saved voice transcript file to the special user.
 
+## Added Commands
+
+- `/기록검색 [파일명] 질문`: special-user-only search over saved voice transcripts. If the filename is omitted, the bot searches recent recordings.
+- `/봇상태`: special-user-only runtime status for memory, rooms, polls, news, and voice recordings.
+
 ## Deployment
 
 `railpack.json` starts the service with:

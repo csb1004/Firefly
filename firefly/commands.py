@@ -1,7 +1,9 @@
 import discord
 
 from .affection import change_user_affection, set_user_affection
-from .ai import generate_reply, summarize_conversation, summarize_voice_recording
+from .admin_status import build_admin_status_text
+from .ai import generate_reply, summarize_conversation, summarize_voice_recording, summarize_voice_search
+from .command_registry import ADMIN_STATUS_COMMAND, VOICE_SEARCH_COMMAND, matched_alias
 from .commands_parser import (
     SPECIAL_ONLY_COMMAND_PREFIXES,
     SUMMARY_SCOPE_TOKENS,
@@ -26,8 +28,9 @@ from .news import (
     start_daily_news_task,
 )
 from .polls import cancel_poll_tasks, close_poll_from_command, create_poll_from_command
-from .storage import get_user_data, save_memory, update_room_data, update_user_data
+from .storage import get_user_data, load_memory, save_memory, update_room_data, update_user_data
 from .text_utils import parse_last_int_arg
+from .voice_search import load_voice_search_selection, parse_voice_search_args
 from .voice import start_voice_recording, stop_voice_recording
 from .voice_records import (
     VoiceRecordNotFound,
@@ -105,6 +108,40 @@ async def _send_recording_summary(message: discord.Message, filename: str) -> No
             embed=create_summary_embed(f"통화 기록 요약: {filename}", summary, used_count)
         )
 
+async def _send_voice_search(message: discord.Message, raw_text: str) -> None:
+    request = parse_voice_search_args(raw_text)
+    if not request.query:
+        await message.channel.send("사용법: `/기록검색 [파일명] 찾고 싶은 말이나 질문`")
+        return
+
+    try:
+        selection = load_voice_search_selection(request)
+    except VoiceRecordNotFound:
+        await message.channel.send("검색할 수 있는 통화 기록을 찾지 못했어. 통화 기록 목록에서 파일명을 먼저 확인해줘.")
+        return
+
+    async with message.channel.typing():
+        summary, used_count = await summarize_voice_search(
+            selection.entries,
+            selection.filename,
+            request.query,
+            matched_count=selection.matched_count,
+        )
+        await message.channel.send(
+            embed=create_summary_embed(f"통화 기록 검색: {selection.filename}", summary, used_count)
+        )
+
+
+async def _send_admin_status(message: discord.Message, room_key: str, room_data: dict) -> None:
+    guild_id = message.guild.id if message.guild else None
+    status_text = build_admin_status_text(
+        load_memory(),
+        current_room_key=room_key,
+        current_room_data=room_data,
+        guild_id=guild_id,
+    )
+    await message.channel.send(f"```text\n{status_text}\n```")
+
 
 async def _send_memory_or_recording_file(message: discord.Message, filename: str | None = None) -> None:
     if not filename:
@@ -133,6 +170,22 @@ async def handle_mentioned_message(
 ) -> None:
     author_id = message.author.id
     special_user = is_special_user(author_id)
+
+    voice_search_alias = matched_alias(user_text, VOICE_SEARCH_COMMAND.aliases)
+    if voice_search_alias:
+        if not special_user:
+            await message.channel.send("그 명령어는 특별 사용자만 사용할 수 있어.")
+            return
+        await _send_voice_search(message, _command_arg(user_text, voice_search_alias))
+        return
+
+    admin_status_alias = matched_alias(user_text, ADMIN_STATUS_COMMAND.aliases)
+    if admin_status_alias:
+        if not special_user:
+            await message.channel.send("그 명령어는 특별 사용자만 사용할 수 있어.")
+            return
+        await _send_admin_status(message, room_key, room_data)
+        return
 
     if is_news_command_text(user_text):
         await handle_news_command(message, user_text, client)

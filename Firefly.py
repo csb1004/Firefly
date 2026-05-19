@@ -18,6 +18,7 @@ from firefly.storage import (
 from firefly.text_utils import clean_discord_content, is_command_text
 from firefly.voice import handle_bot_voice_disconnect, start_voice_recording, stop_voice_recording
 from firefly.voice_records import (
+    VoiceRecordNotFound,
     format_recording_list,
     get_recording_path,
     list_recordings,
@@ -219,6 +220,18 @@ async def recording_list_slash(interaction: discord.Interaction):
 
     records = list_recordings()
     await interaction.response.send_message(format_recording_list(records), ephemeral=True)
+
+
+@tree.command(name="기록검색", description="저장된 통화 기록에서 질문이나 키워드로 필요한 내용을 찾아요.")
+@app_commands.rename(query="질문")
+@app_commands.describe(query="예: 누가 뭘 먹기로 했는지 알려줘")
+async def recording_search_slash(interaction: discord.Interaction, query: str):
+    await _run_text_command_slash(interaction, f"/기록검색 {query}", ephemeral=True)
+
+
+@tree.command(name="봇상태", description="메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 특별 사용자 전용.")
+async def bot_status_slash(interaction: discord.Interaction):
+    await _run_text_command_slash(interaction, "/봇상태", ephemeral=True)
 
 
 @tree.command(name="요약", description="최근 개인/방 대화 또는 통화 기록 파일을 요약해요.")
