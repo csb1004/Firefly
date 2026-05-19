@@ -229,6 +229,13 @@ async def recording_search_slash(interaction: discord.Interaction, query: str):
     await _run_text_command_slash(interaction, f"/기록검색 {query}", ephemeral=True)
 
 
+@tree.command(name="녹음검색", description="저장된 통화 기록에서 질문이나 키워드로 필요한 내용을 찾아요.")
+@app_commands.rename(query="질문")
+@app_commands.describe(query="예: 어떤 사람이 한 말 찾아줘")
+async def voice_search_slash(interaction: discord.Interaction, query: str):
+    await _run_text_command_slash(interaction, f"/녹음검색 {query}", ephemeral=True)
+
+
 @tree.command(name="봇상태", description="메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 특별 사용자 전용.")
 async def bot_status_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/봇상태", ephemeral=True)

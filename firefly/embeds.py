@@ -65,6 +65,11 @@ def create_special_help_embed() -> discord.Embed:
         ("/방 관리", "`/인터넷모드 [on/off]`, `/단체모드 [on/off]`, `/방상태`, `/방기억`, `/방초기화`"),
     ]
 
+    fields.append((
+        "/기록검색 [파일명] 질문",
+        "저장된 통화 기록에서 필요한 발언을 검색해서 요약해. `/녹음검색`도 같은 기능이야.",
+    ))
+
     for name, value in fields:
         embed.add_field(name=name, value=value, inline=False)
 
