@@ -80,6 +80,10 @@ OPENAI_API_KEY = _get_required_env("OPENAI_API_KEY")
 
 DEFAULT_PROMPT_FILE = _resolve_project_path(os.getenv("DEFAULT_PROMPT_FILE", "prompt.txt"))
 SPECIAL_PROMPT_FILE = _resolve_project_path(os.getenv("SPECIAL_PROMPT_FILE", "prompt_special.txt"))
+COMMAND_GUIDE_FILE = _resolve_project_path(os.getenv("COMMAND_GUIDE_FILE", "prompt_commands_general.txt"))
+SPECIAL_COMMAND_GUIDE_FILE = _resolve_project_path(
+    os.getenv("SPECIAL_COMMAND_GUIDE_FILE", "prompt_commands_special.txt")
+)
 
 DATA_DIR = _resolve_data_dir()
 MEMORY_FILE = _resolve_memory_file(DATA_DIR)

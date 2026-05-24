@@ -61,6 +61,7 @@ def test_build_group_context_prompt_includes_current_user_and_recent_participant
 
 def test_build_system_prompt_uses_base_prompt_user_state_and_time(monkeypatch):
     monkeypatch.setattr(prompts, "get_base_prompt", lambda user_id: f"base prompt for {user_id}")
+    monkeypatch.setattr(prompts, "load_text_file", lambda path: "general command guide")
     monkeypatch.setattr(prompts, "get_current_time_text", lambda: "2026-05-16 12:00:00")
 
     prompt = prompts.build_system_prompt(
@@ -74,4 +75,33 @@ def test_build_system_prompt_uses_base_prompt_user_state_and_time(monkeypatch):
     assert "50" in prompt
     assert "2026-05-16 12:00:00" in prompt
     assert "yesterday" in prompt
+    assert "general command guide" in prompt
+
+
+def test_build_system_prompt_adds_special_command_guide_for_special_user(monkeypatch):
+    monkeypatch.setattr(prompts, "get_base_prompt", lambda user_id: "base prompt")
+    monkeypatch.setattr(prompts, "get_current_time_text", lambda: "2026-05-16 12:00:00")
+
+    def fake_load_text_file(path):
+        if path == prompts.COMMAND_GUIDE_FILE:
+            return "general command guide"
+        if path == prompts.SPECIAL_COMMAND_GUIDE_FILE:
+            return "special command guide"
+        return "unknown guide"
+
+    monkeypatch.setattr(prompts, "load_text_file", fake_load_text_file)
+
+    regular_prompt = prompts.build_system_prompt(
+        123,
+        {"name": "Alice", "nickname": "Al", "affection": 50},
+    )
+    special_prompt = prompts.build_system_prompt(
+        prompts.SPECIAL_USER_ID,
+        {"name": "Owner", "nickname": "Owner", "affection": 1004},
+    )
+
+    assert "general command guide" in regular_prompt
+    assert "special command guide" not in regular_prompt
+    assert "general command guide" in special_prompt
+    assert "special command guide" in special_prompt
 

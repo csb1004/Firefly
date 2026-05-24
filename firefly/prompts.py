@@ -1,11 +1,13 @@
 from .affection import get_affection_stage_text
 from .config import (
+    COMMAND_GUIDE_FILE,
     DEFAULT_AFFECTION,
     MAX_MODEL_HISTORY,
     MAX_ROOM_MODEL_HISTORY,
+    SPECIAL_COMMAND_GUIDE_FILE,
     SPECIAL_USER_ID,
 )
-from .text_utils import get_base_prompt, get_current_time_text, is_command_text
+from .text_utils import get_base_prompt, get_current_time_text, is_command_text, load_text_file
 
 
 def build_group_context_prompt(
@@ -126,6 +128,10 @@ def build_system_prompt(user_id: int, user_data: dict) -> str:
     current_time_text = get_current_time_text()
     last_seen = user_data.get("last_seen", "없음")
     is_special_user = user_id == SPECIAL_USER_ID
+    command_guides = [load_text_file(COMMAND_GUIDE_FILE)]
+    if is_special_user:
+        command_guides.append(load_text_file(SPECIAL_COMMAND_GUIDE_FILE))
+    command_guide = "\n\n".join(command_guides)
     affection_text = get_affection_stage_text(affection, is_special_user)
 
     return f"""
@@ -161,4 +167,6 @@ def build_system_prompt(user_id: int, user_data: dict) -> str:
 - 이전에 했던 말과 감정을 가볍게 기억하는 것처럼 자연스럽게 반응한다.
 - 단, 모든 내용을 장황하게 되풀이하지 않는다.
 - 단체 모드에서는 각 사용자의 이름, 호칭, 호감도를 참고해서 사람마다 다른 거리감으로 반응할 수 있다.
+
+{command_guide}
 """.strip()

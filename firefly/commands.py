@@ -90,6 +90,54 @@ def _summary_recording_filename(user_text: str) -> str | None:
     return summary_recording_filename(user_text)
 
 
+LATEST_RECORDING_TOKENS = {"최근", "마지막", "latest", "last"}
+
+
+def _resolve_recording_summary_filename(filename: str) -> str | None:
+    if filename.strip().lower() not in LATEST_RECORDING_TOKENS:
+        return filename
+
+    records = list_recordings()
+    if not records:
+        return None
+    return str(records[0].get("filename") or "") or None
+
+
+def _extract_auto_command(reply: str) -> str | None:
+    lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
+    if len(lines) != 1:
+        return None
+
+    command = lines[0]
+    if not command.startswith("/") or command == "/":
+        return None
+    return command[:1900]
+
+
+async def _run_auto_command_from_reply(
+    *,
+    reply: str,
+    message: discord.Message,
+    user_data: dict,
+    room_key: str,
+    room_data: dict,
+    client: discord.Client,
+) -> bool:
+    auto_command = _extract_auto_command(reply)
+    if not auto_command:
+        return False
+
+    await handle_mentioned_message(
+        message=message,
+        user_text=auto_command,
+        user_data=user_data,
+        room_key=room_key,
+        room_data=room_data,
+        client=client,
+    )
+    return True
+
+
 async def _send_recording_list(message: discord.Message) -> None:
     records = list_recordings()
     await message.channel.send(format_recording_list(records))
@@ -378,7 +426,11 @@ async def handle_mentioned_message(
             if not special_user:
                 await message.channel.send("…통화 기록 요약은 특별 사용자만 사용할 수 있어.")
                 return
-            await _send_recording_summary(message, recording_filename)
+            resolved_filename = _resolve_recording_summary_filename(recording_filename)
+            if not resolved_filename:
+                await message.channel.send("…요약할 통화 기록이 없어. 먼저 `/대화목록`으로 확인해줘.")
+                return
+            await _send_recording_summary(message, resolved_filename)
             return
 
         await _send_summary(message, user_text, user_data, room_data)
@@ -454,4 +506,15 @@ async def handle_mentioned_message(
             display_name=display_name,
             room_key=room_key,
         )
-        await message.channel.send(reply[:1900])
+
+    if await _run_auto_command_from_reply(
+        reply=reply,
+        message=message,
+        user_data=user_data,
+        room_key=room_key,
+        room_data=room_data,
+        client=client,
+    ):
+        return
+
+    await message.channel.send(reply[:1900])
