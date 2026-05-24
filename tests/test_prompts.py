@@ -105,3 +105,53 @@ def test_build_system_prompt_adds_special_command_guide_for_special_user(monkeyp
     assert "general command guide" in special_prompt
     assert "special command guide" in special_prompt
 
+
+def test_special_command_guide_describes_poll_placeholders_before_examples():
+    guide = prompts.load_text_file(prompts.SPECIAL_COMMAND_GUIDE_FILE)
+
+    poll_section_start = guide.index("[투표 명령어 형식]")
+    variable_section_start = guide.index("[투표 명령어 변수]")
+    example_section_start = guide.index("[투표 명령어 예시]")
+
+    assert poll_section_start < variable_section_start < example_section_start
+    assert "/투표 {제목} | 항목수={항목수} | {항목1} | {항목2}" in guide
+    assert "{항목수}는 실제로 출력한 투표 항목의 개수와 반드시 같아야 한다." in guide
+    assert "사용자가 \"3개 정도 골라서\"라고 하면 {항목수}=3으로 쓰고 {항목1}, {항목2}, {항목3}을 모두 채운다." in guide
+
+
+def test_general_command_guide_uses_placeholder_sections_for_common_commands():
+    guide = prompts.load_text_file(prompts.COMMAND_GUIDE_FILE)
+
+    format_start = guide.index("[일반 명령어 형식]")
+    variable_start = guide.index("[일반 명령어 변수]")
+    example_start = guide.index("[일반 명령어 예시]")
+
+    assert format_start < variable_start < example_start
+    assert "/호칭 {호칭}" in guide
+    assert "/요약 {범위} {개수}" in guide
+    assert "/최신소식 {동작}" in guide
+    assert "/주제 목록" in guide
+    assert "{범위}는 `개인` 또는 `방` 중 하나다." in guide
+    assert "{개수}는 생략할 수 있는 숫자이며, 사용자가 말한 요약할 최근 메시지 수다." in guide
+    assert "반디 자신의 이름이나 봇 이름 변경 요청에는 `/호칭`을 출력하지 않는다." in guide
+
+
+def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands():
+    guide = prompts.load_text_file(prompts.SPECIAL_COMMAND_GUIDE_FILE)
+
+    format_start = guide.index("[특별 명령어 형식]")
+    variable_start = guide.index("[특별 명령어 변수]")
+    poll_start = guide.index("[투표 명령어 형식]")
+
+    assert format_start < variable_start < poll_start
+    assert "/요약 {파일명}" in guide
+    assert "/녹음검색 {파일명} {질문}" in guide
+    assert "/투표마감 {메시지ID}" in guide
+    assert "/인터넷모드 {상태}" in guide
+    assert "/호감도설정 {유저멘션} {숫자}" in guide
+    assert "/최신소식 시간 {시간}" in guide
+    assert "/주제 설정 {주제목록}" in guide
+    assert "{상태}는 `on` 또는 `off`만 사용한다." in guide
+    assert "{파일명}은 사용자가 직접 말한 파일명이나 `최근` 중 하나다." in guide
+    assert "{주제목록}은 쉼표로 구분한 주제 목록이다." in guide
+
