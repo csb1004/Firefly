@@ -88,6 +88,8 @@ async def generate_reply(
     user_id: int,
     display_name: str,
     room_key: str,
+    *,
+    extra_context: str | None = None,
 ) -> str:
     if user_message.strip() == "그 긴거 해줘":
         return LONG_SAM_LINE
@@ -118,6 +120,19 @@ async def generate_reply(
         )
         system_prompt = f"{system_prompt}\n\n{group_context}"
 
+    model_user_message = user_message
+    if extra_context:
+        model_user_message = f"""
+[사용자 요청]
+{user_message}
+
+[먼저 실행한 명령어 결과]
+{extra_context}
+
+[응답 지침]
+명령어 결과를 사실로 사용해서 사용자 요청에 자연스럽게 답해.
+""".strip()
+
     input_messages = [{"role": "system", "content": system_prompt}]
 
     if group_mode:
@@ -127,14 +142,14 @@ async def generate_reply(
             "content": (
                 f"[이름={display_name}, "
                 f"호칭={user_data.get('nickname')}, "
-                f"호감도={user_data.get('affection')}] {user_message}"
+                f"호감도={user_data.get('affection')}] {model_user_message}"
             ),
         })
     else:
         input_messages.extend(build_model_history(user_data.get("history", [])))
         input_messages.append({
             "role": "user",
-            "content": user_message,
+            "content": model_user_message,
         })
 
     try:

@@ -16,6 +16,7 @@ from .commands_parser import (
 from .config import DEFAULT_AFFECTION, MEMORY_FILE, SPECIAL_USER_ID, SUMMARY_DEFAULT_LIMIT
 from .embeds import (
     create_help_embed,
+    create_profile_embed,
     create_room_history_embed,
     create_special_help_embed,
     create_summary_embed,
@@ -30,6 +31,16 @@ from .news import (
 from .polls import cancel_poll_tasks, close_poll_from_command, create_poll_from_command
 from .storage import get_user_data, load_memory, save_memory, update_room_data, update_user_data
 from .text_utils import parse_last_int_arg
+from .utility_commands import (
+    CommandUsageError,
+    format_dice_result,
+    format_team_split_result,
+    parse_command_adapter_args,
+    parse_dice_args,
+    parse_team_split_args,
+    roll_dice,
+    split_members_into_teams,
+)
 from .voice_search import load_voice_search_selection, parse_voice_search_args
 from .voice import start_voice_recording, stop_voice_recording
 from .voice_records import (
@@ -38,6 +49,7 @@ from .voice_records import (
     get_recording_path,
     list_recordings,
     read_transcript_entries,
+    resolve_recording_reference,
 )
 
 
@@ -91,16 +103,114 @@ def _summary_recording_filename(user_text: str) -> str | None:
 
 
 LATEST_RECORDING_TOKENS = {"최근", "마지막", "latest", "last"}
+ADAPTER_BLOCKED_COMMAND_PREFIXES = (
+    "/실행",
+    "/명령답변",
+    "/초기화",
+    "/메모리초기화",
+    "/메모리파일초기화",
+    "/방초기화",
+)
 
 
 def _resolve_recording_summary_filename(filename: str) -> str | None:
     if filename.strip().lower() not in LATEST_RECORDING_TOKENS:
-        return filename
+        try:
+            return resolve_recording_reference(filename, records=list_recordings())
+        except VoiceRecordNotFound:
+            return filename
 
     records = list_recordings()
     if not records:
         return None
     return str(records[0].get("filename") or "") or None
+
+
+class _NoopTyping:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+
+def _embed_to_text(embed: discord.Embed) -> str:
+    parts = []
+    if embed.title:
+        parts.append(str(embed.title))
+    if embed.description:
+        parts.append(str(embed.description))
+    for field in embed.fields:
+        parts.append(f"{field.name}: {field.value}")
+    return "\n".join(parts).strip()
+
+
+def _send_payload_to_text(args: tuple, kwargs: dict) -> str:
+    parts = []
+    if args and args[0] is not None:
+        parts.append(str(args[0]))
+    content = kwargs.get("content")
+    if content:
+        parts.append(str(content))
+
+    embed = kwargs.get("embed")
+    if embed is not None:
+        embed_text = _embed_to_text(embed)
+        if embed_text:
+            parts.append(embed_text)
+
+    for item in kwargs.get("embeds") or []:
+        embed_text = _embed_to_text(item)
+        if embed_text:
+            parts.append(embed_text)
+
+    file = kwargs.get("file")
+    if file is not None:
+        parts.append(f"파일: {getattr(file, 'filename', '첨부 파일')}")
+
+    files = kwargs.get("files") or []
+    for item in files:
+        parts.append(f"파일: {getattr(item, 'filename', '첨부 파일')}")
+
+    return "\n".join(part for part in parts if part).strip()
+
+
+class _CommandCaptureChannel:
+    def __init__(self, channel):
+        self._channel = channel
+        self.outputs: list[str] = []
+
+    def typing(self):
+        typing = getattr(self._channel, "typing", None)
+        if typing is None:
+            return _NoopTyping()
+        return typing()
+
+    async def send(self, *args, **kwargs):
+        output = _send_payload_to_text(args, kwargs)
+        if output:
+            self.outputs.append(output)
+        return await self._channel.send(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        return getattr(self._channel, name)
+
+
+class _CommandCaptureMessage:
+    def __init__(self, original: discord.Message, channel: _CommandCaptureChannel):
+        self.author = original.author
+        self.channel = channel
+        self.guild = original.guild
+        self.mentions = getattr(original, "mentions", [])
+        self.reference = getattr(original, "reference", None)
+        self.content = getattr(original, "content", "")
+
+
+def _adapter_command_allowed(command_text: str) -> bool:
+    return not any(
+        command_text == prefix or command_text.startswith(f"{prefix} ")
+        for prefix in ADAPTER_BLOCKED_COMMAND_PREFIXES
+    )
 
 
 def _extract_auto_command(reply: str) -> str | None:
@@ -200,12 +310,69 @@ async def _send_memory_or_recording_file(message: discord.Message, filename: str
         return
 
     try:
-        path = get_recording_path(filename)
+        resolved_filename = resolve_recording_reference(filename, allow_plain_index=True)
+        path = get_recording_path(resolved_filename)
     except VoiceRecordNotFound:
         await message.channel.send("…그 이름의 통화 기록 파일을 찾지 못했어. `/대화목록`으로 파일명을 확인해줘.")
         return
 
     await message.channel.send(file=discord.File(str(path), filename=path.name))
+
+
+async def _run_command_adapter(
+    *,
+    message: discord.Message,
+    raw_text: str,
+    user_data: dict,
+    room_key: str,
+    room_data: dict,
+    client: discord.Client,
+) -> None:
+    try:
+        request = parse_command_adapter_args(raw_text)
+    except CommandUsageError as exc:
+        await message.channel.send(str(exc))
+        return
+
+    if not _adapter_command_allowed(request.command_text):
+        await message.channel.send("…그 명령어는 `/실행` 안에서 실행하지 않게 막아뒀어.")
+        return
+
+    capture_channel = _CommandCaptureChannel(message.channel)
+    capture_message = _CommandCaptureMessage(message, capture_channel)
+
+    try:
+        await handle_mentioned_message(
+            message=capture_message,
+            user_text=request.command_text,
+            user_data=user_data,
+            room_key=room_key,
+            room_data=room_data,
+            client=client,
+        )
+    except Exception as exc:
+        print("Command adapter execution error:", exc)
+        await message.channel.send("…명령어 실행 중 오류가 났어. 결과를 반영한 답변은 만들지 않을게.")
+        return
+
+    command_output = "\n".join(capture_channel.outputs).strip()
+    if not command_output:
+        command_output = "명령어가 실행됐지만 표시된 결과 메시지는 없었어."
+
+    async with message.channel.typing():
+        display_name = getattr(message.author, "display_name", message.author.name)
+        reply = await generate_reply(
+            user_message=request.prompt,
+            user_id=message.author.id,
+            display_name=display_name,
+            room_key=room_key,
+            extra_context=(
+                f"명령어: {request.command_text}\n"
+                f"결과:\n{command_output[:3000]}"
+            ),
+        )
+
+    await message.channel.send(reply[:1900])
 
 
 async def handle_mentioned_message(
@@ -235,9 +402,50 @@ async def handle_mentioned_message(
         await _send_admin_status(message, room_key, room_data)
         return
 
+    for adapter_alias in ("/실행", "/명령답변"):
+        if matches_command(user_text, adapter_alias):
+            await _run_command_adapter(
+                message=message,
+                raw_text=_command_arg(user_text, adapter_alias),
+                user_data=user_data,
+                room_key=room_key,
+                room_data=room_data,
+                client=client,
+            )
+            return
+
     if is_news_command_text(user_text):
         await handle_news_command(message, user_text, client)
         return
+
+    if matches_command(user_text, "/프로필"):
+        target_mentions = get_target_mentions(message, client.user)
+        target_user = target_mentions[0] if target_mentions else message.author
+        display_name = getattr(target_user, "display_name", target_user.name)
+        target_data = get_user_data(target_user.id, display_name)
+        await message.channel.send(embed=create_profile_embed(target_user, target_data))
+        return
+
+    if matches_command(user_text, "/주사위"):
+        try:
+            request = parse_dice_args(_command_arg(user_text, "/주사위"))
+            result = roll_dice(request)
+        except CommandUsageError as exc:
+            await message.channel.send(str(exc))
+            return
+        await message.channel.send(format_dice_result(result))
+        return
+
+    for team_alias in ("/팀나누기", "/팀"):
+        if matches_command(user_text, team_alias):
+            try:
+                request = parse_team_split_args(_command_arg(user_text, team_alias))
+                teams = split_members_into_teams(request)
+            except CommandUsageError as exc:
+                await message.channel.send(str(exc))
+                return
+            await message.channel.send(format_team_split_result(request, teams))
+            return
 
     if matches_command(user_text, "/기록"):
         if not special_user:

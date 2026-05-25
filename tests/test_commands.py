@@ -34,6 +34,7 @@ def test_summary_recording_filename_ignores_summary_scope_and_limits():
     assert commands._summary_recording_filename("/요약") is None
     assert commands._summary_recording_filename("/요약 room 10") is None
     assert commands._summary_recording_filename("/요약 10") is None
+    assert commands._summary_recording_filename("/요약 1번") == "1번"
     assert commands._summary_recording_filename("/요약 voice-20260516.jsonl") == "voice-20260516.jsonl"
 
 
@@ -56,6 +57,7 @@ def test_resolve_recording_summary_filename_supports_latest_aliases(monkeypatch)
 
     assert commands._resolve_recording_summary_filename("최근") == "voice-20260520-120000.jsonl"
     assert commands._resolve_recording_summary_filename("latest") == "voice-20260520-120000.jsonl"
+    assert commands._resolve_recording_summary_filename("1번") == "voice-20260520-120000.jsonl"
     assert commands._resolve_recording_summary_filename("voice-old.jsonl") == "voice-old.jsonl"
 
 
@@ -114,4 +116,55 @@ def test_auto_command_runs_with_original_message_author(monkeypatch):
 
     assert updated_users == [(123, {"name": "Alice", "nickname": "새별", "affection": 50})]
     assert sent_messages == ["응. 이제부터는 새별(이)라고 불러볼게."]
+
+
+def test_command_adapter_runs_command_then_replies_with_result(monkeypatch):
+    sent_messages = []
+    reply_kwargs = {}
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_generate_reply(**kwargs):
+        reply_kwargs.update(kwargs)
+        return "결과에 4를 더하면 5야."
+
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/실행 주사위 1 1 | 주사위를 굴려서 나온 숫자에 4 더해줘",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == [
+        "주사위 결과: **1** (`1`~`1`)",
+        "결과에 4를 더하면 5야.",
+    ]
+    assert reply_kwargs["user_message"] == "주사위를 굴려서 나온 숫자에 4 더해줘"
+    assert "주사위 결과: **1**" in reply_kwargs["extra_context"]
 

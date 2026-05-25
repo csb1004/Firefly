@@ -23,6 +23,7 @@ from firefly.voice_records import (
     get_recording_path,
     list_recordings,
     purge_expired_recordings,
+    resolve_recording_reference,
 )
 
 logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.WARNING)
@@ -181,6 +182,66 @@ async def nickname_slash(interaction: discord.Interaction, nickname: str):
     await _run_text_command_slash(interaction, f"/호칭 {nickname}", ephemeral=True)
 
 
+@tree.command(name="프로필", description="유저의 프로필 이미지, 이름, 호감도를 보여줘요.")
+@app_commands.rename(target="유저")
+@app_commands.describe(target="확인할 유저. 비워두면 내 프로필을 보여줘요.")
+async def profile_slash(interaction: discord.Interaction, target: discord.User | None = None):
+    user_text = f"/프로필 {_mention_text(target)}".strip()
+    await _run_text_command_slash(
+        interaction,
+        user_text,
+        mentions=[target] if target is not None else None,
+        ephemeral=False,
+    )
+
+
+@tree.command(name="주사위", description="지정한 범위 안에서 숫자 하나를 뽑아요.")
+@app_commands.rename(start="시작", end="끝")
+@app_commands.describe(start="시작 숫자. 끝을 비우면 1부터 이 숫자까지 뽑아요.", end="끝 숫자")
+async def dice_slash(interaction: discord.Interaction, start: int, end: int | None = None):
+    user_text = f"/주사위 {start}" if end is None else f"/주사위 {start} {end}"
+    await _run_text_command_slash(interaction, user_text)
+
+
+@tree.command(name="팀나누기", description="참가자를 섞어서 균형 있게 팀으로 나눠요.")
+@app_commands.rename(members="참가자", team_count="팀수", members_per_team="팀당인원")
+@app_commands.describe(
+    members="쉼표 또는 | 로 구분해요. 예: 철수, 영희, 민수, 수진",
+    team_count="만들 팀 수. 팀당인원과 둘 중 하나만 입력해요.",
+    members_per_team="한 팀당 인원. 팀수와 둘 중 하나만 입력해요.",
+)
+async def team_split_slash(
+    interaction: discord.Interaction,
+    members: str,
+    team_count: int | None = None,
+    members_per_team: int | None = None,
+):
+    if team_count is not None and members_per_team is not None:
+        await interaction.response.send_message("…팀수와 팀당인원은 둘 중 하나만 적어줘.", ephemeral=True)
+        return
+    if team_count is None and members_per_team is None:
+        await interaction.response.send_message("…팀수나 팀당인원 중 하나는 필요해.", ephemeral=True)
+        return
+
+    option = f"팀수={team_count}" if team_count is not None else f"팀당={members_per_team}"
+    await _run_text_command_slash(interaction, f"/팀나누기 {option} | {members}")
+
+
+@tree.command(name="실행", description="명령어를 먼저 실행하고 그 결과를 반영해 반디가 답해요.")
+@app_commands.rename(command_text="명령어", prompt="프롬프트")
+@app_commands.describe(
+    command_text="먼저 실행할 명령어. 예: 주사위 1 6",
+    prompt="명령어 결과를 반영해서 답할 요청",
+)
+async def command_adapter_slash(
+    interaction: discord.Interaction,
+    command_text: str,
+    prompt: str,
+):
+    separator = "||" if "|" in command_text else "|"
+    await _run_text_command_slash(interaction, f"/실행 {command_text} {separator} {prompt}")
+
+
 @tree.command(name="기록", description="현재 들어가 있는 통화방의 대화를 전사해서 저장해요.")
 async def record_slash(interaction: discord.Interaction):
     if not await _require_special_interaction(interaction):
@@ -282,7 +343,8 @@ async def memory_file_slash(interaction: discord.Interaction, filename: str | No
         return
 
     try:
-        path = get_recording_path(filename)
+        resolved_filename = resolve_recording_reference(filename, allow_plain_index=True)
+        path = get_recording_path(resolved_filename)
     except VoiceRecordNotFound:
         await interaction.followup.send("…그 이름의 통화 기록 파일을 찾지 못했어. `/대화목록`으로 확인해줘.", ephemeral=True)
         return

@@ -59,6 +59,11 @@ Optional:
 
 - `/기록검색 [파일명] 질문`: special-user-only search over saved voice transcripts. If the filename is omitted, the bot searches recent recordings.
 - `/봇상태`: special-user-only runtime status for memory, rooms, polls, news, and voice recordings.
+- `/프로필 [@유저]`: show a user's profile avatar, name, nickname, affection, and last-seen time.
+- `/주사위 [시작] [끝]`: roll one number inside the inclusive range, e.g. `/주사위 1 6`.
+- `/팀나누기 팀수=2 | Alice, Bob, Carol, Dana`: shuffle members into balanced teams. Use `팀당=3` to split by team size.
+- `/실행 [명령어] | [프롬프트]`: run a bot command first, print its result, then answer with that result as context. Use `||` as the separator when the command itself contains `|`.
+- Voice recording commands accept list indexes such as `1번`, `#1`, or `index:1` wherever a recording filename is accepted.
 
 ## Deployment
 

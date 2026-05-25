@@ -9,6 +9,15 @@ POLL_HELP_TEXT = (
     "`/투표 제목 | 선택지개수 | 선택지1 | 선택지2 | 마감`\n"
     "마감 예: `10분`, `2시간`, `23:30`, `2026-05-07 23:30`"
 )
+TEAM_HELP_TEXT = (
+    "`/팀나누기 팀수=2 | 철수, 영희, 민수, 수진`\n"
+    "`/팀나누기 팀당=3 | 철수 | 영희 | 민수 | 수진 | 지훈`"
+)
+
+
+def _avatar_url(user: discord.User | discord.Member) -> str | None:
+    avatar = getattr(user, "display_avatar", None)
+    return str(getattr(avatar, "url", "") or "") or None
 
 
 def create_help_embed() -> discord.Embed:
@@ -23,6 +32,10 @@ def create_help_embed() -> discord.Embed:
         ("/호감도", "현재 너에 대한 반디의 호감도를 확인해."),
         ("/초기화", "최근 개인 대화 기억을 비워."),
         ("/호칭 [이름]", "반디가 너를 부를 호칭을 바꿔."),
+        ("/프로필 [@유저]", "프로필 이미지, 이름, 호감도를 보여줘."),
+        ("/주사위 [시작] [끝]", "범위 안에서 숫자 하나를 뽑아."),
+        ("/팀나누기", TEAM_HELP_TEXT),
+        ("/실행 [명령어] | [프롬프트]", "명령어 결과를 먼저 보여주고 그 결과를 반영해 답해."),
         ("/요약 [개인/방] [개수]", "최근 개인 대화나 방 대화를 요약해."),
         ("/최신소식 [받기/그만/상태]", "기술 소식 개인 메시지 구독을 관리해."),
         ("/주제 목록", "최신 소식 주제를 확인해."),
@@ -46,12 +59,18 @@ def create_special_help_embed() -> discord.Embed:
     fields = [
         (
             "기본",
-            "`/도움말`, `/호감도`, `/초기화`, `/호칭 [이름]`, `/요약 [개인/방] [개수]`",
+            "`/도움말`, `/호감도`, `/초기화`, `/호칭 [이름]`, `/프로필 [@유저]`, `/요약 [개인/방] [개수]`",
+        ),
+        (
+            "도구",
+            "`/주사위 1 6`, `/실행 주사위 1 6 | 나온 숫자에 4 더해줘`\n"
+            f"{TEAM_HELP_TEXT}",
         ),
         (
             "통화 기록",
-            "`/기록`, `/기록중지`, `/대화목록`, `/요약 [파일명]`\n"
-            "`/기록검색 [파일명] 질문`, `/녹음검색 [파일명] 질문`",
+            "`/기록`, `/기록중지`, `/대화목록`, `/요약 [파일명/1번/#1]`\n"
+            "`/기록검색 [파일명] 질문`, `/녹음검색 [파일명] 질문`\n"
+            "파일명 자리에는 `1번`, `#1`, `index:1`도 쓸 수 있어.",
         ),
         (
             "투표",
@@ -156,6 +175,9 @@ def create_user_info_embed(target_user: discord.User | discord.Member, user_data
     embed.add_field(name="호칭", value=str(nickname), inline=False)
     embed.add_field(name="호감도", value=f"{affection} ({stage_text})", inline=False)
     embed.add_field(name="마지막 대화", value=last_seen, inline=False)
+    avatar_url = _avatar_url(target_user)
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
 
     history_lines = []
     for i, item in enumerate(history[-5:], start=1):
@@ -186,6 +208,32 @@ def create_user_info_embed(target_user: discord.User | discord.Member, user_data
     history_text = "\n".join(history_lines) if history_lines else "최근 대화 기록이 없어."
     embed.add_field(name="최근 대화", value=clamp_text(history_text, 1024, "\n..."), inline=False)
     embed.set_footer(text="반디 봇")
+    return embed
+
+
+def create_profile_embed(target_user: discord.User | discord.Member, user_data: dict) -> discord.Embed:
+    display_name = getattr(target_user, "display_name", getattr(target_user, "name", "알 수 없음"))
+    username = getattr(target_user, "name", display_name)
+    mention = getattr(target_user, "mention", str(display_name))
+    nickname = user_data.get("nickname", "없음")
+    affection = int(user_data.get("affection", DEFAULT_AFFECTION))
+    stage_text = get_affection_stage_label(affection)
+    last_seen = user_data.get("last_seen") or "기록 없음"
+
+    embed = discord.Embed(
+        title=f"{display_name} 프로필",
+        description=str(mention),
+        color=0x00FFFF,
+    )
+    avatar_url = _avatar_url(target_user)
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
+
+    embed.add_field(name="이름", value=str(username), inline=True)
+    embed.add_field(name="호칭", value=str(nickname), inline=True)
+    embed.add_field(name="호감도", value=f"{affection} ({stage_text})", inline=True)
+    embed.add_field(name="마지막 대화", value=str(last_seen), inline=False)
+    embed.set_footer(text=f"사용자 ID: {getattr(target_user, 'id', '알 수 없음')}")
     return embed
 
 

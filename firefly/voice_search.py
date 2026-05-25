@@ -1,7 +1,13 @@
 from dataclasses import dataclass
 
 from .text_utils import clamp_text
-from .voice_records import VoiceRecordNotFound, list_recordings, read_transcript_entries
+from .voice_records import (
+    VoiceRecordNotFound,
+    list_recordings,
+    parse_recording_index_reference,
+    read_transcript_entries,
+    resolve_recording_reference,
+)
 
 
 DEFAULT_SEARCH_RECORD_LIMIT = 5
@@ -27,7 +33,11 @@ def parse_voice_search_args(raw_text: str) -> VoiceSearchRequest:
         return VoiceSearchRequest(query="")
 
     first, _, rest = text.partition(" ")
-    if first.endswith(".jsonl") or first.startswith("voice-"):
+    if (
+        first.endswith(".jsonl")
+        or first.startswith("voice-")
+        or parse_recording_index_reference(first, allow_plain_index=True) is not None
+    ):
         return VoiceSearchRequest(query=rest.strip(), filename=first)
 
     return VoiceSearchRequest(query=text)
@@ -85,13 +95,14 @@ def load_voice_search_selection(
         raise ValueError("query is required")
 
     if request.filename:
-        entries = read_transcript_entries(request.filename)
+        filename = resolve_recording_reference(request.filename, allow_plain_index=True)
+        entries = read_transcript_entries(filename)
         selected, matched_count = select_relevant_voice_entries(
             entries,
             request.query,
             limit=entry_limit,
         )
-        return VoiceSearchSelection(request.filename, selected, matched_count)
+        return VoiceSearchSelection(filename, selected, matched_count)
 
     best_selection: VoiceSearchSelection | None = None
     for record in list_recordings()[:record_limit]:

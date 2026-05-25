@@ -11,6 +11,7 @@ KST = timezone(timedelta(hours=9))
 INDEX_FILE = VOICE_RECORDINGS_DIR / "index.json"
 RECORDS_DIR = VOICE_RECORDINGS_DIR / "records"
 _LOCK = RLock()
+RECORDING_INDEX_PATTERN = re.compile(r"^(?:#|index[:=-]?|파일)?(\d+)(?:번)?$", re.IGNORECASE)
 
 
 class VoiceRecordNotFound(FileNotFoundError):
@@ -100,6 +101,43 @@ def get_recording_path(filename: str) -> Path:
     if not path.exists():
         raise VoiceRecordNotFound(filename)
     return path
+
+
+def parse_recording_index_reference(reference: str, *, allow_plain_index: bool = False) -> int | None:
+    text = reference.strip()
+    if not text:
+        return None
+
+    if text.isdigit() and not allow_plain_index:
+        return None
+
+    match = RECORDING_INDEX_PATTERN.fullmatch(text)
+    if not match:
+        return None
+
+    index = int(match.group(1))
+    return index if index > 0 else None
+
+
+def resolve_recording_reference(
+    reference: str,
+    *,
+    allow_plain_index: bool = False,
+    records: list[dict] | None = None,
+) -> str:
+    index = parse_recording_index_reference(reference, allow_plain_index=allow_plain_index)
+    if index is None:
+        return _safe_filename(reference)
+
+    records = records if records is not None else list_recordings()
+    try:
+        filename = str(records[index - 1].get("filename") or "")
+    except IndexError as exc:
+        raise VoiceRecordNotFound(reference) from exc
+
+    if not filename:
+        raise VoiceRecordNotFound(reference)
+    return _safe_filename(filename)
 
 
 def _delete_record_file_unlocked(filename: str) -> None:
@@ -354,7 +392,7 @@ def list_recordings() -> list[dict]:
 
 def get_recording_metadata(filename: str) -> dict:
     purge_expired_recordings()
-    safe_name = _safe_filename(filename)
+    safe_name = resolve_recording_reference(filename, allow_plain_index=True)
     with _LOCK:
         for record in _load_index_unlocked()["records"]:
             if record.get("filename") == safe_name:
@@ -417,5 +455,7 @@ def format_recording_list(records: list[dict], limit: int = 20) -> str:
 
     if len(records) > limit:
         lines.append(f"...외 {len(records) - limit}개")
+
+    lines.append("요약/검색에는 `1번`, `#1`, `index:1`처럼 목록 번호를 파일명 대신 쓸 수 있어.")
 
     return "\n".join(lines)

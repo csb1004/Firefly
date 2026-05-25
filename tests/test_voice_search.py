@@ -13,6 +13,13 @@ def test_parse_voice_search_args_supports_filename_and_query():
     assert request.query == "누가 피자 얘기했어?"
 
 
+def test_parse_voice_search_args_supports_recording_index_and_query():
+    request = voice_search.parse_voice_search_args("1번 누가 피자 얘기했어?")
+
+    assert request.filename == "1번"
+    assert request.query == "누가 피자 얘기했어?"
+
+
 def test_parse_voice_search_args_without_filename_uses_latest_records():
     request = voice_search.parse_voice_search_args("어떤 걸 먹기로 했었는지 알려줘")
 

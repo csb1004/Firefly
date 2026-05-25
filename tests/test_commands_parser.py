@@ -12,6 +12,8 @@ def test_summary_recording_filename_only_accepts_non_scope_first_arg():
     assert commands_parser.summary_recording_filename("/요약 room 10") is None
     assert commands_parser.summary_recording_filename("/요약 방 10") is None
     assert commands_parser.summary_recording_filename("/요약 10") is None
+    assert commands_parser.summary_recording_filename("/요약 1번") == "1번"
+    assert commands_parser.summary_recording_filename("/요약 #1") == "#1"
     assert commands_parser.summary_recording_filename("/요약 voice-20260516.jsonl") == "voice-20260516.jsonl"
 
 
