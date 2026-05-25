@@ -117,7 +117,8 @@ def test_special_command_guide_describes_poll_placeholders_before_examples():
     assert "/투표 {제목} | 항목수={항목수} | {항목1} | {항목2}" in guide
     assert "{항목수}는 실제로 출력한 투표 항목의 개수와 반드시 같아야 한다." in guide
     assert "사용자가 \"3개 정도 골라서\"라고 하면 {항목수}=3으로 쓰고 {항목1}, {항목2}, {항목3}을 모두 채운다." in guide
-    assert "사용자가 \"이유도 같이\"라고 하면 각 항목 안에 `장소 - 이유` 형태로 이유를 짧게 붙인다." in guide
+    assert "반드시 `/실행 /투표 ... || {프롬프트}` 형식을 사용한다." in guide
+    assert "이유, 설명, 코멘트, 타이픈으로 붙인 문장은 투표 항목에 넣지 않는다." in guide
     assert "총 `{항목수}+3`조각이어야 한다." in guide
     assert "형식 검증 실패 메시지" in guide
 
@@ -142,6 +143,7 @@ def test_general_command_guide_uses_placeholder_sections_for_common_commands():
     assert "{개수}는 생략할 수 있는 숫자이며, 사용자가 말한 요약할 최근 메시지 수다." in guide
     assert "반디 자신의 이름이나 봇 이름 변경 요청에는 `/호칭`을 출력하지 않는다." in guide
     assert "주사위 결과로 이어서 계산하거나 판단해야 하면" in guide
+    assert "명령어 실행과 대화 답변을 동시에 원하면 일반 명령어를 단독 출력하지 말고 반드시 `/실행`을 사용한다." in guide
 
 
 def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands():

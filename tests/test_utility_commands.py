@@ -75,3 +75,17 @@ def test_parse_command_adapter_args_supports_double_separator_for_pipe_commands(
 
     assert request.command_text == "/팀나누기 팀수=2 | 철수, 영희, 민수, 수진"
     assert request.prompt == "첫 번째 팀만 알려줘"
+
+
+def test_parse_command_adapter_args_supports_poll_command_with_followup_prompt():
+    request = parse_command_adapter_args(
+        "/투표 반디랑 갈 데이트 장소 | 항목수=4 | 조용한 북카페 | "
+        "한적한 공원 산책길 | 작은 수족관 | 야경 보이는 강변 | 10분 "
+        "|| 고른 이유도 같이 알려줘"
+    )
+
+    assert request.command_text == (
+        "/투표 반디랑 갈 데이트 장소 | 항목수=4 | 조용한 북카페 | "
+        "한적한 공원 산책길 | 작은 수족관 | 야경 보이는 강변 | 10분"
+    )
+    assert request.prompt == "고른 이유도 같이 알려줘"
