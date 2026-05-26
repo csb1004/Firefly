@@ -40,6 +40,30 @@ client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
 NEWS_FIELD_LABELS = ("무슨 일", "왜 중요해", "확인 링크")
 NEWS_OMITTED_FIELD_LABELS = ("왜 중요해",)
+NEWS_TREND_FALLBACK_DAYS = 7
+NEWS_SOURCE_CATEGORIES = (
+    "공식 발표와 릴리스 노트: AI 연구소, 클라우드/반도체 회사, 언어/프레임워크/개발자 도구 프로젝트의 블로그와 changelog",
+    "연구/논문: arXiv, OpenReview, NeurIPS, ICML, ICLR, CVPR, ACL, EMNLP, Papers with Code, Hugging Face Papers",
+    "오픈소스 생태계: GitHub releases/trending/advisories, 주요 저장소 이슈/PR, PyPI, npm, crates.io, package release notes",
+    "보안/인프라: CVE/NVD, GitHub Security Advisories, CNCF/Kubernetes, 주요 클라우드 보안 공지와 장애/변경 공지",
+    "기술 뉴스와 동향: The Register, InfoQ, IEEE Spectrum, ACM/IEEE, Hacker News, 주요 기술 뉴스레터와 커뮤니티 요약",
+)
+NEWS_TOPIC_SOURCE_HINTS = (
+    (
+        ("인공지능", "ai", "llm", "머신러닝", "딥러닝", "강화학습"),
+        (
+            "AI 주제는 모델/제품 발표뿐 아니라 새 논문, benchmark, dataset, evaluation, safety, agent/tooling 동향까지 확인한다.",
+            "대형 발표가 없으면 arXiv cs.AI/cs.LG/cs.CL/cs.CV, OpenReview, 컨퍼런스 accepted paper/workshop 페이지, Hugging Face Papers를 우선 보강한다.",
+        ),
+    ),
+    (
+        ("프로그래밍", "개발", "software", "programming", "developer", "코딩"),
+        (
+            "프로그래밍 주제는 언어/런타임/프레임워크 릴리스, 개발자 도구, 패키지 생태계, 보안 권고, 빌드/배포 인프라 변화를 확인한다.",
+            "대형 뉴스가 없으면 Python, JavaScript/TypeScript, Rust, Go, Java, .NET, Kubernetes, Docker, GitHub Actions 관련 release note와 advisories를 보강한다.",
+        ),
+    ),
+)
 
 
 def _is_model_not_found_error(error: APIError) -> bool:
@@ -81,6 +105,89 @@ def _normalize_news_digest_format(text: str) -> str:
 
     text = re.sub(r"\n{3,}", "\n\n", text)
     return re.sub(r"\n+(?=\[\d+\]\s+)", "\n\n", text).strip()
+
+
+def _news_topic_source_hints(topics: list[str]) -> list[str]:
+    topic_text = " ".join(topics).casefold()
+    hints = []
+    seen = set()
+
+    for keywords, topic_hints in NEWS_TOPIC_SOURCE_HINTS:
+        if not any(keyword.casefold() in topic_text for keyword in keywords):
+            continue
+
+        for hint in topic_hints:
+            if hint in seen:
+                continue
+            hints.append(hint)
+            seen.add(hint)
+
+    return hints
+
+
+def _format_news_source_guidance(topics: list[str], *, broaden_search: bool) -> str:
+    lines = [
+        "[검색 범위]",
+        "GitHub나 일반 뉴스 검색 한두 곳에서 멈추지 말고, 아래 범주를 차례로 넓혀 확인해.",
+    ]
+    lines.extend(f"- {category}" for category in NEWS_SOURCE_CATEGORIES)
+
+    topic_hints = _news_topic_source_hints(topics)
+    if topic_hints:
+        lines.append("")
+        lines.append("[주제별 보강]")
+        lines.extend(f"- {hint}" for hint in topic_hints)
+
+    if broaden_search:
+        lines.append("")
+        lines.append("[보강 검색 모드]")
+        lines.append("- 첫 검색 결과가 없거나 이미 전달한 항목뿐이었다. 대형 뉴스보다 사실 확인 가능한 새 자료를 우선해서 다시 찾아.")
+        lines.append(
+            f"- 조회 기간 안의 항목을 우선하되, 그래도 3개 미만이면 최근 {NEWS_TREND_FALLBACK_DAYS}일 이내 공개된 "
+            "논문, 릴리스 노트, 보안 권고, 컨퍼런스/워크숍 자료, 기술 동향 글을 보강 동향으로 포함할 수 있어."
+        )
+        lines.append("- 보강 동향은 공개일이나 대상 기간을 본문에 명시하고, 오래된 소식을 오늘 일어난 일처럼 쓰지 마.")
+
+    return "\n".join(lines)
+
+
+def build_daily_news_digest_prompt(
+    topics: list[str],
+    window_start_text: str,
+    window_end_text: str,
+    previously_sent_items: list[str] | None = None,
+    *,
+    broaden_search: bool = False,
+) -> tuple[str, str]:
+    topic_text = ", ".join(topics)
+    previously_sent_items = previously_sent_items or []
+    previously_sent_text = (
+        "\n".join(f"- {item}" for item in previously_sent_items)
+        if previously_sent_items
+        else "없음"
+    )
+    system_prompt = load_text_file(NEWS_PROMPT_FILE)
+    source_guidance = _format_news_source_guidance(topics, broaden_search=broaden_search)
+    user_prompt = f"""
+[조회 기간]
+{window_start_text}부터 {window_end_text}까지, 한국 시간 기준.
+
+[관심 주제]
+{topic_text}
+
+[이미 전달한 소식]
+{previously_sent_text}
+
+{source_guidance}
+
+[요청]
+위 기간에 공개되거나 보도된 최신 소식 중, 관심 주제와 관련되고 사실 확인 가능한 소식만 웹 검색으로 확인해서 정리해줘.
+각 항목에는 반드시 확인 가능한 링크를 붙여줘.
+확실한 링크와 날짜 근거가 부족하면 항목에서 제외해줘.
+이미 전달한 소식과 같은 사건, 같은 링크, 같은 발표는 제외해줘.
+중요한 이유나 해석은 쓰지 말고, 확인된 사실만 간결하게 써줘.
+""".strip()
+    return system_prompt, user_prompt
 
 
 async def generate_reply(
@@ -498,32 +605,16 @@ async def generate_daily_news_digest(
     window_start_text: str,
     window_end_text: str,
     previously_sent_items: list[str] | None = None,
+    *,
+    broaden_search: bool = False,
 ) -> str | None:
-    topic_text = ", ".join(topics)
-    previously_sent_items = previously_sent_items or []
-    previously_sent_text = (
-        "\n".join(f"- {item}" for item in previously_sent_items)
-        if previously_sent_items
-        else "없음"
+    system_prompt, user_prompt = build_daily_news_digest_prompt(
+        topics=topics,
+        window_start_text=window_start_text,
+        window_end_text=window_end_text,
+        previously_sent_items=previously_sent_items,
+        broaden_search=broaden_search,
     )
-    system_prompt = load_text_file(NEWS_PROMPT_FILE)
-    user_prompt = f"""
-[조회 기간]
-{window_start_text}부터 {window_end_text}까지, 한국 시간 기준.
-
-[관심 주제]
-{topic_text}
-
-[이미 전달한 소식]
-{previously_sent_text}
-
-[요청]
-위 기간에 공개되거나 보도된 최신 소식 중, 관심 주제와 관련되고 사실 확인 가능한 소식만 웹 검색으로 확인해서 정리해줘.
-각 항목에는 반드시 확인 가능한 링크를 붙여줘.
-확실한 링크와 날짜 근거가 부족하면 항목에서 제외해줘.
-이미 전달한 소식과 같은 사건, 같은 링크, 같은 발표는 제외해줘.
-중요한 이유나 해석은 쓰지 말고, 확인된 사실만 간결하게 써줘.
-""".strip()
 
     try:
         response = await asyncio.to_thread(

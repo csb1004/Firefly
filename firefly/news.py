@@ -932,13 +932,24 @@ async def deliver_daily_news(client: discord.Client) -> bool:
         window_end_text=_format_kst(window_end),
         previously_sent_items=_recent_sent_item_lines(settings),
     )
-    if not report:
+    if report is None:
         print("Daily news digest was not generated; delivery will be retried later.")
         return False
 
     report = _drop_previously_sent_items(report, settings)
     if not report:
-        report = _empty_news_report(window_start, window_end, settings["topics"])
+        fallback_report = await generate_daily_news_digest(
+            topics=settings["topics"],
+            window_start_text=_format_kst(window_start),
+            window_end_text=_format_kst(window_end),
+            previously_sent_items=_recent_sent_item_lines(settings),
+            broaden_search=True,
+        )
+        if fallback_report:
+            report = _drop_previously_sent_items(fallback_report, settings)
+
+        if not report:
+            report = _empty_news_report(window_start, window_end, settings["topics"])
 
     await _send_digest_to_subscribers(report, recipients)
     _mark_window_delivered(window_end, report)
