@@ -398,6 +398,7 @@ async def _run_command_adapter(
             room_key=room_key,
             extra_context=extra_context,
             force_web_search=force_web_search,
+            allow_command_output=False,
         )
 
     await message.channel.send(reply[:1900])

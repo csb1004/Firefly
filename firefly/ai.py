@@ -198,6 +198,7 @@ async def generate_reply(
     *,
     extra_context: str | None = None,
     force_web_search: bool = False,
+    allow_command_output: bool = True,
 ) -> str:
     if user_message.strip() == "그 긴거 해줘":
         return LONG_SAM_LINE
@@ -215,7 +216,11 @@ async def generate_reply(
 
     relationship_context = build_relationship_event_context(user_data, user_message)
     relationship_events = dict(user_data.get(RELATIONSHIP_EVENTS_KEY, {}))
-    system_prompt = build_system_prompt(user_id, user_data)
+    system_prompt = build_system_prompt(
+        user_id,
+        user_data,
+        include_command_guides=allow_command_output,
+    )
     if relationship_context:
         system_prompt = f"{system_prompt}\n\n{relationship_context}"
 

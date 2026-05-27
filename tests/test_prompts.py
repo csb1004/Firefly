@@ -106,6 +106,21 @@ def test_build_system_prompt_adds_special_command_guide_for_special_user(monkeyp
     assert "special command guide" in special_prompt
 
 
+def test_build_system_prompt_can_disable_command_guides(monkeypatch):
+    monkeypatch.setattr(prompts, "get_base_prompt", lambda user_id: "base prompt")
+    monkeypatch.setattr(prompts, "load_text_file", lambda path: "/검색실행 {프롬프트}")
+    monkeypatch.setattr(prompts, "get_current_time_text", lambda: "2026-05-16 12:00:00")
+
+    prompt = prompts.build_system_prompt(
+        prompts.SPECIAL_USER_ID,
+        {"name": "Owner", "nickname": "Owner", "affection": 1004},
+        include_command_guides=False,
+    )
+
+    assert "/검색실행 {프롬프트}" not in prompt
+    assert "봇 명령어를 출력하지 말고" in prompt
+
+
 def test_special_command_guide_describes_poll_placeholders_before_examples():
     guide = prompts.load_text_file(prompts.SPECIAL_COMMAND_GUIDE_FILE)
 

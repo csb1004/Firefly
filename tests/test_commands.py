@@ -274,6 +274,61 @@ def test_web_command_adapter_uses_web_search_for_final_reply_only(monkeypatch):
     assert reply_kwargs["extra_context"] is None
 
 
+def test_auto_web_command_runs_search_adapter_without_echoing_command(monkeypatch):
+    sent_messages = []
+    reply_calls = []
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_generate_reply(**kwargs):
+        reply_calls.append(kwargs)
+        if kwargs.get("allow_command_output", True):
+            return "/검색실행 정왕역 근처 맛집 찾아줄 수 있어?"
+        return "정왕역 근처 맛집을 찾아봤어."
+
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="정왕역 근처 맛집 찾아줄 수 있어?",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={"internet_mode": False},
+            client=client,
+        )
+    )
+
+    assert sent_messages == ["정왕역 근처 맛집을 찾아봤어."]
+    assert len(reply_calls) == 2
+    assert reply_calls[1]["force_web_search"] is True
+    assert reply_calls[1]["allow_command_output"] is False
+
+
 def test_command_adapter_blocks_persistent_internet_mode():
     sent_messages = []
 

@@ -121,17 +121,28 @@ def build_room_model_history(room_history: list[dict]) -> list[dict]:
     return model_history
 
 
-def build_system_prompt(user_id: int, user_data: dict) -> str:
+def build_system_prompt(
+    user_id: int,
+    user_data: dict,
+    *,
+    include_command_guides: bool = True,
+) -> str:
     base_prompt = get_base_prompt(user_id)
     nickname = user_data.get("nickname", user_data.get("name", "너"))
     affection = int(user_data.get("affection", DEFAULT_AFFECTION))
     current_time_text = get_current_time_text()
     last_seen = user_data.get("last_seen", "없음")
     is_special_user = user_id == SPECIAL_USER_ID
-    command_guides = [load_text_file(COMMAND_GUIDE_FILE)]
-    if is_special_user:
-        command_guides.append(load_text_file(SPECIAL_COMMAND_GUIDE_FILE))
-    command_guide = "\n\n".join(command_guides)
+    if include_command_guides:
+        command_guides = [load_text_file(COMMAND_GUIDE_FILE)]
+        if is_special_user:
+            command_guides.append(load_text_file(SPECIAL_COMMAND_GUIDE_FILE))
+        command_guide = "\n\n".join(command_guides)
+    else:
+        command_guide = """
+[명령어 출력 제한]
+- 지금 응답에서는 `/`로 시작하는 봇 명령어를 출력하지 말고, 이미 실행된 결과와 검색 내용을 바탕으로 자연어로 직접 답한다.
+""".strip()
     affection_text = get_affection_stage_text(affection, is_special_user)
 
     return f"""
