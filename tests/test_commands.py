@@ -511,6 +511,44 @@ def test_web_command_adapter_rejects_non_special_user():
     assert sent_messages == ["…인터넷 검색 실행은 특별 사용자만 사용할 수 있어."]
 
 
+def test_poll_close_command_passes_user_text_to_poll_handler(monkeypatch):
+    close_calls = []
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            raise AssertionError(f"unexpected message: {content}")
+
+    async def fake_close_poll_from_command(message, client, user_text):
+        close_calls.append(user_text)
+
+    monkeypatch.setattr(commands, "close_poll_from_command", fake_close_poll_from_command)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/투표마감 최근",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert close_calls == ["/투표마감 최근"]
+
+
 def test_memory_reset_targets_one_split_file_and_preserves_news(monkeypatch, tmp_path):
     sent_messages = []
     monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")

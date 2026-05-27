@@ -177,6 +177,7 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "/요약 {파일인덱스}" in guide
     assert "/녹음검색 {파일명} {질문}" in guide
     assert "/녹음검색 {파일인덱스} {질문}" in guide
+    assert "/투표마감 최근" in guide
     assert "/투표마감 {메시지ID}" in guide
     assert "/메모리파일 {메모리대상}" in guide
     assert "/메모리초기화 {메모리대상} 확인" in guide
@@ -194,5 +195,6 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "임의로 여러 파일을 초기화하지 않는다." in guide
     assert "{파일명}은 사용자가 직접 말한 파일명이나 `최근` 중 하나다." in guide
     assert "{파일인덱스}`: `/대화목록`에 표시된 통화 기록 번호다." in guide
+    assert "투표 조기 마감해줘" in guide
     assert "{주제목록}은 쉼표로 구분한 주제 목록이다." in guide
 

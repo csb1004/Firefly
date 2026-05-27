@@ -77,7 +77,7 @@ def create_special_help_embed() -> discord.Embed:
         ),
         (
             "투표",
-            f"`/투표`, `/투표마감 [메시지ID]`\n{POLL_HELP_TEXT}",
+            f"`/투표`, `/투표마감 [메시지ID/최근]`\n{POLL_HELP_TEXT}",
         ),
         (
             "뉴스",

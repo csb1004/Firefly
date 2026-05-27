@@ -31,6 +31,15 @@ class PollSpec:
     closes_at: datetime
 
 
+@dataclass(frozen=True)
+class PollCloseTarget:
+    message_id: str | None
+    error_message: str | None = None
+
+
+LATEST_POLL_TOKENS = {"최근", "마지막", "latest", "last"}
+
+
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -194,6 +203,64 @@ def remove_poll(message_id: int | str) -> None:
         polls.pop(str(message_id), None)
 
     update_memory(mutate)
+
+
+def _extract_poll_close_message_id(user_text: str) -> str | None:
+    raw = user_text.replace("/투표마감", "", 1).strip()
+    match = re.search(r"\b\d+\b", raw)
+    return match.group(0) if match else None
+
+
+def _wants_latest_poll(user_text: str) -> bool:
+    raw = user_text.replace("/투표마감", "", 1).strip().lower()
+    return raw in LATEST_POLL_TOKENS
+
+
+def _poll_message_id_sort_key(poll: dict) -> int:
+    try:
+        return int(poll.get("message_id", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _active_polls_in_channel(channel_id: int | str) -> list[dict]:
+    channel_id_text = str(channel_id)
+    polls = [
+        poll
+        for poll in _active_polls().values()
+        if str(poll.get("channel_id")) == channel_id_text
+    ]
+    return sorted(polls, key=_poll_message_id_sort_key, reverse=True)
+
+
+def _resolve_poll_close_target(message: discord.Message, user_text: str) -> PollCloseTarget:
+    explicit_message_id = _extract_poll_close_message_id(user_text)
+    if explicit_message_id:
+        return PollCloseTarget(explicit_message_id)
+
+    reference = getattr(message, "reference", None)
+    reference_message_id = getattr(reference, "message_id", None)
+    if reference_message_id is not None:
+        return PollCloseTarget(str(reference_message_id))
+
+    channel_id = getattr(getattr(message, "channel", None), "id", None)
+    if channel_id is None:
+        return PollCloseTarget(
+            None,
+            "…마감할 투표 메시지에 답장하거나 `/투표마감 메시지ID`로 알려줘.",
+        )
+
+    channel_polls = _active_polls_in_channel(channel_id)
+    if not channel_polls:
+        return PollCloseTarget(None, "…이 채널에 진행 중인 투표가 없어.")
+
+    if len(channel_polls) == 1 or _wants_latest_poll(user_text):
+        return PollCloseTarget(str(channel_polls[0]["message_id"]))
+
+    return PollCloseTarget(
+        None,
+        "…진행 중인 투표가 여러 개야. 마감할 투표 메시지에 답장하거나 `/투표마감 메시지ID`로 알려줘.",
+    )
 
 
 def _cancel_poll_task(message_id: int | str) -> None:
@@ -482,16 +549,17 @@ async def finalize_poll(
 async def close_poll_from_command(
     message: discord.Message,
     client: discord.Client,
+    user_text: str = "/투표마감",
 ) -> None:
-    reference = getattr(message, "reference", None)
-    message_id = getattr(reference, "message_id", None)
-    if message_id is None:
-        await message.channel.send("…마감할 투표 메시지에 답장으로 `/투표마감`을 입력해줘.")
+    target = _resolve_poll_close_target(message, user_text)
+    if target.error_message:
+        await message.channel.send(target.error_message)
         return
 
+    message_id = target.message_id
     poll = get_poll(message_id)
     if not poll:
-        await message.channel.send("…답장한 메시지는 진행 중인 투표가 아니야.")
+        await message.channel.send("…진행 중인 투표를 찾지 못했어.")
         return
 
     if int(poll["channel_id"]) != message.channel.id:

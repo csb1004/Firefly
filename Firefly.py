@@ -7,7 +7,7 @@ from discord import app_commands
 from firefly.commands import handle_mentioned_message
 from firefly.config import DISCORD_BOT_TOKEN, SPECIAL_USER_ID
 from firefly.news import handle_news_command, is_news_command_text, start_daily_news_task
-from firefly.polls import enforce_single_vote, finalize_poll, refresh_poll_vote_count, restore_poll_tasks
+from firefly.polls import enforce_single_vote, refresh_poll_vote_count, restore_poll_tasks
 from firefly.storage import (
     get_existing_room_data,
     get_room_data,
@@ -423,22 +423,10 @@ async def poll_slash(interaction: discord.Interaction, poll_text: str):
 
 @tree.command(name="투표마감", description="진행 중인 투표를 마감해요. 특별 사용자 전용.")
 @app_commands.rename(message_id="메시지id")
-@app_commands.describe(message_id="마감할 투표 메시지 ID")
-async def close_poll_slash(interaction: discord.Interaction, message_id: str):
-    if not await _require_special_interaction(interaction):
-        return
-
-    if not message_id.isdigit():
-        await interaction.response.send_message("…투표 메시지 ID는 숫자로 적어줘.", ephemeral=True)
-        return
-
-    await interaction.response.defer(thinking=True)
-    closed_by = getattr(interaction.user, "display_name", interaction.user.name)
-    closed = await finalize_poll(client, int(message_id), closed_by=closed_by)
-    if closed:
-        await interaction.followup.send("…투표를 마감했어.", ephemeral=True)
-    else:
-        await interaction.followup.send("…진행 중인 투표를 찾지 못했어.", ephemeral=True)
+@app_commands.describe(message_id="생략하면 현재 채널의 유일한 진행 중 투표, 최근이면 최신 투표를 마감")
+async def close_poll_slash(interaction: discord.Interaction, message_id: str | None = None):
+    user_text = f"/투표마감 {message_id or ''}".strip()
+    await _run_text_command_slash(interaction, user_text, ephemeral=True)
 
 
 @tree.command(name="인터넷모드", description="이 방의 인터넷 검색 모드를 켜거나 꺼요. 특별 사용자 전용.")

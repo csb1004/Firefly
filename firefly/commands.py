@@ -768,7 +768,7 @@ async def handle_mentioned_message(
             await message.channel.send("…투표 마감은 특별 사용자만 사용할 수 있어.")
             return
 
-        await close_poll_from_command(message, client)
+        await close_poll_from_command(message, client, user_text)
         return
 
     if user_text == "/요약" or user_text.startswith("/요약 "):

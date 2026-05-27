@@ -65,6 +65,7 @@ Optional:
 - `/팀나누기 팀수=2 | Alice, Bob, Carol, Dana`: shuffle members into balanced teams. Use `팀당=3` to split by team size.
 - `/실행 [명령어들] | [프롬프트]`: run bot commands first, print their results, then answer with those results as context. Separate independent commands with `&&`; if a later command depends on an earlier result, `/실행` queues the next command after seeing that result. Use `||` as the prompt separator when any command contains `|`.
 - `/검색실행 [프롬프트]` or `/검색실행 [명령어들] || [프롬프트]`: special-user-only one-shot web search for the final reply without changing the room's persistent internet mode.
+- `/투표마감 [메시지ID/최근]`: special-user-only early close for a poll by message ID, replied poll, latest poll, or the only active poll in the current channel.
 - `/메모리초기화 [대화/방/투표/뉴스] 확인`: special-user-only targeted reset for one split memory file.
 - Voice recording commands accept list indexes such as `1번`, `#1`, or `index:1` wherever a recording filename is accepted.
 
