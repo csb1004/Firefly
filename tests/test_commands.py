@@ -1,7 +1,8 @@
 import asyncio
 from types import SimpleNamespace
 
-from firefly import commands
+from firefly import commands, storage
+from firefly.config import DAILY_NEWS_KEY, POLLS_KEY
 
 
 def test_matches_command_requires_exact_command_or_space_boundary():
@@ -167,6 +168,7 @@ def test_command_adapter_runs_command_then_replies_with_result(monkeypatch):
     ]
     assert reply_kwargs["user_message"] == "주사위를 굴려서 나온 숫자에 4 더해줘"
     assert "주사위 결과: **1**" in reply_kwargs["extra_context"]
+    assert reply_kwargs["persist_command_reply"] is False
 
 
 def test_command_adapter_runs_multiple_commands_before_reply(monkeypatch):
@@ -219,6 +221,7 @@ def test_command_adapter_runs_multiple_commands_before_reply(monkeypatch):
     ]
     assert "[1] 명령어: /주사위 1 1" in reply_kwargs["extra_context"]
     assert "[2] 명령어: /주사위 2 2" in reply_kwargs["extra_context"]
+    assert reply_kwargs["persist_command_reply"] is False
 
 
 def test_web_command_adapter_uses_web_search_for_final_reply_only(monkeypatch):
@@ -272,6 +275,7 @@ def test_web_command_adapter_uses_web_search_for_final_reply_only(monkeypatch):
     assert reply_kwargs["user_message"] == "최신 AI 소식 알려줘"
     assert reply_kwargs["force_web_search"] is True
     assert reply_kwargs["extra_context"] is None
+    assert reply_kwargs["persist_command_reply"] is False
 
 
 def test_auto_web_command_runs_search_adapter_without_echoing_command(monkeypatch):
@@ -325,8 +329,10 @@ def test_auto_web_command_runs_search_adapter_without_echoing_command(monkeypatc
 
     assert sent_messages == ["정왕역 근처 맛집을 찾아봤어."]
     assert len(reply_calls) == 2
+    assert reply_calls[0]["persist_command_reply"] is False
     assert reply_calls[1]["force_web_search"] is True
     assert reply_calls[1]["allow_command_output"] is False
+    assert reply_calls[1]["persist_command_reply"] is False
 
 
 def test_command_adapter_blocks_persistent_internet_mode():
@@ -387,4 +393,47 @@ def test_web_command_adapter_rejects_non_special_user():
     )
 
     assert sent_messages == ["…인터넷 검색 실행은 특별 사용자만 사용할 수 있어."]
+
+
+def test_memory_reset_targets_one_split_file_and_preserves_news(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.save_memory({
+        "123": {"name": "Alice", "history": [{"role": "user", "content": "hello"}]},
+        POLLS_KEY: {"poll-1": {"question": "Dinner?"}},
+        DAILY_NEWS_KEY: {"topics": ["AI"], "subscribers": {"1": {"name": "Owner"}}},
+    })
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/메모리초기화 대화 확인",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    data = storage.load_memory()
+    assert sent_messages == ["…응. 대화 메모리 파일 `conversation_memory.json`을 비웠어."]
+    assert "123" not in data
+    assert data[POLLS_KEY]["poll-1"]["question"] == "Dinner?"
+    assert data[DAILY_NEWS_KEY]["subscribers"]["1"]["name"] == "Owner"
 

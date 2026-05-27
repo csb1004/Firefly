@@ -38,6 +38,11 @@ from .voice_search import format_voice_search_context
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
+
+def _is_auto_command_reply(reply: str) -> bool:
+    lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
+    return len(lines) == 1 and is_command_text(lines[0]) and lines[0] != "/"
+
 NEWS_FIELD_LABELS = ("무슨 일", "왜 중요해", "확인 링크")
 NEWS_OMITTED_FIELD_LABELS = ("왜 중요해",)
 NEWS_TREND_FALLBACK_DAYS = 7
@@ -199,6 +204,7 @@ async def generate_reply(
     extra_context: str | None = None,
     force_web_search: bool = False,
     allow_command_output: bool = True,
+    persist_command_reply: bool = True,
 ) -> str:
     if user_message.strip() == "그 긴거 해줘":
         return LONG_SAM_LINE
@@ -279,6 +285,9 @@ async def generate_reply(
             **request_kwargs,
         )
         reply = response.output_text.strip()
+
+        if not persist_command_reply and _is_auto_command_reply(reply):
+            return reply
 
         latest_user_data = get_user_data(user_id, display_name)
         if relationship_events:

@@ -3,7 +3,14 @@ from types import SimpleNamespace
 import pytest
 
 from firefly import storage
-from firefly.config import DEFAULT_AFFECTION, MAX_HISTORY, MAX_ROOM_HISTORY, ROOMS_KEY
+from firefly.config import (
+    DAILY_NEWS_KEY,
+    DEFAULT_AFFECTION,
+    MAX_HISTORY,
+    MAX_ROOM_HISTORY,
+    POLLS_KEY,
+    ROOMS_KEY,
+)
 
 
 @pytest.fixture
@@ -26,6 +33,74 @@ def test_save_memory_writes_json_atomically(memory_file):
 
     assert storage.load_memory() == {"123": {"name": "User"}}
     assert not memory_file.with_name("memory.json.tmp").exists()
+    assert memory_file.with_name("conversation_memory.json").exists()
+
+
+def test_load_memory_reads_legacy_file_when_split_files_do_not_exist(memory_file):
+    memory_file.write_text(
+        """
+{
+  "123": {"name": "User"},
+  "__rooms__": {"room-1": {"history": []}},
+  "__polls__": {"poll-1": {"question": "Dinner?"}},
+  "__daily_news__": {"topics": ["AI"], "subscribers": {"1": {"name": "Owner"}}}
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    data = storage.load_memory()
+
+    assert data["123"]["name"] == "User"
+    assert data[ROOMS_KEY]["room-1"]["history"] == []
+    assert data[POLLS_KEY]["poll-1"]["question"] == "Dinner?"
+    assert data[DAILY_NEWS_KEY]["topics"] == ["AI"]
+
+
+def test_ensure_memory_section_file_exports_legacy_section(memory_file):
+    memory_file.write_text(
+        '{"__daily_news__": {"topics": ["AI"], "subscribers": {"1": {"name": "Owner"}}}}',
+        encoding="utf-8",
+    )
+
+    path = storage.ensure_memory_section_file("news")
+
+    assert path == memory_file.with_name("news_memory.json")
+    assert storage.load_memory()[DAILY_NEWS_KEY]["topics"] == ["AI"]
+
+
+@pytest.mark.parametrize(
+    ("raw_text", "section"),
+    [
+        ("대화 메모리", "conversation"),
+        ("conversation_memory.json", "conversation"),
+        ("방 기억", "rooms"),
+        ("room_memory.json", "rooms"),
+        ("투표 메모리", "polls"),
+        ("poll_memory.json", "polls"),
+        ("뉴스 메모리", "news"),
+        ("news_memory.json", "news"),
+    ],
+)
+def test_resolve_memory_section_accepts_labels_and_file_names(raw_text, section):
+    assert storage.resolve_memory_section(raw_text) == section
+
+
+def test_reset_memory_section_preserves_other_split_files(memory_file):
+    storage.save_memory({
+        "123": {"name": "User"},
+        ROOMS_KEY: {"room-1": {"history": ["room"]}},
+        POLLS_KEY: {"poll-1": {"question": "Dinner?"}},
+        DAILY_NEWS_KEY: {"topics": ["AI"], "subscribers": {"1": {"name": "Owner"}}},
+    })
+
+    storage.reset_memory_section("conversation")
+
+    data = storage.load_memory()
+    assert "123" not in data
+    assert data[ROOMS_KEY]["room-1"]["history"] == ["room"]
+    assert data[POLLS_KEY]["poll-1"]["question"] == "Dinner?"
+    assert data[DAILY_NEWS_KEY]["subscribers"]["1"]["name"] == "Owner"
 
 
 def test_get_user_data_creates_and_normalizes_defaults(memory_file):

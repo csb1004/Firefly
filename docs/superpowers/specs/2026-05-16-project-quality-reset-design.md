@@ -25,7 +25,7 @@ The first priority is to protect the conversation, memory, and prompt behavior. 
 
 - `Firefly.py` is the Discord entrypoint. It owns client setup, slash commands, event handlers, and top-level routing.
 - `firefly/commands.py` handles mentioned-message commands and general conversation flow.
-- `firefly/storage.py` manages memory JSON state for users and rooms.
+- `firefly/storage.py` manages split JSON state for conversation users, rooms, polls, and news while preserving legacy `memory.json` read compatibility.
 - `firefly/prompts.py` builds system prompts and model history.
 - `firefly/text_utils.py` normalizes Discord message content.
 - `firefly/utility_commands.py` owns pure parsing and formatting logic for utility commands such as dice, team split, and command adapters.
@@ -97,6 +97,7 @@ The command adapter is a protected user-facing workflow:
 - Commands that already contain `|`, such as polls or team split requests, must use `||` between the command block and the follow-up prompt.
 - Adapter results are summarized and size-limited before being passed to the model so large command outputs do not dominate the prompt.
 - Adapter final replies suppress command guides so the model answers in natural language instead of emitting another `/실행` or `/검색실행` command.
+- Auto-generated command replies are not persisted to user or room history; only the final natural-language answer is logged.
 - Recursive, destructive, reset, and persistent mode-changing commands are blocked inside `/실행`.
 
 Internet search should use the narrowest surface that satisfies the request:
@@ -105,6 +106,17 @@ Internet search should use the narrowest surface that satisfies the request:
 - It can run optional prior commands, then forces internet search for the final answer only.
 - It must not mutate the room's persistent `internet_mode` setting.
 - `/인터넷모드` remains the persistent room-level mode toggle and should not be invoked through `/실행`.
+
+## Split Memory Files
+
+Runtime memory is separated by concern:
+
+- `conversation_memory.json`: user profiles, affection, and personal conversation history.
+- `room_memory.json`: room mode flags and group conversation history.
+- `poll_memory.json`: active poll metadata and scheduled poll closures.
+- `news_memory.json`: daily news topics, subscribers, delivery window, and duplicate-delivery history.
+
+`load_memory()` still presents a combined in-memory shape for existing callers, but writes are persisted to the split files. If split files do not exist yet, the storage layer reads matching sections from the legacy `memory.json` so older deployments migrate naturally on the next write. Reset commands must target one memory file at a time; `/메모리초기화 대화 확인` must not touch room, poll, or news data.
 
 ## Data Flow To Protect
 

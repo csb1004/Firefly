@@ -3,6 +3,10 @@
 !.env.example
 .venv
 memory.json
+conversation_memory.json
+room_memory.json
+poll_memory.json
+news_memory.json
 data/
 __pycache__/
 *.pyc

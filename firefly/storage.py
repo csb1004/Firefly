@@ -5,10 +5,12 @@ import discord
 
 from .config import (
     BOT_DISPLAY_NAME,
+    DAILY_NEWS_KEY,
     DEFAULT_AFFECTION,
     MAX_HISTORY,
     MAX_ROOM_HISTORY,
     MEMORY_FILE,
+    POLLS_KEY,
     ROOMS_KEY,
     SPECIAL_USER_ID,
     SPECIAL_USER_NAME,
@@ -18,25 +20,166 @@ from .text_utils import clean_discord_content, get_current_time_text
 
 _MEMORY_LOCK = RLock()
 
+MEMORY_SECTION_FILES = {
+    "conversation": "conversation_memory.json",
+    "rooms": "room_memory.json",
+    "polls": "poll_memory.json",
+    "news": "news_memory.json",
+}
+MEMORY_SECTION_LABELS = {
+    "conversation": "대화",
+    "rooms": "방",
+    "polls": "투표",
+    "news": "뉴스",
+}
+MEMORY_SECTION_DATA_KEYS = {
+    "rooms": ROOMS_KEY,
+    "polls": POLLS_KEY,
+    "news": DAILY_NEWS_KEY,
+}
+MEMORY_SECTION_ALIASES = {
+    "대화": "conversation",
+    "대화 메모리": "conversation",
+    "대화메모리": "conversation",
+    "개인": "conversation",
+    "개인 기억": "conversation",
+    "개인기억": "conversation",
+    "유저": "conversation",
+    "사용자": "conversation",
+    "conversation": "conversation",
+    "conversation_memory": "conversation",
+    "conversation_memory.json": "conversation",
+    "방": "rooms",
+    "방 메모리": "rooms",
+    "방메모리": "rooms",
+    "방 기억": "rooms",
+    "방기억": "rooms",
+    "룸": "rooms",
+    "rooms": "rooms",
+    "room": "rooms",
+    "room_memory": "rooms",
+    "room_memory.json": "rooms",
+    "투표": "polls",
+    "투표 메모리": "polls",
+    "투표메모리": "polls",
+    "poll": "polls",
+    "polls": "polls",
+    "poll_memory": "polls",
+    "poll_memory.json": "polls",
+    "뉴스": "news",
+    "뉴스 메모리": "news",
+    "뉴스메모리": "news",
+    "최신소식": "news",
+    "최신 소식": "news",
+    "소식": "news",
+    "news": "news",
+    "daily_news": "news",
+    "news_memory": "news",
+    "news_memory.json": "news",
+}
 
-def _read_memory_unlocked() -> dict:
-    if not MEMORY_FILE.exists():
+
+def get_memory_section_file(section: str):
+    return MEMORY_FILE.with_name(MEMORY_SECTION_FILES[section])
+
+
+def resolve_memory_section(raw_text: str) -> str | None:
+    text = raw_text.strip().casefold()
+    return MEMORY_SECTION_ALIASES.get(text)
+
+
+def format_memory_section_list() -> str:
+    return "\n".join(
+        f"- {MEMORY_SECTION_LABELS[section]}: `{filename}`"
+        for section, filename in MEMORY_SECTION_FILES.items()
+    )
+
+
+def _read_json_file_unlocked(path) -> dict:
+    if not path.exists():
         return {}
 
     try:
-        return json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+    return data if isinstance(data, dict) else {}
 
 
-def _write_memory_unlocked(data: dict) -> None:
-    MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temp_file = MEMORY_FILE.with_name(f"{MEMORY_FILE.name}.tmp")
+def _write_json_file_unlocked(path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = path.with_name(f"{path.name}.tmp")
     temp_file.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    temp_file.replace(MEMORY_FILE)
+    temp_file.replace(path)
+
+
+def _section_file_exists(section: str) -> bool:
+    return get_memory_section_file(section).exists()
+
+
+def _split_legacy_memory(legacy_data: dict) -> dict:
+    return {
+        section: _extract_memory_section(legacy_data, section)
+        for section in MEMORY_SECTION_FILES
+    }
+
+
+def _combine_memory_sections(sections: dict[str, dict]) -> dict:
+    data = dict(sections.get("conversation", {}))
+    for section, data_key in MEMORY_SECTION_DATA_KEYS.items():
+        section_data = sections.get(section, {})
+        if section_data:
+            data[data_key] = section_data
+    return data
+
+
+def _read_memory_unlocked() -> dict:
+    legacy_sections = _split_legacy_memory(_read_json_file_unlocked(MEMORY_FILE))
+    sections = {}
+    for section in MEMORY_SECTION_FILES:
+        sections[section] = (
+            _read_json_file_unlocked(get_memory_section_file(section))
+            if _section_file_exists(section)
+            else legacy_sections[section]
+        )
+    return _combine_memory_sections(sections)
+
+
+def _write_memory_unlocked(data: dict) -> None:
+    for section in MEMORY_SECTION_FILES:
+        _write_json_file_unlocked(
+            get_memory_section_file(section),
+            _extract_memory_section(data, section),
+        )
+
+
+def _extract_memory_section(data: dict, section: str) -> dict:
+    if section == "conversation":
+        return {
+            key: value
+            for key, value in data.items()
+            if key.isdigit() and isinstance(value, dict)
+        }
+    data_key = MEMORY_SECTION_DATA_KEYS.get(section)
+    if data_key is not None and isinstance(data.get(data_key), dict):
+        return data[data_key]
+    return {}
+
+
+def ensure_memory_section_file(section: str):
+    with _MEMORY_LOCK:
+        path = get_memory_section_file(section)
+        if not path.exists():
+            _write_json_file_unlocked(path, _extract_memory_section(_read_memory_unlocked(), section))
+        return path
+
+
+def reset_memory_section(section: str) -> None:
+    with _MEMORY_LOCK:
+        _write_json_file_unlocked(get_memory_section_file(section), {})
 
 
 def load_memory() -> dict:

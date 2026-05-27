@@ -5,7 +5,7 @@ import discord
 from discord import app_commands
 
 from firefly.commands import handle_mentioned_message
-from firefly.config import DISCORD_BOT_TOKEN, MEMORY_FILE, SPECIAL_USER_ID
+from firefly.config import DISCORD_BOT_TOKEN, SPECIAL_USER_ID
 from firefly.news import handle_news_command, is_news_command_text, start_daily_news_task
 from firefly.polls import enforce_single_vote, finalize_poll, refresh_poll_vote_count, restore_poll_tasks
 from firefly.storage import (
@@ -18,12 +18,9 @@ from firefly.storage import (
 from firefly.text_utils import clean_discord_content, is_command_text
 from firefly.voice import handle_bot_voice_disconnect, start_voice_recording, stop_voice_recording
 from firefly.voice_records import (
-    VoiceRecordNotFound,
     format_recording_list,
-    get_recording_path,
     list_recordings,
     purge_expired_recordings,
-    resolve_recording_reference,
 )
 
 logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.WARNING)
@@ -345,50 +342,38 @@ async def summary_slash(
     await _run_text_command_slash(interaction, " ".join(parts), ephemeral=True)
 
 
-@tree.command(name="메모리파일", description="memory.json 또는 통화 기록 원본 파일을 받아와요.")
+@tree.command(name="메모리파일", description="대화/방/투표/뉴스 메모리 파일 또는 통화 기록 원본 파일을 받아와요.")
 @app_commands.rename(filename="파일이름")
-@app_commands.describe(filename="생략하면 memory.json, 입력하면 통화 기록 파일명")
+@app_commands.describe(filename="대화, 방, 투표, 뉴스, 메모리 파일명, 또는 통화 기록 파일명")
 async def memory_file_slash(interaction: discord.Interaction, filename: str | None = None):
-    if not await _require_special_interaction(interaction):
-        return
-
-    await interaction.response.defer(thinking=True, ephemeral=True)
-
-    if not filename:
-        if not MEMORY_FILE.exists():
-            await interaction.followup.send("…아직 저장된 메모리 파일이 없어.", ephemeral=True)
-            return
-        await interaction.followup.send(file=discord.File(str(MEMORY_FILE)), ephemeral=True)
-        return
-
-    try:
-        resolved_filename = resolve_recording_reference(filename, allow_plain_index=True)
-        path = get_recording_path(resolved_filename)
-    except VoiceRecordNotFound:
-        await interaction.followup.send("…그 이름의 통화 기록 파일을 찾지 못했어. `/대화목록`으로 확인해줘.", ephemeral=True)
-        return
-
-    await interaction.followup.send(file=discord.File(str(path), filename=path.name), ephemeral=True)
+    user_text = f"/메모리파일 {filename or ''}".strip()
+    await _run_text_command_slash(interaction, user_text, ephemeral=True)
 
 
-@tree.command(name="메모리초기화", description="memory.json 전체를 비워요. 특별 사용자 전용.")
-@app_commands.rename(confirm_text="확인문구")
-@app_commands.describe(confirm_text="정말 초기화하려면 확인이라고 입력")
-async def memory_reset_slash(interaction: discord.Interaction, confirm_text: str):
+@tree.command(name="메모리초기화", description="대화/방/투표/뉴스 메모리 파일 중 하나를 비워요. 특별 사용자 전용.")
+@app_commands.rename(target="대상", confirm_text="확인문구")
+@app_commands.describe(
+    target="대화, 방, 투표, 뉴스 또는 conversation_memory.json 같은 파일 이름",
+    confirm_text="정말 초기화하려면 확인이라고 입력",
+)
+async def memory_reset_slash(interaction: discord.Interaction, target: str, confirm_text: str):
     await _run_text_command_slash(
         interaction,
-        f"/메모리초기화 {confirm_text}",
+        f"/메모리초기화 {target} {confirm_text}",
         ephemeral=True,
     )
 
 
-@tree.command(name="메모리파일초기화", description="memory.json 전체를 비워요. 특별 사용자 전용.")
-@app_commands.rename(confirm_text="확인문구")
-@app_commands.describe(confirm_text="정말 초기화하려면 확인이라고 입력")
-async def memory_file_reset_slash(interaction: discord.Interaction, confirm_text: str):
+@tree.command(name="메모리파일초기화", description="대화/방/투표/뉴스 메모리 파일 중 하나를 비워요. 특별 사용자 전용.")
+@app_commands.rename(target="대상", confirm_text="확인문구")
+@app_commands.describe(
+    target="대화, 방, 투표, 뉴스 또는 conversation_memory.json 같은 파일 이름",
+    confirm_text="정말 초기화하려면 확인이라고 입력",
+)
+async def memory_file_reset_slash(interaction: discord.Interaction, target: str, confirm_text: str):
     await _run_text_command_slash(
         interaction,
-        f"/메모리파일초기화 {confirm_text}",
+        f"/메모리파일초기화 {target} {confirm_text}",
         ephemeral=True,
     )
 

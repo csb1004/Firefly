@@ -13,7 +13,7 @@ from .commands_parser import (
     parse_summary_args,
     summary_recording_filename,
 )
-from .config import DEFAULT_AFFECTION, MEMORY_FILE, SPECIAL_USER_ID, SUMMARY_DEFAULT_LIMIT
+from .config import DEFAULT_AFFECTION, SPECIAL_USER_ID, SUMMARY_DEFAULT_LIMIT
 from .embeds import (
     create_help_embed,
     create_profile_embed,
@@ -22,14 +22,20 @@ from .embeds import (
     create_summary_embed,
     create_user_info_embed,
 )
-from .news import (
-    cancel_daily_news_task,
-    handle_news_command,
-    is_news_command_text,
-    start_daily_news_task,
-)
+from .news import handle_news_command, is_news_command_text
 from .polls import cancel_poll_tasks, close_poll_from_command, create_poll_from_command
-from .storage import get_user_data, load_memory, save_memory, update_room_data, update_user_data
+from .storage import (
+    MEMORY_SECTION_LABELS,
+    ensure_memory_section_file,
+    format_memory_section_list,
+    get_memory_section_file,
+    get_user_data,
+    load_memory,
+    reset_memory_section,
+    resolve_memory_section,
+    update_room_data,
+    update_user_data,
+)
 from .text_utils import parse_last_int_arg
 from .utility_commands import (
     CommandUsageError,
@@ -232,6 +238,13 @@ def _format_adapter_command_summary(index: int, command_text: str, command_outpu
     )
 
 
+def _parse_memory_reset_args(raw_text: str) -> tuple[str | None, str]:
+    target_text, separator, confirm_text = raw_text.rpartition(" ")
+    if not separator:
+        return None, confirm_text.strip()
+    return resolve_memory_section(target_text), confirm_text.strip()
+
+
 def _extract_auto_command(reply: str) -> str | None:
     lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
     if len(lines) != 1:
@@ -322,10 +335,17 @@ async def _send_admin_status(message: discord.Message, room_key: str, room_data:
 
 async def _send_memory_or_recording_file(message: discord.Message, filename: str | None = None) -> None:
     if not filename:
-        if not MEMORY_FILE.exists():
-            await message.channel.send("…아직 저장된 메모리 파일이 없어.")
-            return
-        await message.channel.send(file=discord.File(str(MEMORY_FILE)))
+        await message.channel.send(
+            "…어떤 메모리 파일을 받을지 적어줘.\n"
+            f"{format_memory_section_list()}\n"
+            "예: `/메모리파일 대화`, `/메모리파일 news_memory.json`"
+        )
+        return
+
+    section = resolve_memory_section(filename)
+    if section:
+        path = ensure_memory_section_file(section)
+        await message.channel.send(file=discord.File(str(path), filename=path.name))
         return
 
     try:
@@ -399,6 +419,7 @@ async def _run_command_adapter(
             extra_context=extra_context,
             force_web_search=force_web_search,
             allow_command_output=False,
+            persist_command_reply=False,
         )
 
     await message.channel.send(reply[:1900])
@@ -544,19 +565,22 @@ async def handle_mentioned_message(
             await message.channel.send("…메모리 초기화는 특별 사용자만 사용할 수 있어.")
             return
 
-        confirm_text = user_text.replace(memory_reset_command, "", 1).strip()
-        if confirm_text != "확인":
+        raw_args = user_text.replace(memory_reset_command, "", 1).strip()
+        section, confirm_text = _parse_memory_reset_args(raw_args)
+        if section is None or confirm_text != "확인":
             await message.channel.send(
-                "…메모리 파일 전체를 비우려면 `/메모리초기화 확인`이라고 다시 입력해줘. "
-                "개인 기억, 방 기억, 투표 예약이 모두 초기화돼."
+                "…초기화할 메모리 파일 이름과 `확인`을 같이 적어줘.\n"
+                f"{format_memory_section_list()}\n"
+                "예: `/메모리초기화 대화 확인`, `/메모리초기화 news_memory.json 확인`"
             )
             return
 
-        save_memory({})
-        cancel_poll_tasks()
-        cancel_daily_news_task()
-        start_daily_news_task(client)
-        await message.channel.send("…응. 메모리 파일을 빈 상태로 초기화했어.")
+        reset_memory_section(section)
+        if section == "polls":
+            cancel_poll_tasks()
+        label = MEMORY_SECTION_LABELS[section]
+        path = get_memory_section_file(section)
+        await message.channel.send(f"…응. {label} 메모리 파일 `{path.name}`을 비웠어.")
         return
 
     if special_user and user_text.startswith("/유저정보"):
@@ -759,6 +783,7 @@ async def handle_mentioned_message(
             user_id=author_id,
             display_name=display_name,
             room_key=room_key,
+            persist_command_reply=False,
         )
 
     if await _run_auto_command_from_reply(

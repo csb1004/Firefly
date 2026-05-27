@@ -37,3 +37,10 @@ def test_special_help_lists_one_shot_web_search_command():
 
     assert "/검색실행 [프롬프트]" in text
     assert "/검색실행 [명령어들] || [프롬프트]" in text
+
+
+def test_special_help_lists_split_memory_commands():
+    text = _field_text(create_special_help_embed())
+
+    assert "/메모리파일 [대화/방/투표/뉴스]" in text
+    assert "/메모리초기화 [대상] 확인" in text
