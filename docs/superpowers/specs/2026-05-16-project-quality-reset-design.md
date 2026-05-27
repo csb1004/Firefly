@@ -96,7 +96,8 @@ The command adapter is a protected user-facing workflow:
 - Multiple commands are separated with `&&` or newlines, up to a bounded maximum. This keeps a single adapter request useful without allowing runaway command chains.
 - Commands that already contain `|`, such as polls or team split requests, must use `||` between the command block and the follow-up prompt.
 - Adapter results are summarized and size-limited before being passed to the model so large command outputs do not dominate the prompt.
-- Adapter final replies suppress command guides so the model answers in natural language instead of emitting another `/실행` or `/검색실행` command.
+- When prior command output can determine the next command's arguments, the adapter runs a bounded FIFO chain: after each result batch, the model may emit one direct follow-up command, which is queued and executed before the final natural reply.
+- Prompt-only one-shot search suppresses command guides so `/검색실행 최신 정보...` answers directly instead of echoing another command.
 - Auto-generated command replies are not persisted to user or room history; only the final natural-language answer is logged.
 - Recursive, destructive, reset, and persistent mode-changing commands are blocked inside `/실행`.
 

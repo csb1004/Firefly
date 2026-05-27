@@ -241,6 +241,14 @@ async def generate_reply(
 
     model_user_message = user_message
     if extra_context:
+        response_instruction = "명령어 결과를 사실로 사용해서 사용자 요청에 자연스럽게 답해."
+        if allow_command_output:
+            response_instruction = (
+                "명령어 결과를 사실로 사용해서 사용자 요청을 처리해. "
+                "이미 받은 결과만으로 답할 수 있으면 명령어를 더 출력하지 말고 자연스럽게 답해. "
+                "아직 추가 봇 명령어 실행이 꼭 필요하면 `/실행`으로 감싸지 말고 실제 다음 명령어 한 줄만 출력해. "
+                "더 실행할 명령어가 없으면 자연스럽게 답해."
+            )
         model_user_message = f"""
 [사용자 요청]
 {user_message}
@@ -249,7 +257,7 @@ async def generate_reply(
 {extra_context}
 
 [응답 지침]
-명령어 결과를 사실로 사용해서 사용자 요청에 자연스럽게 답해.
+{response_instruction}
 """.strip()
 
     input_messages = [{"role": "system", "content": system_prompt}]

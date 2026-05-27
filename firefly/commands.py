@@ -1,3 +1,5 @@
+from collections import deque
+
 import discord
 
 from .affection import change_user_affection, set_user_affection
@@ -39,6 +41,7 @@ from .storage import (
 from .text_utils import parse_last_int_arg
 from .utility_commands import (
     CommandUsageError,
+    MAX_ADAPTER_COMMANDS,
     format_dice_result,
     format_team_split_result,
     parse_command_adapter_args,
@@ -111,6 +114,10 @@ def _summary_recording_filename(user_text: str) -> str | None:
 LATEST_RECORDING_TOKENS = {"최근", "마지막", "latest", "last"}
 ADAPTER_COMMAND_OUTPUT_LIMIT = 1200
 ADAPTER_CONTEXT_LIMIT = 3500
+ADAPTER_CHAIN_LIMIT_MESSAGE = (
+    f"…연속 실행은 한 번에 최대 {MAX_ADAPTER_COMMANDS}개까지만 할게. "
+    "중간 결과를 보고 이어서 다시 부탁해줘."
+)
 ADAPTER_BLOCKED_COMMAND_PREFIXES = (
     "/실행",
     "/명령답변",
@@ -238,6 +245,12 @@ def _format_adapter_command_summary(index: int, command_text: str, command_outpu
     )
 
 
+def _format_adapter_context(command_summaries: list[str]) -> str | None:
+    if not command_summaries:
+        return None
+    return "\n\n".join(command_summaries)[:ADAPTER_CONTEXT_LIMIT]
+
+
 def _parse_memory_reset_args(raw_text: str) -> tuple[str | None, str]:
     target_text, separator, confirm_text = raw_text.rpartition(" ")
     if not separator:
@@ -358,6 +371,29 @@ async def _send_memory_or_recording_file(message: discord.Message, filename: str
     await message.channel.send(file=discord.File(str(path), filename=path.name))
 
 
+async def _generate_adapter_reply(
+    *,
+    message: discord.Message,
+    prompt: str,
+    room_key: str,
+    extra_context: str | None,
+    force_web_search: bool,
+    allow_command_output: bool,
+) -> str:
+    async with message.channel.typing():
+        display_name = getattr(message.author, "display_name", message.author.name)
+        return await generate_reply(
+            user_message=prompt,
+            user_id=message.author.id,
+            display_name=display_name,
+            room_key=room_key,
+            extra_context=extra_context,
+            force_web_search=force_web_search,
+            allow_command_output=allow_command_output,
+            persist_command_reply=False,
+        )
+
+
 async def _run_command_adapter(
     *,
     message: discord.Message,
@@ -380,49 +416,86 @@ async def _run_command_adapter(
             await message.channel.send(_adapter_blocked_message(command_text))
             return
 
+    if not request.command_texts:
+        reply = await _generate_adapter_reply(
+            message=message,
+            prompt=request.prompt,
+            room_key=room_key,
+            extra_context=None,
+            force_web_search=force_web_search,
+            allow_command_output=False,
+        )
+        await message.channel.send(reply[:1900])
+        return
+
     capture_channel = _CommandCaptureChannel(message.channel)
     capture_message = _CommandCaptureMessage(message, capture_channel)
     command_summaries = []
+    command_queue = deque(request.command_texts)
 
-    for index, command_text in enumerate(request.command_texts, start=1):
-        output_start = len(capture_channel.outputs)
-        try:
-            await handle_mentioned_message(
-                message=capture_message,
-                user_text=command_text,
-                user_data=user_data,
-                room_key=room_key,
-                room_data=room_data,
-                client=client,
+    while True:
+        while command_queue:
+            if len(command_summaries) >= MAX_ADAPTER_COMMANDS:
+                await message.channel.send(ADAPTER_CHAIN_LIMIT_MESSAGE)
+                return
+
+            command_text = command_queue.popleft()
+            if not _adapter_command_allowed(command_text):
+                await message.channel.send(_adapter_blocked_message(command_text))
+                return
+
+            output_start = len(capture_channel.outputs)
+            try:
+                await handle_mentioned_message(
+                    message=capture_message,
+                    user_text=command_text,
+                    user_data=user_data,
+                    room_key=room_key,
+                    room_data=room_data,
+                    client=client,
+                )
+            except Exception as exc:
+                print("Command adapter execution error:", exc)
+                await message.channel.send("…명령어 실행 중 오류가 났어. 결과를 반영한 답변은 만들지 않을게.")
+                return
+
+            command_output = "\n".join(capture_channel.outputs[output_start:]).strip()
+            if not command_output:
+                command_output = "명령어가 실행됐지만 표시된 결과 메시지는 없었어."
+            command_summaries.append(
+                _format_adapter_command_summary(
+                    len(command_summaries) + 1,
+                    command_text,
+                    command_output,
+                )
             )
-        except Exception as exc:
-            print("Command adapter execution error:", exc)
-            await message.channel.send("…명령어 실행 중 오류가 났어. 결과를 반영한 답변은 만들지 않을게.")
-            return
 
-        command_output = "\n".join(capture_channel.outputs[output_start:]).strip()
-        if not command_output:
-            command_output = "명령어가 실행됐지만 표시된 결과 메시지는 없었어."
-        command_summaries.append(_format_adapter_command_summary(index, command_text, command_output))
+        extra_context = _format_adapter_context(command_summaries)
+        allow_more_commands = len(command_summaries) < MAX_ADAPTER_COMMANDS
 
-    extra_context = None
-    if command_summaries:
-        extra_context = "\n\n".join(command_summaries)[:ADAPTER_CONTEXT_LIMIT]
-
-    async with message.channel.typing():
-        display_name = getattr(message.author, "display_name", message.author.name)
-        reply = await generate_reply(
-            user_message=request.prompt,
-            user_id=message.author.id,
-            display_name=display_name,
+        reply = await _generate_adapter_reply(
+            message=message,
+            prompt=request.prompt,
             room_key=room_key,
             extra_context=extra_context,
             force_web_search=force_web_search,
-            allow_command_output=False,
-            persist_command_reply=False,
+            allow_command_output=allow_more_commands,
         )
 
-    await message.channel.send(reply[:1900])
+        followup_command = _extract_auto_command(reply)
+        if not followup_command:
+            await message.channel.send(reply[:1900])
+            return
+
+        if len(command_summaries) >= MAX_ADAPTER_COMMANDS:
+            await message.channel.send(ADAPTER_CHAIN_LIMIT_MESSAGE)
+            return
+
+        if not _adapter_command_allowed(followup_command):
+            await message.channel.send(_adapter_blocked_message(followup_command))
+            return
+
+        command_queue.append(followup_command)
 
 
 async def handle_mentioned_message(

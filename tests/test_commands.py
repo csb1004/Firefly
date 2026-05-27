@@ -224,6 +224,122 @@ def test_command_adapter_runs_multiple_commands_before_reply(monkeypatch):
     assert reply_kwargs["persist_command_reply"] is False
 
 
+def test_command_adapter_runs_result_dependent_followup_command(monkeypatch):
+    sent_messages = []
+    reply_calls = []
+    poll_commands = []
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_generate_reply(**kwargs):
+        reply_calls.append(kwargs)
+        if len(reply_calls) == 1:
+            return "/투표 내일 점심밥 | 항목수=2 | 김밥 | 라멘 | 10분"
+        return "주사위가 2라서 두 항목으로 투표를 올렸어."
+
+    async def fake_create_poll_from_command(message, user_text, client):
+        poll_commands.append(user_text)
+        await message.channel.send("투표 생성됨: 내일 점심밥")
+
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+    monkeypatch.setattr(commands, "create_poll_from_command", fake_create_poll_from_command)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/실행 주사위 2 2 | 2~6 주사위 굴려서 나온 숫자만큼 투표 항목 만들어줘. 투표 주제는 내일 점심밥",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == [
+        "주사위 결과: **2** (`2`~`2`)",
+        "투표 생성됨: 내일 점심밥",
+        "주사위가 2라서 두 항목으로 투표를 올렸어.",
+    ]
+    assert poll_commands == ["/투표 내일 점심밥 | 항목수=2 | 김밥 | 라멘 | 10분"]
+    assert len(reply_calls) == 2
+    assert reply_calls[0]["allow_command_output"] is True
+    assert "주사위 결과: **2**" in reply_calls[0]["extra_context"]
+    assert reply_calls[1]["allow_command_output"] is True
+    assert "[2] 명령어: /투표 내일 점심밥" in reply_calls[1]["extra_context"]
+
+
+def test_command_adapter_stops_result_dependent_loop_at_limit(monkeypatch):
+    sent_messages = []
+    reply_calls = []
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_generate_reply(**kwargs):
+        reply_calls.append(kwargs)
+        return "/주사위 1 1"
+
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/실행 주사위 1 1 | 계속 굴려줘",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages.count("주사위 결과: **1** (`1`~`1`)") == commands.MAX_ADAPTER_COMMANDS
+    assert sent_messages[-1] == commands.ADAPTER_CHAIN_LIMIT_MESSAGE
+    assert reply_calls[-1]["allow_command_output"] is False
+
+
 def test_web_command_adapter_uses_web_search_for_final_reply_only(monkeypatch):
     sent_messages = []
     reply_kwargs = {}
