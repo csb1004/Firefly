@@ -168,3 +168,168 @@ def test_command_adapter_runs_command_then_replies_with_result(monkeypatch):
     assert reply_kwargs["user_message"] == "주사위를 굴려서 나온 숫자에 4 더해줘"
     assert "주사위 결과: **1**" in reply_kwargs["extra_context"]
 
+
+def test_command_adapter_runs_multiple_commands_before_reply(monkeypatch):
+    sent_messages = []
+    reply_kwargs = {}
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_generate_reply(**kwargs):
+        reply_kwargs.update(kwargs)
+        return "두 결과를 합치면 3이야."
+
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/실행 주사위 1 1 && 주사위 2 2 | 두 결과를 더해줘",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == [
+        "주사위 결과: **1** (`1`~`1`)",
+        "주사위 결과: **2** (`2`~`2`)",
+        "두 결과를 합치면 3이야.",
+    ]
+    assert "[1] 명령어: /주사위 1 1" in reply_kwargs["extra_context"]
+    assert "[2] 명령어: /주사위 2 2" in reply_kwargs["extra_context"]
+
+
+def test_web_command_adapter_uses_web_search_for_final_reply_only(monkeypatch):
+    sent_messages = []
+    reply_kwargs = {}
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_generate_reply(**kwargs):
+        reply_kwargs.update(kwargs)
+        return "검색해서 답했어."
+
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/검색실행 최신 AI 소식 알려줘",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={"internet_mode": False},
+            client=client,
+        )
+    )
+
+    assert sent_messages == ["검색해서 답했어."]
+    assert reply_kwargs["user_message"] == "최신 AI 소식 알려줘"
+    assert reply_kwargs["force_web_search"] is True
+    assert reply_kwargs["extra_context"] is None
+
+
+def test_command_adapter_blocks_persistent_internet_mode():
+    sent_messages = []
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/실행 인터넷모드 on | 이번 답변에서 검색해줘",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == [
+        "…`/실행` 안에서는 `/인터넷모드` 대신 `/검색실행`을 써줘. 그 답변 한 번에만 인터넷 검색을 사용할게."
+    ]
+
+
+def test_web_command_adapter_rejects_non_special_user():
+    sent_messages = []
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/검색실행 최신 AI 소식 알려줘",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == ["…인터넷 검색 실행은 특별 사용자만 사용할 수 있어."]
+

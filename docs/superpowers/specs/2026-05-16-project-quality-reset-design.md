@@ -28,6 +28,7 @@ The first priority is to protect the conversation, memory, and prompt behavior. 
 - `firefly/storage.py` manages memory JSON state for users and rooms.
 - `firefly/prompts.py` builds system prompts and model history.
 - `firefly/text_utils.py` normalizes Discord message content.
+- `firefly/utility_commands.py` owns pure parsing and formatting logic for utility commands such as dice, team split, and command adapters.
 - `firefly/ai.py` calls OpenAI APIs for replies, summaries, voice summaries, and news digests.
 - `firefly/news.py` combines news settings, command parsing, delivery scheduling, duplicate tracking, and Discord messaging.
 - `firefly/voice.py` combines Discord voice receiving, PCM conversion, realtime transcription, fallback transcription, and active recording lifecycle.
@@ -86,6 +87,23 @@ After Phase 1 tests are passing:
 - `firefly/poll_parser.py`: extract poll command parsing from `polls.py` if poll work becomes active.
 
 These should be introduced only when a plan identifies the exact behavior to protect and the tests that prove it stayed stable.
+
+## Command Adapter And One-Shot Search
+
+The command adapter is a protected user-facing workflow:
+
+- `/실행 [명령어들] | [프롬프트]` runs one or more bot commands first, then sends the collected command results into the final conversation reply as extra context.
+- Multiple commands are separated with `&&` or newlines, up to a bounded maximum. This keeps a single adapter request useful without allowing runaway command chains.
+- Commands that already contain `|`, such as polls or team split requests, must use `||` between the command block and the follow-up prompt.
+- Adapter results are summarized and size-limited before being passed to the model so large command outputs do not dominate the prompt.
+- Recursive, destructive, reset, and persistent mode-changing commands are blocked inside `/실행`.
+
+Internet search should use the narrowest surface that satisfies the request:
+
+- `/검색실행`, also aliased as `/인터넷실행` and `/검색답변`, is special-user-only.
+- It can run optional prior commands, then forces internet search for the final answer only.
+- It must not mutate the room's persistent `internet_mode` setting.
+- `/인터넷모드` remains the persistent room-level mode toggle and should not be invoked through `/실행`.
 
 ## Data Flow To Protect
 

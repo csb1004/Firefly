@@ -136,6 +136,7 @@ def test_general_command_guide_uses_placeholder_sections_for_common_commands():
     assert "/주사위 {시작숫자} {끝숫자}" in guide
     assert "/팀나누기 팀수={팀수} | {참가자목록}" in guide
     assert "/실행 {명령어} | {프롬프트}" in guide
+    assert "/실행 {명령어1} && {명령어2} || {프롬프트}" in guide
     assert "/요약 {범위} {개수}" in guide
     assert "/최신소식 {동작}" in guide
     assert "/주제 목록" in guide
@@ -144,6 +145,7 @@ def test_general_command_guide_uses_placeholder_sections_for_common_commands():
     assert "반디 자신의 이름이나 봇 이름 변경 요청에는 `/호칭`을 출력하지 않는다." in guide
     assert "주사위 결과로 이어서 계산하거나 판단해야 하면" in guide
     assert "명령어 실행과 대화 답변을 동시에 원하면 일반 명령어를 단독 출력하지 말고 반드시 `/실행`을 사용한다." in guide
+    assert "먼저 실행할 명령어가 여러 개면" in guide
 
 
 def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands():
@@ -159,11 +161,15 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "/녹음검색 {파일명} {질문}" in guide
     assert "/녹음검색 {파일인덱스} {질문}" in guide
     assert "/투표마감 {메시지ID}" in guide
+    assert "/검색실행 {프롬프트}" in guide
+    assert "/검색실행 {명령어들} || {프롬프트}" in guide
     assert "/인터넷모드 {상태}" in guide
     assert "/호감도설정 {유저멘션} {숫자}" in guide
     assert "/최신소식 시간 {시간}" in guide
     assert "/주제 설정 {주제목록}" in guide
     assert "{상태}는 `on` 또는 `off`만 사용한다." in guide
+    assert "최종 답변 한 번에만 인터넷 검색을 사용하고 방 설정은 바꾸지 않는다." in guide
+    assert "이번 질문만 검색" in guide
     assert "{파일명}은 사용자가 직접 말한 파일명이나 `최근` 중 하나다." in guide
     assert "{파일인덱스}`: `/대화목록`에 표시된 통화 기록 번호다." in guide
     assert "{주제목록}은 쉼표로 구분한 주제 목록이다." in guide

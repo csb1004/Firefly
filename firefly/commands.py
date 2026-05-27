@@ -103,9 +103,15 @@ def _summary_recording_filename(user_text: str) -> str | None:
 
 
 LATEST_RECORDING_TOKENS = {"최근", "마지막", "latest", "last"}
+ADAPTER_COMMAND_OUTPUT_LIMIT = 1200
+ADAPTER_CONTEXT_LIMIT = 3500
 ADAPTER_BLOCKED_COMMAND_PREFIXES = (
     "/실행",
     "/명령답변",
+    "/검색실행",
+    "/인터넷실행",
+    "/검색답변",
+    "/인터넷모드",
     "/초기화",
     "/메모리초기화",
     "/메모리파일초기화",
@@ -210,6 +216,19 @@ def _adapter_command_allowed(command_text: str) -> bool:
     return not any(
         command_text == prefix or command_text.startswith(f"{prefix} ")
         for prefix in ADAPTER_BLOCKED_COMMAND_PREFIXES
+    )
+
+
+def _adapter_blocked_message(command_text: str) -> str:
+    if command_text == "/인터넷모드" or command_text.startswith("/인터넷모드 "):
+        return "…`/실행` 안에서는 `/인터넷모드` 대신 `/검색실행`을 써줘. 그 답변 한 번에만 인터넷 검색을 사용할게."
+    return "…그 명령어는 `/실행` 안에서 실행하지 않게 막아뒀어."
+
+
+def _format_adapter_command_summary(index: int, command_text: str, command_output: str) -> str:
+    return (
+        f"[{index}] 명령어: {command_text}\n"
+        f"결과:\n{command_output[:ADAPTER_COMMAND_OUTPUT_LIMIT]}"
     )
 
 
@@ -327,37 +346,48 @@ async def _run_command_adapter(
     room_key: str,
     room_data: dict,
     client: discord.Client,
+    force_web_search: bool = False,
+    allow_prompt_only: bool = False,
 ) -> None:
     try:
-        request = parse_command_adapter_args(raw_text)
+        request = parse_command_adapter_args(raw_text, allow_prompt_only=allow_prompt_only)
     except CommandUsageError as exc:
         await message.channel.send(str(exc))
         return
 
-    if not _adapter_command_allowed(request.command_text):
-        await message.channel.send("…그 명령어는 `/실행` 안에서 실행하지 않게 막아뒀어.")
-        return
+    for command_text in request.command_texts:
+        if not _adapter_command_allowed(command_text):
+            await message.channel.send(_adapter_blocked_message(command_text))
+            return
 
     capture_channel = _CommandCaptureChannel(message.channel)
     capture_message = _CommandCaptureMessage(message, capture_channel)
+    command_summaries = []
 
-    try:
-        await handle_mentioned_message(
-            message=capture_message,
-            user_text=request.command_text,
-            user_data=user_data,
-            room_key=room_key,
-            room_data=room_data,
-            client=client,
-        )
-    except Exception as exc:
-        print("Command adapter execution error:", exc)
-        await message.channel.send("…명령어 실행 중 오류가 났어. 결과를 반영한 답변은 만들지 않을게.")
-        return
+    for index, command_text in enumerate(request.command_texts, start=1):
+        output_start = len(capture_channel.outputs)
+        try:
+            await handle_mentioned_message(
+                message=capture_message,
+                user_text=command_text,
+                user_data=user_data,
+                room_key=room_key,
+                room_data=room_data,
+                client=client,
+            )
+        except Exception as exc:
+            print("Command adapter execution error:", exc)
+            await message.channel.send("…명령어 실행 중 오류가 났어. 결과를 반영한 답변은 만들지 않을게.")
+            return
 
-    command_output = "\n".join(capture_channel.outputs).strip()
-    if not command_output:
-        command_output = "명령어가 실행됐지만 표시된 결과 메시지는 없었어."
+        command_output = "\n".join(capture_channel.outputs[output_start:]).strip()
+        if not command_output:
+            command_output = "명령어가 실행됐지만 표시된 결과 메시지는 없었어."
+        command_summaries.append(_format_adapter_command_summary(index, command_text, command_output))
+
+    extra_context = None
+    if command_summaries:
+        extra_context = "\n\n".join(command_summaries)[:ADAPTER_CONTEXT_LIMIT]
 
     async with message.channel.typing():
         display_name = getattr(message.author, "display_name", message.author.name)
@@ -366,10 +396,8 @@ async def _run_command_adapter(
             user_id=message.author.id,
             display_name=display_name,
             room_key=room_key,
-            extra_context=(
-                f"명령어: {request.command_text}\n"
-                f"결과:\n{command_output[:3000]}"
-            ),
+            extra_context=extra_context,
+            force_web_search=force_web_search,
         )
 
     await message.channel.send(reply[:1900])
@@ -411,6 +439,23 @@ async def handle_mentioned_message(
                 room_key=room_key,
                 room_data=room_data,
                 client=client,
+            )
+            return
+
+    for web_adapter_alias in ("/검색실행", "/인터넷실행", "/검색답변"):
+        if matches_command(user_text, web_adapter_alias):
+            if not special_user:
+                await message.channel.send("…인터넷 검색 실행은 특별 사용자만 사용할 수 있어.")
+                return
+            await _run_command_adapter(
+                message=message,
+                raw_text=_command_arg(user_text, web_adapter_alias),
+                user_data=user_data,
+                room_key=room_key,
+                room_data=room_data,
+                client=client,
+                force_web_search=True,
+                allow_prompt_only=True,
             )
             return
 

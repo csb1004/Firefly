@@ -29,4 +29,11 @@ def test_help_lists_profile_dice_team_and_adapter_commands():
     assert "/프로필 [@유저]" in text
     assert "/주사위 [시작] [끝]" in text
     assert "/팀나누기" in text
-    assert "/실행 [명령어] | [프롬프트]" in text
+    assert "/실행 [명령어들] | [프롬프트]" in text
+
+
+def test_special_help_lists_one_shot_web_search_command():
+    text = _field_text(create_special_help_embed())
+
+    assert "/검색실행 [프롬프트]" in text
+    assert "/검색실행 [명령어들] || [프롬프트]" in text

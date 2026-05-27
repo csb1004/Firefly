@@ -197,6 +197,7 @@ async def generate_reply(
     room_key: str,
     *,
     extra_context: str | None = None,
+    force_web_search: bool = False,
 ) -> str:
     if user_message.strip() == "그 긴거 해줘":
         return LONG_SAM_LINE
@@ -205,7 +206,7 @@ async def generate_reply(
     room_data = get_room_data(room_key)
 
     group_mode = room_data.get("group_mode", False)
-    internet_mode = room_data.get("internet_mode", False)
+    internet_mode = force_web_search or room_data.get("internet_mode", False)
 
     before_affection = int(user_data.get("affection", DEFAULT_AFFECTION))
     user_data = adjust_affection(user_id, user_data, user_message)

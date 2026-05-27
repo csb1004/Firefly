@@ -230,7 +230,7 @@ async def team_split_slash(
 @tree.command(name="실행", description="명령어를 먼저 실행하고 그 결과를 반영해 반디가 답해요.")
 @app_commands.rename(command_text="명령어", prompt="프롬프트")
 @app_commands.describe(
-    command_text="먼저 실행할 명령어. 예: 주사위 1 6",
+    command_text="먼저 실행할 명령어. 여러 개는 &&로 구분해요. 예: 주사위 1 6 && 프로필 @유저",
     prompt="명령어 결과를 반영해서 답할 요청",
 )
 async def command_adapter_slash(
@@ -240,6 +240,25 @@ async def command_adapter_slash(
 ):
     separator = "||" if "|" in command_text else "|"
     await _run_text_command_slash(interaction, f"/실행 {command_text} {separator} {prompt}")
+
+
+@tree.command(name="검색실행", description="이 답변 한 번만 인터넷 검색을 사용해 반디가 답해요. 특별 사용자 전용.")
+@app_commands.rename(prompt="프롬프트", command_text="명령어")
+@app_commands.describe(
+    prompt="인터넷 검색을 사용해서 답할 요청",
+    command_text="선택: 먼저 실행할 명령어. 여러 개는 &&로 구분해요.",
+)
+async def web_command_adapter_slash(
+    interaction: discord.Interaction,
+    prompt: str,
+    command_text: str | None = None,
+):
+    if command_text:
+        separator = "||" if "|" in command_text else "|"
+        user_text = f"/검색실행 {command_text} {separator} {prompt}"
+    else:
+        user_text = f"/검색실행 {prompt}"
+    await _run_text_command_slash(interaction, user_text)
 
 
 @tree.command(name="기록", description="현재 들어가 있는 통화방의 대화를 전사해서 저장해요.")

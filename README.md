@@ -62,7 +62,8 @@ Optional:
 - `/프로필 [@유저]`: show a user's profile avatar, name, nickname, affection, and last-seen time.
 - `/주사위 [시작] [끝]`: roll one number inside the inclusive range, e.g. `/주사위 1 6`.
 - `/팀나누기 팀수=2 | Alice, Bob, Carol, Dana`: shuffle members into balanced teams. Use `팀당=3` to split by team size.
-- `/실행 [명령어] | [프롬프트]`: run a bot command first, print its result, then answer with that result as context. Use `||` as the separator when the command itself contains `|`.
+- `/실행 [명령어들] | [프롬프트]`: run one or more bot commands first, print their results, then answer with those results as context. Separate multiple commands with `&&`; use `||` as the prompt separator when any command contains `|`.
+- `/검색실행 [프롬프트]` or `/검색실행 [명령어들] || [프롬프트]`: special-user-only one-shot web search for the final reply without changing the room's persistent internet mode.
 - Voice recording commands accept list indexes such as `1번`, `#1`, or `index:1` wherever a recording filename is accepted.
 
 ## Deployment

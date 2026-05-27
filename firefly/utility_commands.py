@@ -29,7 +29,7 @@ class TeamSplitRequest:
 
 @dataclass(frozen=True)
 class CommandAdapterRequest:
-    command_text: str
+    command_texts: tuple[str, ...]
     prompt: str
 
 
@@ -37,6 +37,7 @@ TEAM_COUNT_KEYS = {"팀수", "팀", "조", "조수", "teams", "team_count"}
 TEAM_SIZE_KEYS = {"팀당", "팀원", "인원", "size", "team_size", "members_per_team"}
 MAX_DICE_ABS_VALUE = 1_000_000_000
 MAX_TEAM_MEMBERS = 100
+MAX_ADAPTER_COMMANDS = 5
 
 
 def parse_dice_args(raw_text: str) -> DiceRequest:
@@ -182,7 +183,35 @@ def format_team_split_result(request: TeamSplitRequest, teams: list[list[str]]) 
     return "\n".join(lines)
 
 
-def parse_command_adapter_args(raw_text: str) -> CommandAdapterRequest:
+def _normalize_adapter_command(command_text: str) -> str:
+    command_text = command_text.strip()
+    if not command_text:
+        raise CommandUsageError("실행할 명령어 이름이 비어 있어.")
+    if not command_text.startswith("/"):
+        command_text = f"/{command_text}"
+    if command_text == "/":
+        raise CommandUsageError("실행할 명령어 이름이 비어 있어.")
+    return command_text
+
+
+def _split_adapter_commands(command_block: str) -> tuple[str, ...]:
+    raw_commands = [
+        part.strip()
+        for part in re.split(r"\s*(?:&&|\n+)\s*", command_block.strip())
+        if part.strip()
+    ]
+    if not raw_commands:
+        raise CommandUsageError("먼저 실행할 명령어를 적어줘.")
+    if len(raw_commands) > MAX_ADAPTER_COMMANDS:
+        raise CommandUsageError(f"`/실행`에서는 명령어를 한 번에 최대 {MAX_ADAPTER_COMMANDS}개까지 실행할 수 있어.")
+    return tuple(_normalize_adapter_command(command) for command in raw_commands)
+
+
+def parse_command_adapter_args(
+    raw_text: str,
+    *,
+    allow_prompt_only: bool = False,
+) -> CommandAdapterRequest:
     text = raw_text.strip()
     if text.startswith("(") and text.endswith(")"):
         text = text[1:-1].strip()
@@ -192,21 +221,18 @@ def parse_command_adapter_args(raw_text: str) -> CommandAdapterRequest:
     else:
         command_text, separator, prompt = text.partition("|")
     if not separator:
+        if allow_prompt_only and text:
+            return CommandAdapterRequest(command_texts=(), prompt=text)
         raise CommandUsageError(
             "사용법: `/실행 주사위 1 6 | 주사위를 굴려서 나온 숫자에 4 더해줘`"
         )
 
     command_text = command_text.strip()
     prompt = prompt.strip()
-    if not command_text:
+    if not command_text and not allow_prompt_only:
         raise CommandUsageError("먼저 실행할 명령어를 적어줘.")
     if not prompt:
         raise CommandUsageError("명령어 결과로 이어서 답할 프롬프트를 적어줘.")
 
-    if not command_text.startswith("/"):
-        command_text = f"/{command_text}"
-
-    if command_text == "/":
-        raise CommandUsageError("실행할 명령어 이름이 비어 있어.")
-
-    return CommandAdapterRequest(command_text=command_text, prompt=prompt)
+    command_texts = _split_adapter_commands(command_text) if command_text else ()
+    return CommandAdapterRequest(command_texts=command_texts, prompt=prompt)

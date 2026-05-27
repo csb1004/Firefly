@@ -64,7 +64,7 @@ def test_split_members_into_balanced_teams():
 def test_parse_command_adapter_args_supports_single_separator():
     request = parse_command_adapter_args("주사위 1 6 | 나온 숫자에 4 더해줘")
 
-    assert request.command_text == "/주사위 1 6"
+    assert request.command_texts == ("/주사위 1 6",)
     assert request.prompt == "나온 숫자에 4 더해줘"
 
 
@@ -73,7 +73,7 @@ def test_parse_command_adapter_args_supports_double_separator_for_pipe_commands(
         "/팀나누기 팀수=2 | 철수, 영희, 민수, 수진 || 첫 번째 팀만 알려줘"
     )
 
-    assert request.command_text == "/팀나누기 팀수=2 | 철수, 영희, 민수, 수진"
+    assert request.command_texts == ("/팀나누기 팀수=2 | 철수, 영희, 민수, 수진",)
     assert request.prompt == "첫 번째 팀만 알려줘"
 
 
@@ -84,8 +84,36 @@ def test_parse_command_adapter_args_supports_poll_command_with_followup_prompt()
         "|| 고른 이유도 같이 알려줘"
     )
 
-    assert request.command_text == (
-        "/투표 반디랑 갈 데이트 장소 | 항목수=4 | 조용한 북카페 | "
-        "한적한 공원 산책길 | 작은 수족관 | 야경 보이는 강변 | 10분"
+    assert request.command_texts == (
+        (
+            "/투표 반디랑 갈 데이트 장소 | 항목수=4 | 조용한 북카페 | "
+            "한적한 공원 산책길 | 작은 수족관 | 야경 보이는 강변 | 10분"
+        ),
     )
     assert request.prompt == "고른 이유도 같이 알려줘"
+
+
+def test_parse_command_adapter_args_supports_multiple_commands():
+    request = parse_command_adapter_args("주사위 1 6 && 프로필 | 결과를 같이 설명해줘")
+
+    assert request.command_texts == ("/주사위 1 6", "/프로필")
+    assert request.prompt == "결과를 같이 설명해줘"
+
+
+def test_parse_command_adapter_args_supports_newline_separated_commands():
+    request = parse_command_adapter_args("dice 1 1\nprofile @user | combine the results")
+
+    assert request.command_texts == ("/dice 1 1", "/profile @user")
+    assert request.prompt == "combine the results"
+
+
+def test_parse_command_adapter_args_rejects_too_many_commands():
+    with pytest.raises(CommandUsageError):
+        parse_command_adapter_args("a && b && c && d && e && f | summarize")
+
+
+def test_parse_command_adapter_args_supports_prompt_only_when_allowed():
+    request = parse_command_adapter_args("최신 AI 소식 알려줘", allow_prompt_only=True)
+
+    assert request.command_texts == ()
+    assert request.prompt == "최신 AI 소식 알려줘"
