@@ -119,6 +119,47 @@ def test_auto_command_runs_with_original_message_author(monkeypatch):
     assert sent_messages == ["응. 이제부터는 새별(이)라고 불러볼게."]
 
 
+def test_natural_nickname_command_runs_without_model(monkeypatch):
+    sent_messages = []
+    updated_users = []
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content)
+
+    async def fail_generate_reply(**kwargs):
+        raise AssertionError("natural command should not call the model")
+
+    def fake_update_user_data(user_id, user_data):
+        updated_users.append((user_id, dict(user_data)))
+
+    monkeypatch.setattr(commands, "generate_reply", fail_generate_reply)
+    monkeypatch.setattr(commands, "update_user_data", fake_update_user_data)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+    user_data = {"name": "Alice", "nickname": "Alice", "affection": 50}
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="칭호를 새별이라고 바꿔줘",
+            user_data=user_data,
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert updated_users == [(123, {"name": "Alice", "nickname": "새별", "affection": 50})]
+    assert sent_messages == ["응. 이제부터는 새별(이)라고 불러볼게."]
+
+
 def test_command_adapter_runs_command_then_replies_with_result(monkeypatch):
     sent_messages = []
     reply_kwargs = {}

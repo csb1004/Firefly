@@ -258,6 +258,13 @@ async def web_command_adapter_slash(
     await _run_text_command_slash(interaction, user_text)
 
 
+@tree.command(name="역할", description="역할 부여, 제거, 색, 이름, 권한을 바꿔요. 특별 사용자 전용.")
+@app_commands.rename(command_text="명령")
+@app_commands.describe(command_text="예: 부여 @유저 @역할, 색 @역할 #ffaa00, 권한제거 @역할 관리자")
+async def role_slash(interaction: discord.Interaction, command_text: str):
+    await _run_text_command_slash(interaction, f"/역할 {command_text}", ephemeral=True)
+
+
 @tree.command(name="기록", description="현재 들어가 있는 통화방의 대화를 전사해서 저장해요.")
 async def record_slash(interaction: discord.Interaction):
     if not await _require_special_interaction(interaction):

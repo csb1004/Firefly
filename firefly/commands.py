@@ -5,13 +5,14 @@ import discord
 from .affection import change_user_affection, set_user_affection
 from .admin_status import build_admin_status_text
 from .ai import generate_reply, summarize_conversation, summarize_voice_recording, summarize_voice_search
-from .command_registry import ADMIN_STATUS_COMMAND, VOICE_SEARCH_COMMAND, matched_alias
+from .command_registry import ADMIN_STATUS_COMMAND, ROLE_COMMAND, VOICE_SEARCH_COMMAND, matched_alias
 from .commands_parser import (
     SPECIAL_ONLY_COMMAND_PREFIXES,
     SUMMARY_SCOPE_TOKENS,
     command_arg,
     is_special_only_command,
     matches_command,
+    normalize_natural_command,
     parse_summary_args,
     summary_recording_filename,
 )
@@ -26,6 +27,7 @@ from .embeds import (
 )
 from .news import handle_news_command, is_news_command_text
 from .polls import cancel_poll_tasks, close_poll_from_command, create_poll_from_command
+from .role_commands import handle_role_command, is_role_command_text
 from .storage import (
     MEMORY_SECTION_LABELS,
     ensure_memory_section_file,
@@ -129,6 +131,8 @@ ADAPTER_BLOCKED_COMMAND_PREFIXES = (
     "/메모리초기화",
     "/메모리파일초기화",
     "/방초기화",
+    "/역할",
+    "/role",
 )
 
 
@@ -509,6 +513,18 @@ async def handle_mentioned_message(
     author_id = message.author.id
     special_user = is_special_user(author_id)
 
+    natural_command = normalize_natural_command(user_text, special_user=special_user)
+    if natural_command:
+        await handle_mentioned_message(
+            message=message,
+            user_text=natural_command,
+            user_data=user_data,
+            room_key=room_key,
+            room_data=room_data,
+            client=client,
+        )
+        return
+
     voice_search_alias = matched_alias(user_text, VOICE_SEARCH_COMMAND.aliases)
     if voice_search_alias:
         if not special_user:
@@ -523,6 +539,18 @@ async def handle_mentioned_message(
             await message.channel.send("그 명령어는 특별 사용자만 사용할 수 있어.")
             return
         await _send_admin_status(message, room_key, room_data)
+        return
+
+    role_alias = matched_alias(user_text, ROLE_COMMAND.aliases)
+    if role_alias:
+        if not special_user:
+            await message.channel.send("그 명령어는 특별 사용자만 사용할 수 있어.")
+            return
+        await handle_role_command(message, _command_arg(user_text, role_alias))
+        return
+
+    if special_user and is_role_command_text(user_text):
+        await handle_role_command(message, user_text)
         return
 
     for adapter_alias in ("/실행", "/명령답변"):

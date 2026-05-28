@@ -12,6 +12,7 @@ from .config import (
     NEWS_DEFAULT_MINUTE,
     NEWS_DEFAULT_TOPICS,
     SPECIAL_USER_ID,
+    SPECIAL_USER_NAME,
 )
 from .storage import update_memory
 
@@ -22,6 +23,7 @@ TOPIC_COMMAND_PREFIX = "/주제"
 NEWS_MESSAGE_LIMIT = 1900
 NEWS_DELIVERED_ITEM_LIMIT = 200
 NEWS_PROMPT_RECENT_ITEM_LIMIT = 40
+NEWS_OWNER_BOOTSTRAPPED_KEY = "default_owner_subscription_bootstrapped"
 URL_PATTERN = re.compile(r"https?://[^\s<>()\]]+", re.IGNORECASE)
 REPORT_ITEM_PATTERN = re.compile(r"(?m)^\s*(?:\[\d+\]|\d+\.)\s+(.+)$")
 REPORT_ITEM_PREFIX_PATTERN = re.compile(r"^\s*(?:\[\d+\]|\d+\.)\s+")
@@ -55,6 +57,14 @@ def _default_news_settings() -> dict:
         "subscribers": {},
         "delivered_items": [],
         "last_delivered_window_end": None,
+    }
+
+
+def _default_owner_subscriber() -> dict:
+    return {
+        "name": SPECIAL_USER_NAME,
+        "added_at": _now_kst().isoformat(),
+        "last_sent_at": None,
     }
 
 
@@ -101,6 +111,12 @@ def _normalize_news_settings(settings: dict | None) -> dict:
             "added_at": subscriber.get("added_at"),
             "last_sent_at": subscriber.get("last_sent_at"),
         }
+
+    if normalized_subscribers:
+        settings[NEWS_OWNER_BOOTSTRAPPED_KEY] = True
+    elif not settings.get(NEWS_OWNER_BOOTSTRAPPED_KEY):
+        normalized_subscribers[str(SPECIAL_USER_ID)] = _default_owner_subscriber()
+        settings[NEWS_OWNER_BOOTSTRAPPED_KEY] = True
 
     settings["hour"] = hour
     settings["minute"] = minute
@@ -465,6 +481,7 @@ def _add_subscriber(user: discord.User | discord.Member) -> bool:
             "added_at": now.isoformat(),
             "last_sent_at": subscribers.get(user_id, {}).get("last_sent_at"),
         }
+        settings[NEWS_OWNER_BOOTSTRAPPED_KEY] = True
         today_target = _today_schedule(now, settings["hour"], settings["minute"])
         if today_target <= now and not had_subscribers:
             settings["last_delivered_window_end"] = today_target.isoformat()
@@ -476,6 +493,7 @@ def _add_subscriber(user: discord.User | discord.Member) -> bool:
 def _remove_subscriber(user_id: int) -> bool:
     def mutate(settings: dict) -> bool:
         subscribers = settings.setdefault("subscribers", {})
+        settings[NEWS_OWNER_BOOTSTRAPPED_KEY] = True
         return subscribers.pop(str(user_id), None) is not None
 
     return _update_news_settings(mutate)
@@ -951,7 +969,11 @@ async def deliver_daily_news(client: discord.Client) -> bool:
         if not report:
             report = _empty_news_report(window_start, window_end, settings["topics"])
 
-    await _send_digest_to_subscribers(report, recipients)
+    sent_count = await _send_digest_to_subscribers(report, recipients)
+    if sent_count <= 0:
+        print("Daily news digest was generated but no recipient received it; delivery will be retried later.")
+        return False
+
     _mark_window_delivered(window_end, report)
     return True
 

@@ -20,10 +20,17 @@ ADMIN_STATUS_COMMAND = TextCommandSpec(
     summary="Show runtime memory, room, news, poll, and recording status.",
 )
 
+ROLE_COMMAND = TextCommandSpec(
+    aliases=("/역할", "/role"),
+    special_only=True,
+    summary="Manage Discord roles, colors, names, assignments, and permissions.",
+)
+
 
 REGISTERED_TEXT_COMMANDS = (
     VOICE_SEARCH_COMMAND,
     ADMIN_STATUS_COMMAND,
+    ROLE_COMMAND,
 )
 
 

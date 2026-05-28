@@ -30,6 +30,7 @@ def test_help_lists_profile_dice_team_and_adapter_commands():
     assert "/주사위 [시작] [끝]" in text
     assert "/팀나누기" in text
     assert "/실행 [명령어들] | [프롬프트]" in text
+    assert "특별 사용자 전용 명령은 여기서도 권한을 우회할 수 없어" in text
 
 
 def test_special_help_lists_one_shot_web_search_command():
@@ -44,3 +45,10 @@ def test_special_help_lists_split_memory_commands():
 
     assert "/메모리파일 [대화/방/투표/뉴스]" in text
     assert "/메모리초기화 [대상] 확인" in text
+
+
+def test_special_help_lists_role_management_commands():
+    text = _field_text(create_special_help_embed())
+
+    assert "/역할 부여 @유저 @역할" in text
+    assert "/역할 권한제거 @역할 [권한]" in text
