@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import discord
 
 from firefly import commands
+from firefly.role_commands import _parse_color_value
 
 
 class FakeChannel:
@@ -118,6 +119,75 @@ def test_role_command_changes_role_color():
 
     assert role.edit_calls[0]["color"] == discord.Color(0xFFAA00)
     assert channel.sent_messages == ["…응. <@&456> 색을 `#FFAA00`로 바꿨어."]
+
+
+def test_role_color_parser_accepts_natural_color_names_and_loose_hex():
+    assert _parse_color_value("하늘색 계열로 해줘") == 0x87CEEB
+    assert _parse_color_value("하얀색으로") == 0xFFFFFF
+    assert _parse_color_value("ffffff로해줘") == 0xFFFFFF
+    assert _parse_color_value("#0af로") == 0x00AAFF
+
+
+def test_role_command_renames_and_recolors_in_one_message():
+    channel = FakeChannel()
+    member = FakeMember()
+    role = FakeRole(name="일레이나")
+    message = _message(channel, member, role)
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text='일레이나 역할을 "관리자"로 이름 바꿔줘. 색은 하늘색 계열로 해줘',
+            user_data={},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert role.edit_calls[0]["name"] == "관리자"
+    assert role.edit_calls[1]["color"] == discord.Color(0x87CEEB)
+    assert channel.sent_messages == [
+        "…응. `일레이나` 역할 이름을 `관리자`로 바꿨어.",
+        "…응. <@&456> 색을 `#87CEEB`로 바꿨어.",
+    ]
+
+
+def test_color_followup_without_role_asks_for_role_instead_of_calling_model(monkeypatch):
+    channel = FakeChannel()
+    member = FakeMember()
+    role = FakeRole()
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=channel,
+        mentions=[],
+        role_mentions=[],
+        guild=FakeGuild(member, role),
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    async def fail_generate_reply(**kwargs):
+        raise AssertionError("color follow-up should not call the model")
+
+    monkeypatch.setattr(commands, "generate_reply", fail_generate_reply)
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="그러면 ffffff로해줘",
+            user_data={},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert channel.sent_messages == ["…대상 역할을 멘션하거나 정확한 역할 이름을 적어줘."]
 
 
 def test_role_command_removes_permissions():

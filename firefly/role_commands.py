@@ -22,6 +22,14 @@ ACTION_RENAME = "rename"
 ACTION_ALLOW_PERMISSIONS = "allow_permissions"
 ACTION_DENY_PERMISSIONS = "deny_permissions"
 ACTION_HELP = "help"
+ROLE_ACTIONS = {
+    ACTION_ASSIGN,
+    ACTION_REMOVE,
+    ACTION_COLOR,
+    ACTION_RENAME,
+    ACTION_ALLOW_PERMISSIONS,
+    ACTION_DENY_PERMISSIONS,
+}
 
 ASSIGN_WORDS = ("부여", "지급", "달아", "달기", "줘", "주기", "추가")
 REMOVE_WORDS = ("제거", "해제", "빼", "빼기", "박탈", "삭제")
@@ -93,11 +101,31 @@ COLOR_ALIASES = {
     "노랑": 0xFEE75C,
     "초록": 0x57F287,
     "파랑": 0x3498DB,
+    "파란색": 0x3498DB,
+    "하늘": 0x87CEEB,
+    "하늘색": 0x87CEEB,
+    "스카이블루": 0x87CEEB,
+    "skyblue": 0x87CEEB,
+    "sky blue": 0x87CEEB,
+    "청록": 0x1ABC9C,
+    "청록색": 0x1ABC9C,
+    "민트": 0x57F287,
+    "민트색": 0x57F287,
     "보라": 0x9B59B6,
+    "보라색": 0x9B59B6,
     "분홍": 0xEB459E,
+    "분홍색": 0xEB459E,
+    "핑크": 0xEB459E,
     "검정": 0x23272A,
+    "검은색": 0x23272A,
+    "검정색": 0x23272A,
     "하양": 0xFFFFFF,
+    "하얀색": 0xFFFFFF,
+    "흰색": 0xFFFFFF,
+    "화이트": 0xFFFFFF,
+    "white": 0xFFFFFF,
 }
+COLOR_WORD_PATTERN = re.compile(r"(?<!검)색(?:상|깔|은|을|이|으로|도|만|$|\s)|컬러|color", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -117,6 +145,10 @@ def _normalize_spaces(text: str) -> str:
 def _contains_any(text: str, words: tuple[str, ...]) -> bool:
     folded = text.casefold()
     return any(word.casefold() in folded for word in words)
+
+
+def _contains_color_word(text: str) -> bool:
+    return bool(COLOR_WORD_PATTERN.search(text))
 
 
 def _role_mentions(message: discord.Message) -> list[discord.Role]:
@@ -203,7 +235,9 @@ def _parse_action(text: str) -> str:
             return ACTION_ALLOW_PERMISSIONS
         return ACTION_HELP
 
-    if _contains_any(text, COLOR_WORDS):
+    if _parse_color_value(text) is not None:
+        return ACTION_COLOR
+    if _contains_color_word(text):
         return ACTION_COLOR
     if _contains_any(text, RENAME_WORDS):
         return ACTION_RENAME
@@ -215,9 +249,14 @@ def _parse_action(text: str) -> str:
 
 
 def _parse_color_value(text: str) -> int | None:
-    hex_match = re.search(r"#?([0-9a-fA-F]{6})\b", text)
+    hex_match = re.search(r"(?<![0-9a-fA-F])#?([0-9a-fA-F]{6})(?![0-9a-fA-F])", text)
     if hex_match:
         return int(hex_match.group(1), 16)
+
+    short_hex_match = re.search(r"(?<![0-9a-fA-F])#([0-9a-fA-F]{3})(?![0-9a-fA-F])", text)
+    if short_hex_match:
+        red, green, blue = short_hex_match.group(1)
+        return int(f"{red}{red}{green}{green}{blue}{blue}", 16)
 
     folded = text.casefold()
     for name, value in COLOR_ALIASES.items():
@@ -232,15 +271,29 @@ def _remove_fragment(text: str, fragment: str) -> str:
     return re.sub(re.escape(fragment), " ", text, count=1, flags=re.IGNORECASE)
 
 
+def _clean_role_name(raw_name: str) -> str | None:
+    name = _normalize_spaces(raw_name)
+    quoted_names = re.findall(r"[\"'`“”‘’]([^\"'`“”‘’]+)[\"'`“”‘’]", name)
+    if quoted_names:
+        name = quoted_names[-1]
+    name = name.strip("\"'`“”‘’.,;:()[]{}")
+    name = re.sub(r"^역할(?:을|를|은|는)?\s*", "", name).strip()
+    name = re.sub(r"\s*(?:으로|로|이라고|라고)$", "", name).strip()
+    return name or None
+
+
 def _extract_new_name(text: str, role: discord.Role | None) -> str | None:
     patterns = (
         r"(?:이름|명칭)(?:을|를)?\s+(.+?)(?:으로|로|이라고|라고)?\s*(?:바꿔|변경|설정|수정)",
+        r"(.+?)(?:으로|로|이라고|라고)\s*(?:이름|명칭)(?:을|를)?\s*(?:바꿔|변경|설정|수정)",
         r"(?:rename|name)\s+(.+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            return _normalize_spaces(match.group(1)).strip("\"'`")
+            new_name = _clean_role_name(match.group(1))
+            if new_name:
+                return new_name
 
     remaining = text
     if role is not None:
@@ -249,8 +302,7 @@ def _extract_new_name(text: str, role: discord.Role | None) -> str | None:
 
     for word in ("역할", "이름", "명칭", "rename", "name", "바꿔줘", "바꿔", "변경해줘", "변경", "설정해줘", "설정"):
         remaining = _remove_fragment(remaining, word)
-    remaining = _normalize_spaces(remaining).strip("\"'`")
-    return remaining or None
+    return _clean_role_name(remaining)
 
 
 def _valid_permission_flags() -> set[str]:
@@ -304,6 +356,14 @@ def _permission_text_without_role(text: str, role: discord.Role | None) -> str:
     return remaining
 
 
+def _text_without_role(text: str, role: discord.Role | None) -> str:
+    remaining = text
+    if role is not None:
+        remaining = _remove_fragment(remaining, getattr(role, "mention", ""))
+        remaining = _remove_fragment(remaining, getattr(role, "name", ""))
+    return remaining
+
+
 def _request_from_text(message: discord.Message, text: str) -> RoleRequest:
     text = _normalize_spaces(text)
     action = _parse_action(text)
@@ -314,7 +374,7 @@ def _request_from_text(message: discord.Message, text: str) -> RoleRequest:
     member = _resolve_member(message, text)
 
     if action == ACTION_COLOR:
-        return RoleRequest(action=action, role=role, color_value=_parse_color_value(text))
+        return RoleRequest(action=action, role=role, color_value=_parse_color_value(_text_without_role(text, role)))
     if action == ACTION_RENAME:
         return RoleRequest(action=action, role=role, new_name=_extract_new_name(text, role))
     if action in {ACTION_ALLOW_PERMISSIONS, ACTION_DENY_PERMISSIONS}:
@@ -326,11 +386,35 @@ def _request_from_text(message: discord.Message, text: str) -> RoleRequest:
     return RoleRequest(action=action, role=role, member=member)
 
 
+def _requests_from_text(message: discord.Message, text: str) -> list[RoleRequest]:
+    text = _normalize_spaces(text)
+    action = _parse_action(text)
+    if action == ACTION_HELP:
+        return [RoleRequest(action=ACTION_HELP)]
+
+    role = _resolve_role(message, text)
+    color_text = _text_without_role(text, role)
+    requests = []
+    if _contains_any(text, RENAME_WORDS):
+        requests.append(RoleRequest(action=ACTION_RENAME, role=role, new_name=_extract_new_name(text, role)))
+
+    if _contains_color_word(color_text) or _parse_color_value(color_text) is not None:
+        requests.append(RoleRequest(action=ACTION_COLOR, role=role, color_value=_parse_color_value(color_text)))
+
+    if requests:
+        return requests
+    return [_request_from_text(message, text)]
+
+
 def is_role_command_text(user_text: str) -> bool:
     text = _normalize_spaces(user_text)
     if text.startswith("/역할") or text.startswith("/role"):
         return True
-    return "역할" in text and _parse_action(text) != ACTION_HELP
+    return _parse_action(text) in ROLE_ACTIONS and (
+        "역할" in text
+        or bool(_parse_color_value(text))
+        or _contains_color_word(text)
+    )
 
 
 def _format_role(role: discord.Role) -> str:
@@ -351,7 +435,7 @@ def _missing_target_message(request: RoleRequest) -> str | None:
         return "…대상 역할을 멘션하거나 정확한 역할 이름을 적어줘."
 
     if request.action == ACTION_COLOR and request.color_value is None:
-        return "…색은 `#ffaa00` 같은 6자리 HEX나 빨강/파랑 같은 이름으로 적어줘."
+        return "…색은 `#ffaa00`, `ffffff` 같은 HEX나 하늘색/하얀색/빨강/파랑 같은 이름으로 적어줘."
     if request.action == ACTION_RENAME and not request.new_name:
         return "…새 역할 이름을 같이 적어줘."
     if request.action in {ACTION_ALLOW_PERMISSIONS, ACTION_DENY_PERMISSIONS} and not request.permission_flags:
@@ -376,39 +460,41 @@ async def handle_role_command(message: discord.Message, raw_text: str) -> None:
         await message.channel.send("…역할 관리는 서버 안에서만 할 수 있어.")
         return
 
-    request = _request_from_text(message, raw_text)
-    if request.action == ACTION_HELP:
+    requests = _requests_from_text(message, raw_text)
+    if len(requests) == 1 and requests[0].action == ACTION_HELP:
         await message.channel.send(ROLE_USAGE_TEXT)
         return
 
-    missing_message = _missing_target_message(request)
-    if missing_message:
-        await message.channel.send(missing_message)
-        return
+    for request in requests:
+        missing_message = _missing_target_message(request)
+        if missing_message:
+            await message.channel.send(missing_message)
+            return
 
     reason = f"Firefly role command by {getattr(message.author, 'id', 'unknown')}"
 
     try:
-        if request.action == ACTION_ASSIGN:
-            await request.member.add_roles(request.role, reason=reason)
-            await message.channel.send(f"…응. {_format_member(request.member)}에게 {_format_role(request.role)} 역할을 부여했어.")
-        elif request.action == ACTION_REMOVE:
-            await request.member.remove_roles(request.role, reason=reason)
-            await message.channel.send(f"…응. {_format_member(request.member)}에게서 {_format_role(request.role)} 역할을 제거했어.")
-        elif request.action == ACTION_COLOR:
-            await request.role.edit(color=discord.Color(request.color_value), reason=reason)
-            await message.channel.send(f"…응. {_format_role(request.role)} 색을 `#{request.color_value:06X}`로 바꿨어.")
-        elif request.action == ACTION_RENAME:
-            old_name = getattr(request.role, "name", "역할")
-            await request.role.edit(name=request.new_name, reason=reason)
-            await message.channel.send(f"…응. `{old_name}` 역할 이름을 `{request.new_name}`로 바꿨어.")
-        elif request.action in {ACTION_ALLOW_PERMISSIONS, ACTION_DENY_PERMISSIONS}:
-            enabled = request.action == ACTION_ALLOW_PERMISSIONS
-            await _edit_role_permissions(request.role, request.permission_flags, enabled, reason)
-            action_text = "추가" if enabled else "제거"
-            await message.channel.send(
-                f"…응. {_format_role(request.role)} 역할에서 `{', '.join(request.permission_flags)}` 권한을 {action_text}했어."
-            )
+        for request in requests:
+            if request.action == ACTION_ASSIGN:
+                await request.member.add_roles(request.role, reason=reason)
+                await message.channel.send(f"…응. {_format_member(request.member)}에게 {_format_role(request.role)} 역할을 부여했어.")
+            elif request.action == ACTION_REMOVE:
+                await request.member.remove_roles(request.role, reason=reason)
+                await message.channel.send(f"…응. {_format_member(request.member)}에게서 {_format_role(request.role)} 역할을 제거했어.")
+            elif request.action == ACTION_COLOR:
+                await request.role.edit(color=discord.Color(request.color_value), reason=reason)
+                await message.channel.send(f"…응. {_format_role(request.role)} 색을 `#{request.color_value:06X}`로 바꿨어.")
+            elif request.action == ACTION_RENAME:
+                old_name = getattr(request.role, "name", "역할")
+                await request.role.edit(name=request.new_name, reason=reason)
+                await message.channel.send(f"…응. `{old_name}` 역할 이름을 `{request.new_name}`로 바꿨어.")
+            elif request.action in {ACTION_ALLOW_PERMISSIONS, ACTION_DENY_PERMISSIONS}:
+                enabled = request.action == ACTION_ALLOW_PERMISSIONS
+                await _edit_role_permissions(request.role, request.permission_flags, enabled, reason)
+                action_text = "추가" if enabled else "제거"
+                await message.channel.send(
+                    f"…응. {_format_role(request.role)} 역할에서 `{', '.join(request.permission_flags)}` 권한을 {action_text}했어."
+                )
     except discord.Forbidden:
         await message.channel.send("…디스코드 권한이나 역할 순서 때문에 처리하지 못했어. 봇 역할이 대상 역할보다 위에 있는지 확인해줘.")
     except discord.HTTPException as exc:
