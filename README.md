@@ -67,6 +67,7 @@ Optional:
 - `/검색실행 [프롬프트]` or `/검색실행 [명령어들] || [프롬프트]`: special-user-only one-shot web search for the final reply without changing the room's persistent internet mode.
 - `/투표마감 [메시지ID/최근]`: special-user-only early close for a poll by message ID, replied poll, latest poll, or the only active poll in the current channel.
 - `/역할 ...`: special-user-only Discord role management for assigning/removing roles, changing role colors/names, and adding/removing selected role permissions.
+- `/호칭 @유저 새호칭` or `/호칭 기존호칭 새호칭`: special users can change another user's nickname by mention, Discord ID, or a unique stored nickname.
 - `/메모리초기화 [대화/방/투표/뉴스] 확인`: special-user-only targeted reset for one split memory file.
 - Voice recording commands accept list indexes such as `1번`, `#1`, or `index:1` wherever a recording filename is accepted.
 - Natural phrasing is accepted for common commands such as nickname changes, dice rolls, summaries, profile/help requests, and news subscription commands.

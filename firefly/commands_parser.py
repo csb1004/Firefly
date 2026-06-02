@@ -57,7 +57,41 @@ def _strip_polite_suffix(text: str) -> str:
     return re.sub(r"\s*(?:좀|제발)?\s*$", "", text).strip()
 
 
-def _normalize_nickname_command(text: str) -> str | None:
+def _quote_command_arg(text: str) -> str:
+    text = text.strip()
+    if not re.search(r"\s|[\"“”]", text):
+        return text
+    return '"' + text.replace('"', '\\"') + '"'
+
+
+def _is_self_target(text: str) -> bool:
+    return re.sub(r"\s+", "", text).casefold() in {"나", "내", "나의", "저", "저의", "본인"}
+
+
+def _normalize_targeted_nickname_command(text: str) -> str | None:
+    patterns = (
+        r"^(.+?)(?:의|에 대한)\s*(?:호칭|칭호)(?:을|를|은|는)?\s+(.+?)(?:으로|로|이라고|라고)?\s*(?:바꿔|변경해|설정해)(?:줘|줄래|주세요)?$",
+        r"^(.+?)(?:을|를)\s+(.+?)(?:이라고|라고)\s*불러(?:줘|줄래|주세요)?$",
+    )
+
+    for pattern in patterns:
+        match = re.fullmatch(pattern, text)
+        if not match:
+            continue
+
+        target_text = _strip_polite_suffix(match.group(1))
+        nickname = _strip_polite_suffix(match.group(2))
+        if target_text and nickname and not _is_self_target(target_text):
+            return f"/호칭 {_quote_command_arg(target_text)} {nickname}"
+    return None
+
+
+def _normalize_nickname_command(text: str, *, special_user: bool = False) -> str | None:
+    if special_user:
+        targeted_command = _normalize_targeted_nickname_command(text)
+        if targeted_command:
+            return targeted_command
+
     patterns = (
         rf"^(?:앞으로\s*)?{SELF_TARGET_PATTERN}\s+(.+?)(?:이라고|라고)\s*불러(?:줘|줄래|주세요)?$",
         r"^(?:앞으로\s*)?(.+?)(?:이라고|라고)\s*불러(?:줘|줄래|주세요)?$",
@@ -159,8 +193,11 @@ def normalize_natural_command(user_text: str, *, special_user: bool = False) -> 
     if not text or text.startswith("/"):
         return None
 
+    nickname_command = _normalize_nickname_command(text, special_user=special_user)
+    if nickname_command:
+        return nickname_command
+
     normalizers = (
-        _normalize_nickname_command,
         _normalize_help_command,
         _normalize_affection_command,
         _normalize_profile_command,

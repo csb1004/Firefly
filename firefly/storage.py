@@ -1,4 +1,5 @@
 import json
+import re
 from threading import RLock
 
 import discord
@@ -86,6 +87,32 @@ def get_memory_section_file(section: str):
 def resolve_memory_section(raw_text: str) -> str | None:
     text = raw_text.strip().casefold()
     return MEMORY_SECTION_ALIASES.get(text)
+
+
+def _normalize_lookup_text(text: object) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip().casefold()
+
+
+def find_user_records_by_nickname(nickname: str) -> list[tuple[int, dict]]:
+    lookup = _normalize_lookup_text(nickname)
+    if not lookup:
+        return []
+
+    matches = []
+    for user_id_text, user_data in load_memory().items():
+        if not user_id_text.isdigit() or not isinstance(user_data, dict):
+            continue
+        if _normalize_lookup_text(user_data.get("nickname")) == lookup:
+            matches.append((int(user_id_text), dict(user_data)))
+    return matches
+
+
+def find_nickname_conflicts(nickname: str, *, exclude_user_id: int | None = None) -> list[tuple[int, dict]]:
+    return [
+        (user_id, user_data)
+        for user_id, user_data in find_user_records_by_nickname(nickname)
+        if exclude_user_id is None or user_id != exclude_user_id
+    ]
 
 
 def format_memory_section_list() -> str:

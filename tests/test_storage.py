@@ -123,6 +123,19 @@ def test_get_user_data_creates_and_normalizes_defaults(memory_file):
     assert normalized["history"] == []
 
 
+def test_find_user_records_by_nickname_and_conflicts(memory_file):
+    storage.save_memory({
+        "123": {"name": "Alice", "nickname": "새별"},
+        "456": {"name": "Bob", "nickname": "새별"},
+        "789": {"name": "Carol", "nickname": "다른별"},
+    })
+
+    matches = storage.find_user_records_by_nickname("새별")
+
+    assert [user_id for user_id, _ in matches] == [123, 456]
+    assert [user_id for user_id, _ in storage.find_nickname_conflicts("새별", exclude_user_id=123)] == [456]
+
+
 def test_add_history_trims_to_configured_limit():
     user_data = {"history": []}
 

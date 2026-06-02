@@ -184,10 +184,12 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "/검색실행 {프롬프트}" in guide
     assert "/검색실행 {명령어들} || {프롬프트}" in guide
     assert "/인터넷모드 {상태}" in guide
+    assert "/호칭 {유저멘션또는ID또는기존호칭} {호칭}" in guide
     assert "/호감도설정 {유저멘션} {숫자}" in guide
     assert "/최신소식 시간 {시간}" in guide
     assert "/주제 설정 {주제목록}" in guide
     assert "{상태}는 `on` 또는 `off`만 사용한다." in guide
+    assert "다른 사람의 호칭 변경 요청을 `/호칭 {호칭}`처럼 한 인자만 있는 자기 호칭 변경 명령으로 바꾸지 않는다." in guide
     assert "최종 답변 한 번에만 인터넷 검색을 사용하고 방 설정은 바꾸지 않는다." in guide
     assert "후속 명령어는 `/실행`이 결과를 본 뒤 고르게 둔다." in guide
     assert "이번 질문만 검색" in guide

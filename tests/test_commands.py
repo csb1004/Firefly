@@ -1,7 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from firefly import commands, storage
+from firefly import commands, nickname_commands, storage
 from firefly.config import DAILY_NEWS_KEY, POLLS_KEY
 
 
@@ -93,7 +93,7 @@ def test_auto_command_runs_with_original_message_author(monkeypatch):
         updated_users.append((user_id, dict(user_data)))
 
     monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
-    monkeypatch.setattr(commands, "update_user_data", fake_update_user_data)
+    monkeypatch.setattr(nickname_commands, "update_user_data", fake_update_user_data)
 
     message = SimpleNamespace(
         author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
@@ -134,7 +134,7 @@ def test_natural_nickname_command_runs_without_model(monkeypatch):
         updated_users.append((user_id, dict(user_data)))
 
     monkeypatch.setattr(commands, "generate_reply", fail_generate_reply)
-    monkeypatch.setattr(commands, "update_user_data", fake_update_user_data)
+    monkeypatch.setattr(nickname_commands, "update_user_data", fake_update_user_data)
 
     message = SimpleNamespace(
         author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
@@ -158,6 +158,163 @@ def test_natural_nickname_command_runs_without_model(monkeypatch):
 
     assert updated_users == [(123, {"name": "Alice", "nickname": "새별", "affection": 50})]
     assert sent_messages == ["응. 이제부터는 새별(이)라고 불러볼게."]
+
+
+def test_special_user_changes_mentioned_user_nickname_from_natural_phrase(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.save_memory({
+        "123": {"name": "IkaMom", "nickname": "개척자", "affection": 50},
+    })
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    target = SimpleNamespace(id=123, name="IkaMom", display_name="이카맘", mention="<@123>")
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[target],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="@이카맘의 칭호를 이카로 바꿔줘",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert storage.load_memory()["123"]["nickname"] == "이카"
+    assert sent_messages == ["…응. 이카맘의 호칭을 `이카`로 바꿨어."]
+
+
+def test_special_user_changes_user_nickname_by_existing_nickname(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.save_memory({
+        "123": {"name": "IkaMom", "nickname": "이카", "affection": 50},
+    })
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="이카의 칭호를 이카2로 바꿔줘",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert storage.load_memory()["123"]["nickname"] == "이카2"
+    assert sent_messages == ["…응. IkaMom의 호칭을 `이카2`로 바꿨어."]
+
+
+def test_special_user_nickname_lookup_rejects_ambiguous_existing_nickname(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.save_memory({
+        "123": {"name": "IkaMom", "nickname": "이카", "affection": 50},
+        "456": {"name": "IkaDad", "nickname": "이카", "affection": 50},
+    })
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="이카의 칭호를 이카2로 바꿔줘",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    data = storage.load_memory()
+    assert data["123"]["nickname"] == "이카"
+    assert data["456"]["nickname"] == "이카"
+    assert "`이카` 호칭을 쓰는 사람이 2명" in sent_messages[0]
+
+
+def test_nickname_change_rejects_duplicate_new_nickname(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.save_memory({
+        "123": {"name": "IkaMom", "nickname": "이카", "affection": 50},
+        "456": {"name": "IkaDad", "nickname": "이카2", "affection": 50},
+    })
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="이카의 칭호를 이카2로 바꿔줘",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert storage.load_memory()["123"]["nickname"] == "이카"
+    assert "`이카2` 호칭은 이미" in sent_messages[0]
 
 
 def test_command_adapter_runs_command_then_replies_with_result(monkeypatch):

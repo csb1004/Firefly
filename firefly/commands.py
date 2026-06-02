@@ -52,6 +52,7 @@ from .utility_commands import (
     roll_dice,
     split_members_into_teams,
 )
+from .nickname_commands import handle_nickname_command
 from .voice_search import load_voice_search_selection, parse_voice_search_args
 from .voice import start_voice_recording, stop_voice_recording
 from .voice_records import (
@@ -770,17 +771,13 @@ async def handle_mentioned_message(
         return
 
     if user_text.startswith("/호칭 "):
-        new_nickname = user_text.replace("/호칭 ", "", 1).strip()
-        if not new_nickname:
-            await message.channel.send("…호칭을 비워둘 수는 없어.")
-            return
-        if special_user:
-            await message.channel.send("…너는 특별한 호칭이 이미 정해져 있어서 바꿀 수 없어.")
-            return
-
-        user_data["nickname"] = new_nickname
-        update_user_data(author_id, user_data)
-        await message.channel.send(f"응. 이제부터는 {new_nickname}(이)라고 불러볼게.")
+        await handle_nickname_command(
+            message=message,
+            argument_text=user_text.replace("/호칭 ", "", 1),
+            user_data=user_data,
+            client=client,
+            special_user=special_user,
+        )
         return
 
     if matches_command(user_text, "/투표"):

@@ -15,6 +15,8 @@ def test_daily_news_prompt_includes_broad_source_categories():
     assert "CVPR" in user_prompt
     assert "Hugging Face Papers" in user_prompt
     assert "CVE/NVD" in user_prompt
+    assert "서울경제" in user_prompt
+    assert "안될공학" in user_prompt
 
 
 def test_daily_news_prompt_adds_broad_search_fallback_mode():

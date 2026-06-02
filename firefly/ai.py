@@ -52,6 +52,8 @@ NEWS_SOURCE_CATEGORIES = (
     "오픈소스 생태계: GitHub releases/trending/advisories, 주요 저장소 이슈/PR, PyPI, npm, crates.io, package release notes",
     "보안/인프라: CVE/NVD, GitHub Security Advisories, CNCF/Kubernetes, 주요 클라우드 보안 공지와 장애/변경 공지",
     "기술 뉴스와 동향: The Register, InfoQ, IEEE Spectrum, ACM/IEEE, Hacker News, 주요 기술 뉴스레터와 커뮤니티 요약",
+    "한국 AI/반도체/산업 뉴스: 서울경제, 전자신문, 디지털데일리, ZDNet Korea, 더밀크, AI타임스, 디일렉, IT조선 같은 국내 기사와 산업 분석",
+    "국내 영상/커뮤니티 발견 신호: 안될공학 - IT 테크 신기술 같은 빠른 기술 해설 채널은 후보를 찾는 데 참고하되, 포함 전에는 원 발표/기사/논문/공식 자료로 다시 확인",
 )
 NEWS_TOPIC_SOURCE_HINTS = (
     (
@@ -59,6 +61,8 @@ NEWS_TOPIC_SOURCE_HINTS = (
         (
             "AI 주제는 모델/제품 발표뿐 아니라 새 논문, benchmark, dataset, evaluation, safety, agent/tooling 동향까지 확인한다.",
             "대형 발표가 없으면 arXiv cs.AI/cs.LG/cs.CL/cs.CV, OpenReview, 컨퍼런스 accepted paper/workshop 페이지, Hugging Face Papers를 우선 보강한다.",
+            "한국어 기사도 확인해서 서울경제처럼 AI 반도체, HBM, 클라우드, 로봇, 국내 기업/정책과 연결된 산업 뉴스를 놓치지 않는다.",
+            "유튜브 안될공학처럼 빠른 해설 채널은 신호로 참고하되, 영상 주장만으로 단정하지 말고 원문 링크를 찾아 검증한다.",
         ),
     ),
     (
