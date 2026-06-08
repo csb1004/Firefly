@@ -46,13 +46,24 @@ def _is_auto_command_reply(reply: str) -> bool:
 NEWS_FIELD_LABELS = ("무슨 일", "왜 중요해", "확인 링크")
 NEWS_OMITTED_FIELD_LABELS = ("왜 중요해",)
 NEWS_TREND_FALLBACK_DAYS = 7
+NEWS_SELECTION_PRIORITIES = (
+    "1순위: 주요 언론, 공식 발표, 정부/표준기구/학회/연구기관 자료에서 확인되는 큰 사건을 먼저 고른다.",
+    "2순위: 대규모 모델/제품 출시, 인수합병, 규제/정책 변화, 반도체/클라우드/보안 사고, 널리 쓰이는 런타임/프레임워크의 주요 버전 발표를 고른다.",
+    "3순위: 대형 뉴스가 3개 미만일 때만 논문, 보안 권고, 주요 패키지 릴리스, 기술 동향 글로 보강한다.",
+)
+NEWS_LOW_PRIORITY_SIGNALS = (
+    "GitHub 저장소의 개별 PR/이슈, 트렌딩 저장소, 작은 changelog 한 줄은 기본 후보가 아니라 보강 후보로만 쓴다.",
+    "GitHub Copilot, IDE, 개발자 도구의 사소한 기능 추가나 UI 변경은 여러 매체가 의미 있게 다룬 경우가 아니면 후순위로 둔다.",
+    "한 회사의 작은 릴리스 노트보다 업계 영향이 큰 뉴스, 공식 발표, 보안/정책/연구 성과를 먼저 찾는다.",
+)
 NEWS_SOURCE_CATEGORIES = (
-    "공식 발표와 릴리스 노트: AI 연구소, 클라우드/반도체 회사, 언어/프레임워크/개발자 도구 프로젝트의 블로그와 changelog",
+    "주요 뉴스와 공식 발표: 주요 기술 매체, 회사/연구소/정부/표준기구의 보도자료와 공식 블로그",
+    "한국 AI/반도체/산업 뉴스: 서울경제, 전자신문, 디지털데일리, ZDNet Korea, 더밀크, AI타임스, 디일렉, IT조선 같은 국내 기사와 산업 분석",
+    "공식 릴리스 노트: AI 연구소, 클라우드/반도체 회사, 언어/프레임워크/개발자 도구 프로젝트의 주요 버전 발표와 changelog",
     "연구/논문: arXiv, OpenReview, NeurIPS, ICML, ICLR, CVPR, ACL, EMNLP, Papers with Code, Hugging Face Papers",
-    "오픈소스 생태계: GitHub releases/trending/advisories, 주요 저장소 이슈/PR, PyPI, npm, crates.io, package release notes",
     "보안/인프라: CVE/NVD, GitHub Security Advisories, CNCF/Kubernetes, 주요 클라우드 보안 공지와 장애/변경 공지",
     "기술 뉴스와 동향: The Register, InfoQ, IEEE Spectrum, ACM/IEEE, Hacker News, 주요 기술 뉴스레터와 커뮤니티 요약",
-    "한국 AI/반도체/산업 뉴스: 서울경제, 전자신문, 디지털데일리, ZDNet Korea, 더밀크, AI타임스, 디일렉, IT조선 같은 국내 기사와 산업 분석",
+    "메이저 오픈소스 생태계: Python, JavaScript/TypeScript, Rust, Go, Java, .NET, Kubernetes, Docker, GitHub Actions 같은 널리 쓰이는 프로젝트의 주요 릴리스와 advisories",
     "국내 영상/커뮤니티 발견 신호: 안될공학 - IT 테크 신기술 같은 빠른 기술 해설 채널은 후보를 찾는 데 참고하되, 포함 전에는 원 발표/기사/논문/공식 자료로 다시 확인",
 )
 NEWS_TOPIC_SOURCE_HINTS = (
@@ -136,8 +147,14 @@ def _news_topic_source_hints(topics: list[str]) -> list[str]:
 
 def _format_news_source_guidance(topics: list[str], *, broaden_search: bool) -> str:
     lines = [
+        "[선정 우선순위]",
+        *NEWS_SELECTION_PRIORITIES,
+        "",
+        "[후순위 신호]",
+        *NEWS_LOW_PRIORITY_SIGNALS,
+        "",
         "[검색 범위]",
-        "GitHub나 일반 뉴스 검색 한두 곳에서 멈추지 말고, 아래 범주를 차례로 넓혀 확인해.",
+        "먼저 주요 뉴스와 공식 발표에서 큰 사건을 찾고, 부족할 때만 GitHub와 패키지 생태계까지 차례로 넓혀 확인해.",
     ]
     lines.extend(f"- {category}" for category in NEWS_SOURCE_CATEGORIES)
 
