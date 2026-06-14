@@ -4,7 +4,13 @@ from threading import RLock
 
 import discord
 
-from .brain import BRAIN_NOTES_KEY, normalize_brain_notes
+from .brain import (
+    BRAIN_NOTES_KEY,
+    LONG_TERM_MEMORY_KEY,
+    MEMORY_STATS_KEY,
+    SHORT_TERM_MEMORY_KEY,
+    normalize_user_memory,
+)
 from .config import (
     BOT_DISPLAY_NAME,
     DAILY_NEWS_KEY,
@@ -258,13 +264,16 @@ def _new_user_data(user_id: int, display_name: str) -> dict:
         "last_seen": None,
         "history": [],
         BRAIN_NOTES_KEY: [],
+        SHORT_TERM_MEMORY_KEY: [],
+        LONG_TERM_MEMORY_KEY: [],
+        MEMORY_STATS_KEY: {"schema_version": 1},
     }
 
 
 def _normalize_user_data(user_id: int, display_name: str, user_data: dict) -> dict:
     user_data.setdefault("last_seen", None)
     user_data.setdefault("history", [])
-    normalize_brain_notes(user_data)
+    normalize_user_memory(user_data)
 
     if user_id == SPECIAL_USER_ID:
         user_data["name"] = SPECIAL_USER_NAME

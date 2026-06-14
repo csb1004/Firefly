@@ -50,6 +50,8 @@ def test_new_reasoning_and_brain_commands_are_special_only():
     for command in (
         "/추론",
         "/추론설정 높음",
+        "/메모리 파일",
+        "/memoryfile",
         "/뇌 123456789012345",
         "/뇌추가 123456789012345 평가",
         "/뇌수정 123456789012345 1 평가",

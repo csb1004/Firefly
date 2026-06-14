@@ -278,7 +278,7 @@ async def reasoning_slash(
     await _run_text_command_slash(interaction, user_text, ephemeral=True)
 
 
-@tree.command(name="뇌", description="반디의 사용자 장기 평가를 보여줘요. 권한 필요.")
+@tree.command(name="뇌", description="반디의 사용자 단기/장기 기억을 보여줘요. 권한 필요.")
 @app_commands.rename(target="유저")
 @app_commands.describe(target="확인할 유저")
 async def brain_slash(interaction: discord.Interaction, target: discord.User):
@@ -291,7 +291,7 @@ async def brain_slash(interaction: discord.Interaction, target: discord.User):
     )
 
 
-@tree.command(name="뇌추가", description="반디의 사용자 장기 평가를 추가해요. 권한 필요.")
+@tree.command(name="뇌추가", description="반디의 사용자 단기 기억 후보를 추가해요. 권한 필요.")
 @app_commands.rename(note="내용", target="유저")
 @app_commands.describe(note="추가할 평가", target="대상 유저")
 async def brain_add_slash(
@@ -308,7 +308,7 @@ async def brain_add_slash(
     )
 
 
-@tree.command(name="뇌수정", description="반디의 사용자 장기 평가를 수정해요. 권한 필요.")
+@tree.command(name="뇌수정", description="반디의 사용자 장기 기억을 수정해요. 권한 필요.")
 @app_commands.rename(index="번호", note="내용", target="유저")
 @app_commands.describe(index="수정할 평가 번호", note="새 평가 내용", target="대상 유저")
 async def brain_update_slash(
@@ -326,7 +326,7 @@ async def brain_update_slash(
     )
 
 
-@tree.command(name="뇌삭제", description="반디의 사용자 장기 평가를 삭제해요. 권한 필요.")
+@tree.command(name="뇌삭제", description="반디의 사용자 장기 기억을 삭제해요. 권한 필요.")
 @app_commands.rename(index="번호", target="유저")
 @app_commands.describe(index="삭제할 평가 번호", target="대상 유저")
 async def brain_delete_slash(
@@ -439,6 +439,14 @@ async def summary_slash(
 @app_commands.describe(filename="대화, 방, 투표, 뉴스, 메모리 파일명, 또는 통화 기록 파일명")
 async def memory_file_slash(interaction: discord.Interaction, filename: str | None = None):
     user_text = f"/메모리파일 {filename or ''}".strip()
+    await _run_text_command_slash(interaction, user_text, ephemeral=True)
+
+
+@tree.command(name="memoryfile", description="메모리 JSON 파일을 받아와요. 권한 필요.")
+@app_commands.rename(filename="파일이름")
+@app_commands.describe(filename="대화, 방, 투표, 뉴스, 메모리 파일명, 또는 통화 기록 파일명")
+async def memory_file_english_slash(interaction: discord.Interaction, filename: str | None = None):
+    user_text = f"/memoryfile {filename or ''}".strip()
     await _run_text_command_slash(interaction, user_text, ephemeral=True)
 
 

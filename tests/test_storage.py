@@ -111,6 +111,9 @@ def test_get_user_data_creates_and_normalizes_defaults(memory_file):
     assert user_data["last_seen"] is None
     assert user_data["history"] == []
     assert user_data["brain_notes"] == []
+    assert user_data["short_term_memory"] == []
+    assert user_data["long_term_memory"] == []
+    assert user_data["memory_stats"]["schema_version"] == 1
 
     data = storage.load_memory()
     data["123"].pop("last_seen")
@@ -124,6 +127,30 @@ def test_get_user_data_creates_and_normalizes_defaults(memory_file):
     assert normalized["last_seen"] is None
     assert normalized["history"] == []
     assert normalized["brain_notes"] == ["한 줄 평가"]
+    assert normalized["long_term_memory"][0]["content"] == "한 줄 평가"
+    assert normalized["long_term_memory"][0]["memory_type"] == "long_term"
+
+
+def test_user_memory_schema_recovers_from_invalid_shapes(memory_file):
+    storage.save_memory({
+        "123": {
+            "name": "Alice",
+            "nickname": "새별",
+            "affection": DEFAULT_AFFECTION,
+            "short_term_memory": "broken",
+            "long_term_memory": [{"content": "장기 선호"}],
+            "memory_stats": "broken",
+        }
+    })
+
+    normalized = storage.get_user_data(123, "Alice")
+
+    assert normalized["short_term_memory"] == []
+    assert len(normalized["long_term_memory"]) == 1
+    assert normalized["long_term_memory"][0]["content"] == "장기 선호"
+    assert normalized["long_term_memory"][0]["memory_type"] == "long_term"
+    assert normalized["brain_notes"] == ["장기 선호"]
+    assert normalized["memory_stats"]["schema_version"] == 1
 
 
 def test_find_user_records_by_nickname_and_conflicts(memory_file):

@@ -826,7 +826,7 @@ def test_brain_commands_add_update_and_delete_notes(monkeypatch, tmp_path):
     client = SimpleNamespace(user=SimpleNamespace(id=999))
 
     for command_text in (
-        f"/뇌추가 {commands.SPECIAL_USER_ID} 급할수록 짧고 확실한 답을 선호한다.",
+        f"/뇌추가 {commands.SPECIAL_USER_ID} 중요도=높음 급할수록 짧고 확실한 답을 선호한다.",
         f"/뇌수정 {commands.SPECIAL_USER_ID} 1 급할수록 짧고 실행 가능한 답을 선호한다.",
         f"/뇌삭제 {commands.SPECIAL_USER_ID} 1",
     ):
@@ -843,7 +843,7 @@ def test_brain_commands_add_update_and_delete_notes(monkeypatch, tmp_path):
 
     user_memory = storage.load_memory()[str(commands.SPECIAL_USER_ID)]
     assert user_memory["brain_notes"] == []
-    assert "1번에 저장했어" in sent_messages[0]
+    assert "장기 기억" in sent_messages[0]
     assert "1번 평가를 고쳤어" in sent_messages[1]
     assert "1번 평가를 지웠어" in sent_messages[2]
 
@@ -883,7 +883,7 @@ def test_brain_command_requires_explicit_target(monkeypatch, tmp_path):
     assert "brain_notes" not in storage.load_memory().get(str(commands.SPECIAL_USER_ID), {})
 
 
-def test_brain_command_trusts_model_judgment_after_explicit_target(monkeypatch, tmp_path):
+def test_brain_command_stores_short_term_candidate_after_explicit_target(monkeypatch, tmp_path):
     sent_messages = []
     monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
     storage.get_user_data(commands.SPECIAL_USER_ID, "Owner")
@@ -915,8 +915,10 @@ def test_brain_command_trusts_model_judgment_after_explicit_target(monkeypatch, 
         )
     )
 
-    assert "1번에 저장했어" in sent_messages[0]
-    assert storage.load_memory()[str(commands.SPECIAL_USER_ID)]["brain_notes"] == ["오늘만 피곤해서 답이 느림"]
+    assert "단기 기억 후보" in sent_messages[0]
+    user_memory = storage.load_memory()[str(commands.SPECIAL_USER_ID)]
+    assert user_memory["brain_notes"] == []
+    assert user_memory["short_term_memory"][0]["content"] == "오늘만 피곤해서 답이 느림"
 
 
 def test_affection_change_accepts_explicit_user_id(monkeypatch, tmp_path):
@@ -1091,4 +1093,46 @@ def test_memory_reset_targets_one_split_file_and_preserves_news(monkeypatch, tmp
     assert "123" not in data
     assert data[POLLS_KEY]["poll-1"]["question"] == "Dinner?"
     assert data[DAILY_NEWS_KEY]["subscribers"]["1"]["name"] == "Owner"
+
+
+def test_memory_file_alias_sends_default_conversation_memory(monkeypatch, tmp_path):
+    sent_payloads = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.save_memory({"123": {"name": "Alice", "nickname": "새별", "affection": 50}})
+
+    class FakeFile:
+        def __init__(self, path, filename=None):
+            self.path = path
+            self.filename = filename
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_payloads.append((content, kwargs))
+
+    monkeypatch.setattr(commands.discord, "File", FakeFile)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="memoryfile",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_payloads[0][1]["file"].filename == "conversation_memory.json"
 

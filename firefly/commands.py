@@ -129,7 +129,16 @@ LATEST_RECORDING_TOKENS = {"최근", "마지막", "latest", "last"}
 ADAPTER_COMMAND_OUTPUT_LIMIT = 1200
 ADAPTER_CONTEXT_LIMIT = 3500
 AUTO_COMMAND_HISTORY_OUTPUT_LIMIT = 1200
+MAX_MEMORY_FILE_SEND_BYTES = 24 * 1024 * 1024
 PERMISSION_DENIED_MESSAGE = "…그 명령어를 사용할 권한이 없어."
+MEMORY_FILE_COMMAND_ALIASES = (
+    "/메모리파일",
+    "/메모리 파일",
+    "/memoryfile",
+    "메모리파일",
+    "메모리 파일",
+    "memoryfile",
+)
 ADAPTER_CHAIN_LIMIT_MESSAGE = (
     f"…연속 실행은 한 번에 최대 {MAX_ADAPTER_COMMANDS}개까지만 할게. "
     "중간 결과를 보고 이어서 다시 부탁해줘."
@@ -440,7 +449,8 @@ async def _send_brain_notes(
         return
 
     await message.channel.send(
-        f"반디의 뇌에 저장된 `{target.display_name}` 평가야.\n```text\n{format_brain_notes(target_data)}\n```"
+        f"`{target.display_name}`에 대한 반디의 기억이야.\n"
+        f"```text\n{format_brain_notes(target_data)}\n```"
     )
 
 
@@ -454,16 +464,30 @@ async def _add_brain_note(
         await message.channel.send(error_message or "…대상 사용자를 찾지 못했어.")
         return
     if not note:
-        await message.channel.send("…대상과 저장할 평가를 같이 적어줘. 예: `/뇌추가 @유저 쉽게 불안해하지만 끝까지 확인하려고 한다`")
+        await message.channel.send(
+            "…대상과 저장할 기억 후보를 같이 적어줘. "
+            "예: `/뇌추가 @유저 쉽게 불안해하지만 끝까지 확인하려고 한다`"
+        )
         return
 
     try:
-        index = add_brain_note(target_data, note)
+        result = add_brain_note(target_data, note)
     except ValueError as exc:
         await message.channel.send(f"…{exc}")
         return
     update_user_data(target.user_id, target_data)
-    await message.channel.send(f"…응. `{target.display_name}`에 대한 평가를 {index}번에 저장했어.")
+    if result.status == "promoted":
+        await message.channel.send(
+            f"…응. `{target.display_name}`에 대한 기억 후보를 장기 기억 {result.index}번으로 승격했어."
+        )
+    elif result.status == "merged_long_term":
+        await message.channel.send(
+            f"…응. `{target.display_name}`에 대한 기존 장기 기억 {result.index}번의 반복성을 갱신했어."
+        )
+    else:
+        await message.channel.send(
+            f"…응. `{target.display_name}`에 대한 단기 기억 후보 S{result.index}번으로 보관했어."
+        )
 
 
 async def _update_brain_note(
@@ -556,19 +580,44 @@ async def _resolve_target_argument(
     return target, dict(target.user_data or {}), remainder, None
 
 
+async def _send_file_path(message: discord.Message, path, *, missing_message: str) -> None:
+    try:
+        if not path.exists() or not path.is_file():
+            await message.channel.send(missing_message)
+            return
+        size = path.stat().st_size
+        if size > MAX_MEMORY_FILE_SEND_BYTES:
+            await message.channel.send(
+                f"…`{path.name}` 파일이 너무 커서 여기로 바로 보낼 수 없어. "
+                f"현재 크기는 약 {size / 1024 / 1024:.1f}MB야."
+            )
+            return
+        await message.channel.send(file=discord.File(str(path), filename=path.name))
+    except OSError:
+        await message.channel.send(f"…`{path.name}` 파일에 접근하지 못했어. 파일 권한이나 저장 위치를 확인해줘.")
+
+
+def _matched_memory_file_alias(user_text: str) -> str | None:
+    for alias in MEMORY_FILE_COMMAND_ALIASES:
+        if matches_command(user_text, alias):
+            return alias
+    return None
+
+
 async def _send_memory_or_recording_file(message: discord.Message, filename: str | None = None) -> None:
     if not filename:
-        await message.channel.send(
-            "…어떤 메모리 파일을 받을지 적어줘.\n"
-            f"{format_memory_section_list()}\n"
-            "예: `/메모리파일 대화`, `/메모리파일 news_memory.json`"
-        )
+        path = ensure_memory_section_file("conversation")
+        await _send_file_path(message, path, missing_message="…대화 메모리 파일을 찾지 못했어.")
         return
 
     section = resolve_memory_section(filename)
     if section:
         path = ensure_memory_section_file(section)
-        await message.channel.send(file=discord.File(str(path), filename=path.name))
+        await _send_file_path(
+            message,
+            path,
+            missing_message=f"…{MEMORY_SECTION_LABELS[section]} 메모리 파일을 찾지 못했어.",
+        )
         return
 
     try:
@@ -578,7 +627,7 @@ async def _send_memory_or_recording_file(message: discord.Message, filename: str
         await message.channel.send("…그 이름의 통화 기록 파일을 찾지 못했어. `/대화목록`으로 파일명을 확인해줘.")
         return
 
-    await message.channel.send(file=discord.File(str(path), filename=path.name))
+    await _send_file_path(message, path, missing_message="…그 통화 기록 파일을 찾지 못했어.")
 
 
 async def _generate_adapter_reply(
@@ -898,8 +947,12 @@ async def handle_mentioned_message(
         await _send_recording_list(message)
         return
 
-    if special_user and matches_command(user_text, "/메모리파일"):
-        filename = _command_arg(user_text, "/메모리파일") or None
+    memory_file_alias = _matched_memory_file_alias(user_text)
+    if memory_file_alias:
+        if not special_user:
+            await message.channel.send("…메모리 파일을 받을 권한이 없어.")
+            return
+        filename = _command_arg(user_text, memory_file_alias) or None
         await _send_memory_or_recording_file(message, filename)
         return
 

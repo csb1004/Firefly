@@ -133,7 +133,7 @@ def build_system_prompt(
     base_prompt = get_base_prompt(user_id)
     nickname = user_data.get("nickname", user_data.get("name", "너"))
     affection = int(user_data.get("affection", DEFAULT_AFFECTION))
-    brain_notes = format_brain_notes(user_data)
+    memory_notes = format_brain_notes(user_data)
     current_time_text = get_current_time_text()
     last_seen = user_data.get("last_seen", "없음")
     is_special_user = user_id == SPECIAL_USER_ID
@@ -162,11 +162,12 @@ def build_system_prompt(
 - 현재 호감도: {affection}
 - 사용자 ID는 명령어 대상 식별에만 쓰고, 사용자가 직접 묻지 않으면 말하지 않는다.
 
-[반디의 뇌 - 사용자 장기 평가]
-- 아래 내용은 이 사용자에 대해 장기적으로 저장한 반디의 평가와 기억이다.
-- 기본 페르소나, 호감도 단계, 최근 대화보다 우선해서 말투의 거리감과 태도에 반영한다.
+[반디의 뇌 - 다단계 사용자 기억]
+- 장기 기억은 이 사용자에 대해 지속적으로 보존할 평가와 기억이다.
+- 단기 기억 후보는 아직 확정되지 않은 최근 관찰이므로, 단정하지 말고 약하게만 참고한다.
+- 장기 기억은 기본 페르소나, 호감도 단계, 최근 대화보다 우선해서 말투의 거리감과 태도에 반영한다.
 - 단, 명령어 규칙, 안전 규칙, 사용자가 명확히 지시한 사실은 어기지 않는다.
-{brain_notes}
+{memory_notes}
 
 [호칭 규칙]
 - 사용자를 "{nickname}"라고 부를 수 있다.

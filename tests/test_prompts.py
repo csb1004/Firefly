@@ -203,7 +203,7 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "/검색실행 {명령어들} || {프롬프트}" in guide
     assert "/인터넷모드 {상태}" in guide
     assert "/추론 {추론단계}" in guide
-    assert "/뇌추가 {유저ID} {평가}" in guide
+    assert "/뇌추가 {유저ID} {기억후보}" in guide
     assert "/뇌수정 {유저ID} {번호} {평가}" in guide
     assert "/뇌삭제 {유저ID} {번호}" in guide
     assert "/호칭 {유저멘션또는ID또는기존호칭} {호칭}" in guide
@@ -212,6 +212,7 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "/주제 설정 {주제목록}" in guide
     assert "{상태}는 `on` 또는 `off`만 사용한다." in guide
     assert "{추론단계}" in guide
+    assert "{기억후보}" in guide
     assert "{평가}" in guide
     assert "{유저ID}" in guide
     assert "현재 메시지를 보낸 사용자를 대상으로 삼아야 하면" in guide
@@ -219,6 +220,9 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "최종 답변 한 번에만 인터넷 검색을 사용하고 방 설정은 바꾸지 않는다." in guide
     assert "반디의 뇌를 보자고 하면 대상 사용자를 명시" in guide
     assert "그것만으로 저장하지 않는다" in guide
+    assert "단기 기억 후보에 넣는다" in guide
+    assert "장기 기억으로 승격한다" in guide
+    assert "중요도=높음" in guide
     assert "저장하지 않기로 판단했다면 별도의 안내" in guide
     assert "사소한 취향, 일회성 일정" in guide
     assert "호감도 증감은 사용자가 반복적으로 배려" in guide
