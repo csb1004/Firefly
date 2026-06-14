@@ -223,6 +223,11 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "단기 기억 후보에 넣는다" in guide
     assert "장기 기억으로 승격한다" in guide
     assert "중요도=높음" in guide
+    assert "감정=경계" in guide
+    assert "거리감=거리둠" in guide
+    assert "정서 방향, 신뢰/경계, 거리감" in guide
+    assert "기억이 거의 없다면" in guide
+    assert "기억이 많다면" in guide
     assert "저장하지 않기로 판단했다면 별도의 안내" in guide
     assert "사소한 취향, 일회성 일정" in guide
     assert "호감도 증감은 사용자가 반복적으로 배려" in guide

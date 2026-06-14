@@ -102,3 +102,56 @@ def test_format_brain_notes_shows_short_and_long_term_sections(monkeypatch):
     assert "[단기 기억 후보]" in formatted
     assert "결론을 먼저 듣는 것을 선호한다" in formatted
     assert "프로젝트 문서화" in formatted
+
+
+def test_relationship_memory_tracks_affect_and_promotes_faster_for_sparse_profiles(monkeypatch):
+    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
+    user_data = {}
+
+    first = brain.add_brain_note(user_data, "사용자는 반디에게 꾸준히 배려 깊고 신뢰를 주는 태도를 보인다.")
+    second = brain.add_brain_note(user_data, "사용자는 반디에게 꾸준히 배려 깊고 신뢰를 주는 태도를 보인다.")
+
+    assert first.status == "short_term"
+    assert second.status == "promoted"
+    memory = user_data["long_term_memory"][0]
+    assert memory["memory_category"] == "relationship"
+    assert memory["affective_score"] > 0
+    assert memory["distance_score"] < 0.5
+    assert "기억이 적어" in memory["promotion_reason"]
+
+
+def test_dense_profiles_promote_relationship_memory_more_slowly(monkeypatch):
+    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
+    user_data = {"long_term_memory": [
+        {"content": f"기존 장기 기억 {index}"}
+        for index in range(8)
+    ]}
+    brain.normalize_user_memory(user_data)
+
+    for _ in range(3):
+        result = brain.add_brain_note(user_data, "사용자는 가끔 반디와 장난스럽게 거리를 좁힌다.")
+
+    assert result.status == "short_term"
+    assert len(user_data["short_term_memory"]) == 1
+    assert user_data["short_term_memory"][0]["frequency_score"] == 3
+
+
+def test_abrupt_relationship_change_promotes_even_for_dense_profiles(monkeypatch):
+    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
+    user_data = {"long_term_memory": [
+        {"content": f"기존 장기 기억 {index}"}
+        for index in range(8)
+    ]}
+    brain.normalize_user_memory(user_data)
+
+    result = brain.add_brain_note(
+        user_data,
+        "감정=경계 거리감=거리둠 사용자가 갑자기 반디에게 공격적이고 불신을 주는 태도를 보였다.",
+    )
+
+    assert result.status == "promoted"
+    memory = user_data["long_term_memory"][-1]
+    assert memory["memory_category"] == "relationship"
+    assert memory["affective_score"] < 0
+    assert memory["distance_score"] > 0.7
+    assert "급격한 관계 변화" in memory["promotion_reason"]
