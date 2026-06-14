@@ -476,7 +476,11 @@ async def _add_brain_note(
         await message.channel.send(f"…{exc}")
         return
     update_user_data(target.user_id, target_data)
-    if result.status == "promoted":
+    if result.status == "ignored":
+        await message.channel.send(
+            f"…응. `{target.display_name}`에 대한 현재 관계 맥락으로 받아들였어."
+        )
+    elif result.status == "promoted":
         await message.channel.send(
             f"…응. `{target.display_name}`에 대한 기억 후보를 장기 기억 {result.index}번으로 승격했어."
         )

@@ -104,36 +104,48 @@ def test_format_brain_notes_shows_short_and_long_term_sections(monkeypatch):
     assert "프로젝트 문서화" in formatted
 
 
-def test_relationship_memory_tracks_affect_and_promotes_faster_for_sparse_profiles(monkeypatch):
+def test_sparse_profiles_store_routine_affection_as_new_relationship_signal(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {}
 
-    first = brain.add_brain_note(user_data, "사용자는 반디에게 꾸준히 배려 깊고 신뢰를 주는 태도를 보인다.")
-    second = brain.add_brain_note(user_data, "사용자는 반디에게 꾸준히 배려 깊고 신뢰를 주는 태도를 보인다.")
+    result = brain.add_brain_note(user_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
 
-    assert first.status == "short_term"
-    assert second.status == "promoted"
-    memory = user_data["long_term_memory"][0]
+    assert result.status == "short_term"
+    assert user_data["long_term_memory"] == []
+    memory = user_data["short_term_memory"][0]
     assert memory["memory_category"] == "relationship"
     assert memory["affective_score"] > 0
     assert memory["distance_score"] < 0.5
-    assert "기억이 적어" in memory["promotion_reason"]
 
 
-def test_dense_profiles_promote_relationship_memory_more_slowly(monkeypatch):
+def test_repeated_relationship_affection_promotes_with_default_threshold(monkeypatch):
+    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
+    user_data = {}
+
+    for _ in range(brain.PROMOTION_FREQUENCY_THRESHOLD):
+        result = brain.add_brain_note(user_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
+
+    assert result.status == "promoted"
+    assert user_data["short_term_memory"] == []
+    memory = user_data["long_term_memory"][0]
+    assert memory["memory_category"] == "relationship"
+    assert memory["frequency_score"] == brain.PROMOTION_FREQUENCY_THRESHOLD
+    assert "반복 등장" in memory["promotion_reason"]
+
+
+def test_established_profiles_do_not_store_routine_affection_as_new_memory(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {"long_term_memory": [
-        {"content": f"기존 장기 기억 {index}"}
+        {"content": f"사용자와 반디 사이의 안정적인 관계 기억 {index}"}
         for index in range(8)
     ]}
     brain.normalize_user_memory(user_data)
 
-    for _ in range(3):
-        result = brain.add_brain_note(user_data, "사용자는 가끔 반디와 장난스럽게 거리를 좁힌다.")
+    result = brain.add_brain_note(user_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
 
-    assert result.status == "short_term"
-    assert len(user_data["short_term_memory"]) == 1
-    assert user_data["short_term_memory"][0]["frequency_score"] == 3
+    assert result.status == "ignored"
+    assert user_data["short_term_memory"] == []
+    assert len(user_data["long_term_memory"]) == 8
 
 
 def test_abrupt_relationship_change_promotes_even_for_dense_profiles(monkeypatch):

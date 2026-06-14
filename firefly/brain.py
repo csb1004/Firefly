@@ -18,23 +18,22 @@ MAX_LONG_TERM_MEMORIES = 50
 SHORT_TERM_MEMORY_TTL_DAYS = 14
 PROMOTION_FREQUENCY_THRESHOLD = 3
 PROMOTION_IMPORTANCE_THRESHOLD = 0.85
-SPARSE_RELATIONSHIP_MEMORY_LIMIT = 2
+SPARSE_PROFILE_MEMORY_LIMIT = 2
 DENSE_MEMORY_LIMIT = 8
-SPARSE_RELATIONSHIP_FREQUENCY_THRESHOLD = 2
-DENSE_FREQUENCY_THRESHOLD = 5
-DENSE_IMPORTANCE_THRESHOLD = 0.95
 ABRUPT_RELATIONSHIP_INTENSITY_THRESHOLD = 0.9
 DEFAULT_IMPORTANCE_SCORE = 0.55
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 RELATIONSHIP_KEYWORDS = (
-    "신뢰", "불신", "배려", "존중", "무례", "공격", "기만", "거짓", "거리",
+    "관계", "신뢰", "불신", "배려", "존중", "무례", "공격", "기만", "거짓", "거리",
     "가깝", "편안", "불편", "경계", "상처", "사과", "고마", "의지", "압박",
     "선 넘", "따뜻", "차갑", "조심", "안심", "서운", "친절", "날카롭",
+    "호감", "애정",
 )
 POSITIVE_AFFECT_KEYWORDS = (
     "신뢰", "배려", "존중", "편안", "사과", "고마", "의지", "따뜻", "안심", "친절",
+    "호감", "애정",
 )
 NEGATIVE_AFFECT_KEYWORDS = (
     "불신", "무례", "공격", "기만", "거짓", "불편", "경계", "상처", "압박",
@@ -45,6 +44,10 @@ ABRUPT_CHANGE_KEYWORDS = (
 )
 PREFERENCE_KEYWORDS = ("선호", "좋아", "싫어", "답변", "설명", "요약", "말투", "방식")
 PROJECT_KEYWORDS = ("프로젝트", "문서", "테스트", "코드", "작업", "기능", "버그", "구현")
+ROUTINE_AFFECTION_KEYWORDS = (
+    "좋아해", "사랑해", "애정", "호감", "보고 싶", "고마워", "고맙",
+)
+RELATIONSHIP_TARGET_KEYWORDS = ("반디", "나를", "나에게", "내게", "봇에게")
 
 
 @dataclass
@@ -96,6 +99,24 @@ def _to_frequency(value: object) -> int:
 def _keyword_count(content: str, keywords: tuple[str, ...]) -> int:
     compact = content.casefold()
     return sum(1 for keyword in keywords if keyword.casefold() in compact)
+
+
+def _has_targeted_affection(content: str) -> bool:
+    compact = content.casefold()
+    return (
+        any(keyword.casefold() in compact for keyword in ROUTINE_AFFECTION_KEYWORDS)
+        and any(keyword.casefold() in compact for keyword in RELATIONSHIP_TARGET_KEYWORDS)
+    )
+
+
+def _is_routine_affection(content: str, metadata: dict) -> bool:
+    if metadata.get("memory_category") != "relationship":
+        return False
+    if _to_score(metadata.get("emotional_intensity_score"), 0.0) >= ABRUPT_RELATIONSHIP_INTENSITY_THRESHOLD:
+        return False
+    if _to_score(metadata.get("importance_score"), DEFAULT_IMPORTANCE_SCORE) >= PROMOTION_IMPORTANCE_THRESHOLD:
+        return False
+    return _has_targeted_affection(content)
 
 
 def _score_from_affect_label(value: object) -> float | None:
@@ -230,11 +251,12 @@ def _classify_memory_content(
     positive_count = _keyword_count(content, POSITIVE_AFFECT_KEYWORDS)
     negative_count = _keyword_count(content, NEGATIVE_AFFECT_KEYWORDS)
     relationship_count = _keyword_count(content, RELATIONSHIP_KEYWORDS)
+    targeted_affection = _has_targeted_affection(content)
     abrupt_count = _keyword_count(content, ABRUPT_CHANGE_KEYWORDS)
 
     category = metadata.get("memory_category")
     if category is None:
-        if relationship_count:
+        if relationship_count or targeted_affection:
             category = "relationship"
         elif _keyword_count(content, PROJECT_KEYWORDS):
             category = "project"
@@ -404,15 +426,24 @@ def _memory_count(user_data: dict) -> int:
     return len(user_data.get(SHORT_TERM_MEMORY_KEY, [])) + len(user_data.get(LONG_TERM_MEMORY_KEY, []))
 
 
-def _promotion_thresholds(user_data: dict, entry: dict) -> tuple[int, float]:
-    memory_count = _memory_count(user_data)
-    is_relationship = entry.get("memory_category") == "relationship"
+def _relationship_memory_count(user_data: dict) -> int:
+    return sum(
+        1
+        for entry in user_data.get(SHORT_TERM_MEMORY_KEY, []) + user_data.get(LONG_TERM_MEMORY_KEY, [])
+        if entry.get("memory_category") == "relationship"
+    )
 
-    if is_relationship and memory_count <= SPARSE_RELATIONSHIP_MEMORY_LIMIT:
-        return SPARSE_RELATIONSHIP_FREQUENCY_THRESHOLD, 0.7
-    if memory_count >= DENSE_MEMORY_LIMIT:
-        return DENSE_FREQUENCY_THRESHOLD, DENSE_IMPORTANCE_THRESHOLD
-    return PROMOTION_FREQUENCY_THRESHOLD, PROMOTION_IMPORTANCE_THRESHOLD
+
+def _is_established_profile(user_data: dict) -> bool:
+    return _memory_count(user_data) >= DENSE_MEMORY_LIMIT or _relationship_memory_count(user_data) >= 3
+
+
+def _should_store_candidate(user_data: dict, content: str, metadata: dict) -> bool:
+    if not _is_routine_affection(content, metadata):
+        return True
+    if _memory_count(user_data) <= SPARSE_PROFILE_MEMORY_LIMIT:
+        return True
+    return not _is_established_profile(user_data)
 
 
 class MemoryStorage:
@@ -487,6 +518,9 @@ class ShortTermMemoryManager:
     def add_candidate(user_data: dict, content: str, metadata: dict) -> MemoryActionResult:
         normalize_user_memory(user_data)
         now = _now_text()
+        if not _should_store_candidate(user_data, content, metadata):
+            return MemoryActionResult(status="ignored", index=0, entry={})
+
         content_key = _content_key(content)
         importance_score = _to_score(metadata.get("importance_score"), DEFAULT_IMPORTANCE_SCORE)
 
@@ -631,17 +665,14 @@ def promotion_reason(entry: dict, user_data: dict | None = None) -> str | None:
     importance_score = _to_score(entry.get("importance_score"), DEFAULT_IMPORTANCE_SCORE)
     frequency_score = _to_frequency(entry.get("frequency_score"))
     emotional_intensity_score = _to_score(entry.get("emotional_intensity_score"), 0.0)
-    frequency_threshold, importance_threshold = _promotion_thresholds(user_data or {}, entry)
     is_relationship = entry.get("memory_category") == "relationship"
 
     if is_relationship and emotional_intensity_score >= ABRUPT_RELATIONSHIP_INTENSITY_THRESHOLD:
         return f"급격한 관계 변화 강도 {emotional_intensity_score:.2f}가 장기 기억 기준을 넘음"
-    if importance_score >= importance_threshold:
-        return f"중요도 {importance_score:.2f}가 장기 기억 기준 {importance_threshold:.2f}를 넘음"
-    if frequency_score >= frequency_threshold:
-        if is_relationship and _memory_count(user_data or {}) <= SPARSE_RELATIONSHIP_MEMORY_LIMIT:
-            return f"기억이 적어 관계 관찰 반복 {frequency_score}회를 빠르게 장기 기억으로 승격"
-        return f"반복 등장 {frequency_score}회가 장기 기억 기준 {frequency_threshold}회를 넘음"
+    if importance_score >= PROMOTION_IMPORTANCE_THRESHOLD:
+        return f"중요도 {importance_score:.2f}가 장기 기억 기준 {PROMOTION_IMPORTANCE_THRESHOLD:.2f}를 넘음"
+    if frequency_score >= PROMOTION_FREQUENCY_THRESHOLD:
+        return f"반복 등장 {frequency_score}회가 장기 기억 기준 {PROMOTION_FREQUENCY_THRESHOLD}회를 넘음"
     return None
 
 
