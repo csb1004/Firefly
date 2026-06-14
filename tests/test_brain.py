@@ -90,6 +90,48 @@ def test_update_and_delete_brain_note_operate_on_long_term_memory(monkeypatch):
     assert user_data["brain_notes"] == []
 
 
+def test_delete_brain_memory_accepts_short_term_references(monkeypatch):
+    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
+    user_data = {}
+    brain.add_brain_note(user_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
+
+    result = brain.delete_brain_memory(user_data, brain.parse_brain_delete_target("S1"))
+
+    assert result is not None
+    assert result.memory_type == brain.SHORT_TERM_MEMORY_KEY
+    assert result.index == 1
+    assert result.contents == ["사용자는 반디에게 좋아해라고 애정을 표현했다."]
+    assert user_data["short_term_memory"] == []
+
+
+def test_delete_brain_memory_numeric_reference_falls_back_to_short_term(monkeypatch):
+    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
+    user_data = {}
+    brain.add_brain_note(user_data, "사용자는 최근 반디에게 고마움을 자주 표현한다.")
+
+    result = brain.delete_brain_memory(user_data, brain.parse_brain_delete_target("1"))
+
+    assert result is not None
+    assert result.memory_type == brain.SHORT_TERM_MEMORY_KEY
+    assert result.index == 1
+    assert user_data["short_term_memory"] == []
+
+
+def test_delete_brain_memory_can_clear_short_term_candidates(monkeypatch):
+    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
+    user_data = {}
+    brain.add_brain_note(user_data, "사용자는 최근 문서화를 신경 쓴다.")
+    brain.add_brain_note(user_data, "사용자는 답변이 너무 길면 답답해한다.")
+
+    result = brain.delete_brain_memory(user_data, brain.parse_brain_delete_target("단기"))
+
+    assert result is not None
+    assert result.memory_type == brain.SHORT_TERM_MEMORY_KEY
+    assert result.index is None
+    assert len(result.contents) == 2
+    assert user_data["short_term_memory"] == []
+
+
 def test_format_brain_notes_shows_short_and_long_term_sections(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {}

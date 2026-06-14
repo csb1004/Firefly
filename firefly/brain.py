@@ -59,6 +59,19 @@ class MemoryActionResult:
     reason: str | None = None
 
 
+@dataclass(frozen=True)
+class BrainMemoryDeleteTarget:
+    memory_type: str | None
+    index: int | None
+
+
+@dataclass(frozen=True)
+class BrainMemoryDeleteResult:
+    memory_type: str
+    index: int | None
+    contents: list[str]
+
+
 def _now_text() -> str:
     return get_current_time_text()
 
@@ -558,6 +571,24 @@ class ShortTermMemoryManager:
         stats["short_term_total_created"] = int(stats.get("short_term_total_created", 0)) + 1
         return MemoryManager.evaluate_candidate(user_data, entry)
 
+    @staticmethod
+    def delete(user_data: dict, index: int) -> str | None:
+        normalize_user_memory(user_data)
+        if index < 1 or index > len(user_data[SHORT_TERM_MEMORY_KEY]):
+            return None
+        deleted = user_data[SHORT_TERM_MEMORY_KEY].pop(index - 1)
+        return str(deleted.get("content", ""))
+
+    @staticmethod
+    def clear(user_data: dict) -> list[str]:
+        normalize_user_memory(user_data)
+        deleted = [
+            str(entry.get("content", ""))
+            for entry in user_data[SHORT_TERM_MEMORY_KEY]
+        ]
+        user_data[SHORT_TERM_MEMORY_KEY] = []
+        return [content for content in deleted if content]
+
 
 class LongTermMemoryManager:
     @staticmethod
@@ -697,6 +728,43 @@ def delete_brain_note(user_data: dict, index: int) -> str | None:
     return LongTermMemoryManager.delete(user_data, index)
 
 
+def delete_brain_memory(user_data: dict, target: BrainMemoryDeleteTarget) -> BrainMemoryDeleteResult | None:
+    normalize_user_memory(user_data)
+
+    if target.index is None:
+        if target.memory_type != SHORT_TERM_MEMORY_KEY:
+            return None
+        contents = ShortTermMemoryManager.clear(user_data)
+        if not contents:
+            return None
+        return BrainMemoryDeleteResult(
+            memory_type=SHORT_TERM_MEMORY_KEY,
+            index=None,
+            contents=contents,
+        )
+
+    if target.memory_type == SHORT_TERM_MEMORY_KEY:
+        deleted = ShortTermMemoryManager.delete(user_data, target.index)
+        memory_type = SHORT_TERM_MEMORY_KEY
+    elif target.memory_type == LONG_TERM_MEMORY_KEY:
+        deleted = LongTermMemoryManager.delete(user_data, target.index)
+        memory_type = LONG_TERM_MEMORY_KEY
+    else:
+        deleted = LongTermMemoryManager.delete(user_data, target.index)
+        memory_type = LONG_TERM_MEMORY_KEY
+        if deleted is None:
+            deleted = ShortTermMemoryManager.delete(user_data, target.index)
+            memory_type = SHORT_TERM_MEMORY_KEY
+
+    if deleted is None:
+        return None
+    return BrainMemoryDeleteResult(
+        memory_type=memory_type,
+        index=target.index,
+        contents=[deleted],
+    )
+
+
 def _format_memory_metadata(entry: dict) -> str:
     return (
         f"범주={entry.get('memory_category', 'general')}, "
@@ -744,3 +812,24 @@ def parse_brain_index_and_note(raw_text: str) -> tuple[int | None, str]:
     index = int(parts[0])
     note = parts[1].strip() if len(parts) > 1 else ""
     return index, note
+
+
+def parse_brain_delete_target(raw_text: str) -> BrainMemoryDeleteTarget | None:
+    token = raw_text.strip().split(maxsplit=1)[0] if raw_text.strip() else ""
+    compact = re.sub(r"[\s#._-]+", "", token.casefold())
+    if compact in {"단기", "단기기억", "단기후보", "단기기억후보", "후보", "s", "short", "shortterm"}:
+        return BrainMemoryDeleteTarget(memory_type=SHORT_TERM_MEMORY_KEY, index=None)
+
+    short_match = re.fullmatch(r"(?:s|short|shortterm|단기|후보)(\d+)(?:번)?", compact)
+    if short_match:
+        return BrainMemoryDeleteTarget(memory_type=SHORT_TERM_MEMORY_KEY, index=int(short_match.group(1)))
+
+    long_match = re.fullmatch(r"(?:l|long|longterm|장기)(\d+)(?:번)?", compact)
+    if long_match:
+        return BrainMemoryDeleteTarget(memory_type=LONG_TERM_MEMORY_KEY, index=int(long_match.group(1)))
+
+    number_match = re.fullmatch(r"(\d+)(?:번)?", compact)
+    if number_match:
+        return BrainMemoryDeleteTarget(memory_type=None, index=int(number_match.group(1)))
+
+    return None

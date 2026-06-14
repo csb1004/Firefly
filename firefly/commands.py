@@ -5,11 +5,20 @@ import discord
 
 from .affection import change_user_affection, set_user_affection
 from .admin_status import build_admin_status_text
-from .ai import generate_reply, summarize_conversation, summarize_voice_recording, summarize_voice_search
+from .ai import (
+    generate_reply,
+    generate_silent_auto_command,
+    summarize_conversation,
+    summarize_voice_recording,
+    summarize_voice_search,
+)
 from .brain import (
+    LONG_TERM_MEMORY_KEY,
+    SHORT_TERM_MEMORY_KEY,
     add_brain_note,
-    delete_brain_note,
+    delete_brain_memory,
     format_brain_notes,
+    parse_brain_delete_target,
     parse_brain_index_and_note,
     update_brain_note,
 )
@@ -157,6 +166,7 @@ ADAPTER_BLOCKED_COMMAND_PREFIXES = (
     "/역할",
     "/role",
 )
+SILENT_GROUP_MEMORY_COMMAND_PREFIXES = ("/뇌추가", "/뇌삭제", "/호감도증감")
 
 
 def _resolve_recording_summary_filename(filename: str) -> str | None:
@@ -222,8 +232,9 @@ def _send_payload_to_text(args: tuple, kwargs: dict) -> str:
 
 
 class _CommandCaptureChannel:
-    def __init__(self, channel):
+    def __init__(self, channel, *, forward: bool = True):
         self._channel = channel
+        self._forward = forward
         self.outputs: list[str] = []
 
     def typing(self):
@@ -236,7 +247,9 @@ class _CommandCaptureChannel:
         output = _send_payload_to_text(args, kwargs)
         if output:
             self.outputs.append(output)
-        return await self._channel.send(*args, **kwargs)
+        if self._forward:
+            return await self._channel.send(*args, **kwargs)
+        return None
 
     def __getattr__(self, name: str):
         return getattr(self._channel, name)
@@ -257,6 +270,10 @@ def _adapter_command_allowed(command_text: str) -> bool:
         command_text == prefix or command_text.startswith(f"{prefix} ")
         for prefix in ADAPTER_BLOCKED_COMMAND_PREFIXES
     )
+
+
+def _matches_any_command_prefix(command_text: str, prefixes: tuple[str, ...]) -> bool:
+    return any(matches_command(command_text, prefix) for prefix in prefixes)
 
 
 def _adapter_blocked_message(command_text: str) -> str:
@@ -351,12 +368,17 @@ async def _run_auto_command_from_reply(
     room_key: str,
     room_data: dict,
     client: discord.Client,
+    allowed_prefixes: tuple[str, ...] | None = None,
+    record_context: bool = True,
+    forward_output: bool = True,
 ) -> bool:
     auto_command = _extract_auto_command(reply)
     if not auto_command:
         return False
+    if allowed_prefixes is not None and not _matches_any_command_prefix(auto_command, allowed_prefixes):
+        return False
 
-    capture_channel = _CommandCaptureChannel(message.channel)
+    capture_channel = _CommandCaptureChannel(message.channel, forward=forward_output)
     capture_message = _CommandCaptureMessage(message, capture_channel)
     await handle_mentioned_message(
         message=capture_message,
@@ -366,15 +388,53 @@ async def _run_auto_command_from_reply(
         room_data=room_data,
         client=client,
     )
-    command_output = "\n".join(capture_channel.outputs).strip()
-    _record_auto_command_context(
+    if record_context:
+        command_output = "\n".join(capture_channel.outputs).strip()
+        _record_auto_command_context(
+            message=message,
+            user_text=user_text,
+            room_key=room_key,
+            command_text=auto_command,
+            command_output=command_output,
+        )
+    return True
+
+
+async def handle_silent_group_memory_update(
+    *,
+    message: discord.Message,
+    user_text: str,
+    user_data: dict,
+    room_key: str,
+    room_data: dict,
+    client: discord.Client,
+) -> bool:
+    if not is_special_user(message.author.id):
+        return False
+
+    display_name = getattr(message.author, "display_name", message.author.name)
+    reply = await generate_silent_auto_command(
+        user_message=user_text,
+        user_id=message.author.id,
+        display_name=display_name,
+        room_key=room_key,
+        allowed_command_prefixes=SILENT_GROUP_MEMORY_COMMAND_PREFIXES,
+    )
+    if not reply:
+        return False
+
+    return await _run_auto_command_from_reply(
+        reply=reply,
         message=message,
         user_text=user_text,
+        user_data=user_data,
         room_key=room_key,
-        command_text=auto_command,
-        command_output=command_output,
+        room_data=room_data,
+        client=client,
+        allowed_prefixes=SILENT_GROUP_MEMORY_COMMAND_PREFIXES,
+        record_context=False,
+        forward_output=False,
     )
-    return True
 
 
 async def _send_recording_list(message: discord.Message) -> None:
@@ -524,18 +584,29 @@ async def _delete_brain_note(
     if error_message or target is None or target_data is None:
         await message.channel.send(error_message or "…대상 사용자를 찾지 못했어.")
         return
-    if not args.isdigit():
-        await message.channel.send("…대상과 삭제할 평가 번호를 적어줘. 예: `/뇌삭제 @유저 1`")
+    delete_target = parse_brain_delete_target(args)
+    if delete_target is None:
+        await message.channel.send("…대상과 삭제할 기억 번호를 적어줘. 예: `/뇌삭제 @유저 1`, `/뇌삭제 @유저 S1`")
         return
 
-    index = int(args)
-    deleted = delete_brain_note(target_data, index)
-    if deleted is None:
-        await message.channel.send("…그 번호의 평가를 찾지 못했어.")
+    result = delete_brain_memory(target_data, delete_target)
+    if result is None:
+        await message.channel.send("…그 번호의 기억을 찾지 못했어.")
         return
 
     update_user_data(target.user_id, target_data)
-    await message.channel.send(f"…응. `{target.display_name}`에 대한 {index}번 평가를 지웠어.")
+    if result.memory_type == SHORT_TERM_MEMORY_KEY and result.index is None:
+        await message.channel.send(
+            f"…응. `{target.display_name}`에 대한 단기 기억 후보 {len(result.contents)}개를 지웠어."
+        )
+    elif result.memory_type == SHORT_TERM_MEMORY_KEY:
+        await message.channel.send(
+            f"…응. `{target.display_name}`에 대한 단기 기억 후보 S{result.index}번을 지웠어."
+        )
+    elif result.memory_type == LONG_TERM_MEMORY_KEY:
+        await message.channel.send(f"…응. `{target.display_name}`에 대한 {result.index}번 평가를 지웠어.")
+    else:
+        await message.channel.send(f"…응. `{target.display_name}`에 대한 기억을 지웠어.")
 
 
 async def _send_or_update_reasoning(

@@ -44,6 +44,84 @@ def _is_auto_command_reply(reply: str) -> bool:
     lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
     return len(lines) == 1 and is_command_text(lines[0]) and lines[0] != "/"
 
+
+def _format_allowed_command_prefixes(command_prefixes: tuple[str, ...]) -> str:
+    return ", ".join(command_prefixes)
+
+
+async def generate_silent_auto_command(
+    user_message: str,
+    user_id: int,
+    display_name: str,
+    room_key: str,
+    *,
+    allowed_command_prefixes: tuple[str, ...],
+) -> str | None:
+    user_data = get_user_data(user_id, display_name)
+    room_data = get_room_data(room_key)
+    reasoning_effort = normalize_room_reasoning_effort(room_data)
+    system_prompt = build_system_prompt(
+        user_id,
+        user_data,
+        include_command_guides=True,
+    )
+    system_prompt = f"""
+{system_prompt}
+
+[조용한 단체 대화 업데이트 점검]
+- 이 호출은 공개 답장을 만들지 않는다.
+- 꼭 필요한 자동 명령이 있을 때만 명령어 한 줄을 출력한다.
+- 필요 없으면 설명 없이 `없음`만 출력한다.
+- 일반 답변, 인사, 사족은 출력하지 않는다.
+- 허용 명령: {_format_allowed_command_prefixes(allowed_command_prefixes)}
+""".strip()
+
+    if room_data.get("group_mode", False):
+        group_context = build_group_context_prompt(
+            display_name=display_name,
+            user_id=user_id,
+            user_data=user_data,
+            room_data=room_data,
+        )
+        system_prompt = f"{system_prompt}\n\n{group_context}"
+
+    input_messages = [{"role": "system", "content": system_prompt}]
+    if room_data.get("group_mode", False):
+        input_messages.extend(build_room_model_history(room_data.get("history", [])))
+        input_messages.append({
+            "role": "user",
+            "content": (
+                f"[이름={display_name}, "
+                f"호칭={user_data.get('nickname')}, "
+                f"호감도={user_data.get('affection')}] {user_message}"
+            ),
+        })
+    else:
+        input_messages.extend(build_model_history(user_data.get("history", [])))
+        input_messages.append({"role": "user", "content": user_message})
+
+    try:
+        response = await asyncio.to_thread(
+            client_openai.responses.create,
+            model=DEFAULT_MODEL,
+            input=input_messages,
+            reasoning={"effort": reasoning_effort},
+        )
+    except Exception as exc:
+        print("Silent auto command generation error:", exc)
+        return None
+
+    reply = response.output_text.strip()
+    if not _is_auto_command_reply(reply):
+        return None
+    if not any(
+        reply == prefix or reply.startswith(f"{prefix} ")
+        for prefix in allowed_command_prefixes
+    ):
+        return None
+    return reply[:1900]
+
+
 NEWS_FIELD_LABELS = ("무슨 일", "왜 중요해", "확인 링크")
 NEWS_OMITTED_FIELD_LABELS = ("왜 중요해",)
 NEWS_TREND_FALLBACK_DAYS = 7

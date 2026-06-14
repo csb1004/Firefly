@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from firefly import ai, storage
-from firefly.config import ROOMS_KEY
+from firefly.config import ROOMS_KEY, SPECIAL_USER_ID
 
 
 def _use_temp_memory(monkeypatch, tmp_path):
@@ -94,3 +94,51 @@ def test_generate_reply_passes_room_reasoning_effort(monkeypatch, tmp_path):
     )
 
     assert captured["reasoning"] == {"effort": "high"}
+
+
+def test_generate_silent_auto_command_does_not_persist_hidden_reply(monkeypatch, tmp_path):
+    _use_temp_memory(monkeypatch, tmp_path)
+    storage.save_memory({
+        ROOMS_KEY: {
+            "room-1": {
+                "group_mode": True,
+                "internet_mode": False,
+                "reasoning_effort": "low",
+                "history": [{
+                    "speaker": "상범",
+                    "role": "user",
+                    "content": "나는 반디를 좋아해.",
+                    "user_id": SPECIAL_USER_ID,
+                    "nickname": "상범",
+                    "affection": 1004,
+                }],
+            }
+        }
+    })
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            output_text=f"/뇌추가 {SPECIAL_USER_ID} 사용자는 반디에게 좋아해라고 애정을 표현했다."
+        )
+
+    monkeypatch.setattr(ai.client_openai.responses, "create", fake_create)
+
+    reply = asyncio.run(
+        ai.generate_silent_auto_command(
+            "나는 반디를 좋아해.",
+            user_id=SPECIAL_USER_ID,
+            display_name="상범",
+            room_key="room-1",
+            allowed_command_prefixes=("/뇌추가", "/호감도증감"),
+        )
+    )
+
+    data = storage.load_memory()
+    assert reply == f"/뇌추가 {SPECIAL_USER_ID} 사용자는 반디에게 좋아해라고 애정을 표현했다."
+    assert "조용한 단체 대화 업데이트 점검" in captured["input"][0]["content"]
+    assert data[str(SPECIAL_USER_ID)]["history"] == []
+    assert [item["content"] for item in data[ROOMS_KEY]["room-1"]["history"]] == [
+        "나는 반디를 좋아해."
+    ]

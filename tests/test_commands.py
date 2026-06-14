@@ -1,8 +1,8 @@
 import asyncio
 from types import SimpleNamespace
 
-from firefly import commands, nickname_commands, storage
-from firefly.config import DAILY_NEWS_KEY, POLLS_KEY
+from firefly import brain, commands, nickname_commands, storage
+from firefly.config import DAILY_NEWS_KEY, POLLS_KEY, SPECIAL_USER_ID
 
 
 def test_matches_command_requires_exact_command_or_space_boundary():
@@ -118,6 +118,110 @@ def test_auto_command_runs_with_original_message_author(monkeypatch, tmp_path):
 
     assert updated_users == [(123, {"name": "Alice", "nickname": "새별", "affection": 50})]
     assert sent_messages == ["응. 이제부터는 새별(이)라고 불러볼게."]
+
+
+def test_silent_group_memory_update_runs_brain_command_without_channel_output(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_generate_silent_auto_command(**kwargs):
+        return f"/뇌추가 {SPECIAL_USER_ID} 사용자는 반디에게 좋아해라고 애정을 표현했다."
+
+    special_user = SimpleNamespace(
+        id=SPECIAL_USER_ID,
+        name="상범",
+        display_name="상범",
+        mention=f"<@{SPECIAL_USER_ID}>",
+    )
+    message = SimpleNamespace(
+        author=special_user,
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(
+        user=SimpleNamespace(id=999),
+        get_user=lambda user_id: special_user if user_id == SPECIAL_USER_ID else None,
+    )
+    user_data = storage.get_user_data(SPECIAL_USER_ID, "상범")
+    room_data = storage.get_room_data("room-1")
+
+    monkeypatch.setattr(commands, "generate_silent_auto_command", fake_generate_silent_auto_command)
+
+    result = asyncio.run(
+        commands.handle_silent_group_memory_update(
+            message=message,
+            user_text="나는 반디를 좋아해.",
+            user_data=user_data,
+            room_key="room-1",
+            room_data=room_data,
+            client=client,
+        )
+    )
+
+    data = storage.load_memory()
+    memories = data[str(SPECIAL_USER_ID)]["short_term_memory"]
+    assert result is True
+    assert sent_messages == []
+    assert len(memories) == 1
+    assert memories[0]["memory_category"] == "relationship"
+
+
+def test_silent_group_memory_update_can_delete_short_term_candidate(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    special_user = SimpleNamespace(
+        id=SPECIAL_USER_ID,
+        name="상범",
+        display_name="상범",
+        mention=f"<@{SPECIAL_USER_ID}>",
+    )
+    target_data = storage.get_user_data(SPECIAL_USER_ID, "상범")
+    brain.add_brain_note(target_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
+    storage.update_user_data(SPECIAL_USER_ID, target_data)
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_generate_silent_auto_command(**kwargs):
+        assert "/뇌삭제" in kwargs["allowed_command_prefixes"]
+        return f"/뇌삭제 {SPECIAL_USER_ID} S1"
+
+    message = SimpleNamespace(
+        author=special_user,
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(
+        user=SimpleNamespace(id=999),
+        get_user=lambda user_id: special_user if user_id == SPECIAL_USER_ID else None,
+    )
+    user_data = storage.get_user_data(SPECIAL_USER_ID, "상범")
+    room_data = storage.get_room_data("room-1")
+
+    monkeypatch.setattr(commands, "generate_silent_auto_command", fake_generate_silent_auto_command)
+
+    result = asyncio.run(
+        commands.handle_silent_group_memory_update(
+            message=message,
+            user_text="단기 후보가 충분해서 하나 정리해도 되겠어.",
+            user_data=user_data,
+            room_key="room-1",
+            room_data=room_data,
+            client=client,
+        )
+    )
+
+    data = storage.load_memory()
+    assert result is True
+    assert sent_messages == []
+    assert data[str(SPECIAL_USER_ID)]["short_term_memory"] == []
 
 
 def test_natural_nickname_command_runs_without_model(monkeypatch):
@@ -919,6 +1023,134 @@ def test_brain_command_stores_short_term_candidate_after_explicit_target(monkeyp
     user_memory = storage.load_memory()[str(commands.SPECIAL_USER_ID)]
     assert user_memory["brain_notes"] == []
     assert user_memory["short_term_memory"][0]["content"] == "오늘만 피곤해서 답이 느림"
+
+
+def test_brain_delete_command_accepts_short_term_s_index_with_target_name(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+
+    target_id = 123456789012345
+    target_user = SimpleNamespace(
+        id=target_id,
+        name="추상범",
+        display_name="추상범",
+        mention=f"<@{target_id}>",
+    )
+    target_data = storage.get_user_data(target_id, "추상범")
+    brain.add_brain_note(target_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
+    storage.update_user_data(target_id, target_data)
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    bot_user = SimpleNamespace(id=999)
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[bot_user, target_user],
+        guild=None,
+    )
+    client = SimpleNamespace(user=bot_user, get_user=lambda user_id: target_user if user_id == target_id else None)
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/뇌삭제 @추상범 S1",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    user_memory = storage.load_memory()[str(target_id)]
+    assert user_memory["short_term_memory"] == []
+    assert "단기 기억 후보 S1번을 지웠어" in sent_messages[0]
+
+
+def test_brain_delete_command_numeric_index_falls_back_to_short_term(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.get_user_data(commands.SPECIAL_USER_ID, "Owner")
+    target_data = storage.get_user_data(commands.SPECIAL_USER_ID, "Owner")
+    brain.add_brain_note(target_data, "사용자는 최근 반디에게 고마움을 자주 표현한다.")
+    storage.update_user_data(commands.SPECIAL_USER_ID, target_data)
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text=f"/뇌삭제 {commands.SPECIAL_USER_ID} 1",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    user_memory = storage.load_memory()[str(commands.SPECIAL_USER_ID)]
+    assert user_memory["short_term_memory"] == []
+    assert "단기 기억 후보 S1번을 지웠어" in sent_messages[0]
+
+
+def test_brain_delete_command_can_clear_short_term_candidates(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    target_data = storage.get_user_data(commands.SPECIAL_USER_ID, "Owner")
+    brain.add_brain_note(target_data, "사용자는 최근 프로젝트 문서화를 신경 쓴다.")
+    brain.add_brain_note(target_data, "사용자는 답변이 길어지면 답답해한다.")
+    storage.update_user_data(commands.SPECIAL_USER_ID, target_data)
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text=f"/뇌삭제 {commands.SPECIAL_USER_ID} 단기",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    user_memory = storage.load_memory()[str(commands.SPECIAL_USER_ID)]
+    assert user_memory["short_term_memory"] == []
+    assert "단기 기억 후보 2개를 지웠어" in sent_messages[0]
 
 
 def test_affection_change_accepts_explicit_user_id(monkeypatch, tmp_path):

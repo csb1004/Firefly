@@ -206,6 +206,8 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "/뇌추가 {유저ID} {기억후보}" in guide
     assert "/뇌수정 {유저ID} {번호} {평가}" in guide
     assert "/뇌삭제 {유저ID} {번호}" in guide
+    assert "/뇌삭제 {유저ID} S{번호}" in guide
+    assert "/뇌삭제 {유저ID} 단기" in guide
     assert "/호칭 {유저멘션또는ID또는기존호칭} {호칭}" in guide
     assert "/호감도설정 {유저멘션} {숫자}" in guide
     assert "/최신소식 시간 {시간}" in guide
@@ -226,9 +228,10 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "감정=경계" in guide
     assert "거리감=거리둠" in guide
     assert "정서 방향, 신뢰/경계, 거리감" in guide
-    assert "기억이 거의 없다면" in guide
-    assert "관계 기억이 충분하다면" in guide
-    assert "새 기억 후보로 만들지 않는다" in guide
+    assert "단기 기억 후보가 10개 미만이면 거의 매 대화" in guide
+    assert "좋아해`, `고마워`, `보고 싶어" in guide
+    assert "기존 후보와 대조" in guide
+    assert "/뇌삭제 {유저ID} S{번호}" in guide
     assert "저장하지 않기로 판단했다면 별도의 안내" in guide
     assert "사소한 취향, 일회성 일정" in guide
     assert "호감도 증감은 사용자가 반복적으로 배려" in guide

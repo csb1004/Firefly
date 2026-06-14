@@ -64,3 +64,5 @@ def test_special_help_lists_reasoning_and_brain_commands():
     assert "/뇌추가 @유저 [평가]" in text
     assert "/뇌수정 @유저 [번호] [평가]" in text
     assert "/뇌삭제 @유저 [번호]" in text
+    assert "/뇌삭제 @유저 S[번호]" in text
+    assert "/뇌삭제 @유저 단기" in text

@@ -5,7 +5,7 @@ import discord
 from discord import app_commands
 
 from firefly.attachments import read_text_attachments
-from firefly.commands import handle_mentioned_message
+from firefly.commands import handle_mentioned_message, handle_silent_group_memory_update
 from firefly.config import DISCORD_BOT_TOKEN, SPECIAL_USER_ID
 from firefly.news import handle_news_command, is_news_command_text, start_daily_news_task
 from firefly.polls import enforce_single_vote, refresh_poll_vote_count, restore_poll_tasks
@@ -37,6 +37,28 @@ news_group = app_commands.Group(name="최신소식", description="기술 소식 
 topic_group = app_commands.Group(name="주제", description="최신 소식 주제를 확인하거나 관리해요.")
 _slash_commands_synced = False
 _voice_cleanup_task_started = False
+
+
+async def _run_silent_group_memory_update(
+    *,
+    message: discord.Message,
+    user_text: str,
+    room_key: str,
+) -> None:
+    try:
+        display_name = getattr(message.author, "display_name", message.author.name)
+        user_data = get_user_data(message.author.id, display_name)
+        room_data = get_room_data(room_key)
+        await handle_silent_group_memory_update(
+            message=message,
+            user_text=user_text,
+            user_data=user_data,
+            room_key=room_key,
+            room_data=room_data,
+            client=client,
+        )
+    except Exception as exc:
+        print("Silent group memory update error:", exc)
 
 
 class _SlashTyping:
@@ -326,12 +348,12 @@ async def brain_update_slash(
     )
 
 
-@tree.command(name="뇌삭제", description="반디의 사용자 장기 기억을 삭제해요. 권한 필요.")
+@tree.command(name="뇌삭제", description="반디의 사용자 기억을 삭제해요. 권한 필요.")
 @app_commands.rename(index="번호", target="유저")
-@app_commands.describe(index="삭제할 평가 번호", target="대상 유저")
+@app_commands.describe(index="삭제할 장기 번호, 단기 후보 S번호, 또는 단기", target="대상 유저")
 async def brain_delete_slash(
     interaction: discord.Interaction,
-    index: int,
+    index: str,
     target: discord.User,
 ):
     user_text = f"/뇌삭제 {_mention_text(target)} {index}".strip()
@@ -771,12 +793,18 @@ async def on_message(message: discord.Message):
     if room_data.get("group_mode", False):
         content = clean_discord_content(message)
         if content and not is_command_text(content):
-            record_room_user_message(
+            recorded = record_room_user_message(
                 message,
                 room_key,
                 room_data,
                 content=content,
             )
+            if recorded and message.author.id == SPECIAL_USER_ID:
+                asyncio.create_task(_run_silent_group_memory_update(
+                    message=message,
+                    user_text=content,
+                    room_key=room_key,
+                ))
 
 
 if __name__ == "__main__":
