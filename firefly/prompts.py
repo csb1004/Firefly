@@ -1,3 +1,4 @@
+from .brain import format_brain_notes
 from .affection import get_affection_stage_text
 from .config import (
     COMMAND_GUIDE_FILE,
@@ -30,6 +31,7 @@ def build_group_context_prompt(
             continue
 
         participants[str(uid)] = {
+            "user_id": uid,
             "name": item.get("speaker", "알 수 없음"),
             "nickname": item.get("nickname", "없음"),
             "affection": item.get("affection", "알 수 없음"),
@@ -39,7 +41,8 @@ def build_group_context_prompt(
     participant_lines = []
     for participant in list(participants.values())[-8:]:
         participant_lines.append(
-            f"- 이름={participant['name']}, 호칭={participant['nickname']}, 호감도={participant['affection']}"
+            f"- ID={participant['user_id']}, 이름={participant['name']}, "
+            f"호칭={participant['nickname']}, 호감도={participant['affection']}"
         )
 
     if not participant_lines:
@@ -130,6 +133,7 @@ def build_system_prompt(
     base_prompt = get_base_prompt(user_id)
     nickname = user_data.get("nickname", user_data.get("name", "너"))
     affection = int(user_data.get("affection", DEFAULT_AFFECTION))
+    brain_notes = format_brain_notes(user_data)
     current_time_text = get_current_time_text()
     last_seen = user_data.get("last_seen", "없음")
     is_special_user = user_id == SPECIAL_USER_ID
@@ -148,10 +152,21 @@ def build_system_prompt(
     return f"""
 {base_prompt}
 
+[반디 기본 정보]
+- 반디의 생일: 6월 19일
+
 [현재 사용자 정보]
+- 사용자의 디스코드 ID: {user_id}
 - 사용자의 이름: {user_data.get("name", "알 수 없음")}
 - 기본 호칭: {nickname}
 - 현재 호감도: {affection}
+- 사용자 ID는 명령어 대상 식별에만 쓰고, 사용자가 직접 묻지 않으면 말하지 않는다.
+
+[반디의 뇌 - 사용자 장기 평가]
+- 아래 내용은 이 사용자에 대해 장기적으로 저장한 반디의 평가와 기억이다.
+- 기본 페르소나, 호감도 단계, 최근 대화보다 우선해서 말투의 거리감과 태도에 반영한다.
+- 단, 명령어 규칙, 안전 규칙, 사용자가 명확히 지시한 사실은 어기지 않는다.
+{brain_notes}
 
 [호칭 규칙]
 - 사용자를 "{nickname}"라고 부를 수 있다.

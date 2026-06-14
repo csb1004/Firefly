@@ -62,3 +62,35 @@ def test_generate_reply_persists_natural_reply_when_command_persistence_is_disab
         "주사위를 굴려서 나온 값에 4 더해줘",
         "결과에 4를 더하면 5야.",
     ]
+
+
+def test_generate_reply_passes_room_reasoning_effort(monkeypatch, tmp_path):
+    _use_temp_memory(monkeypatch, tmp_path)
+    storage.save_memory({
+        ROOMS_KEY: {
+            "room-1": {
+                "internet_mode": False,
+                "group_mode": False,
+                "reasoning_effort": "high",
+                "history": [],
+            }
+        }
+    })
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(output_text="깊게 생각해봤어.")
+
+    monkeypatch.setattr(ai.client_openai.responses, "create", fake_create)
+
+    asyncio.run(
+        ai.generate_reply(
+            "조금 복잡한 문제야",
+            user_id=123,
+            display_name="Alice",
+            room_key="room-1",
+        )
+    )
+
+    assert captured["reasoning"] == {"effort": "high"}

@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -20,6 +21,21 @@ def test_parse_poll_command_accepts_four_options_with_explicit_count():
         "작은 수족관",
         "야경 보이는 강변",
     ]
+
+
+def test_parse_poll_command_accepts_week_and_month_deadlines(monkeypatch):
+    now = datetime(2026, 6, 14, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(polls, "_now_utc", lambda: now)
+
+    week_spec = parse_poll_command("/투표 점심 | 항목수=2 | 김밥 | 라멘 | 2주정도")
+    day_spec = parse_poll_command("/투표 점심 | 항목수=2 | 김밥 | 라멘 | 14일로")
+    month_spec = parse_poll_command("/투표 점심 | 항목수=2 | 김밥 | 라멘 | 1달")
+    korean_month_spec = parse_poll_command("/투표 점심 | 항목수=2 | 김밥 | 라멘 | 1개월")
+
+    assert week_spec.closes_at == now + timedelta(weeks=2)
+    assert day_spec.closes_at == now + timedelta(days=14)
+    assert month_spec.closes_at == now + timedelta(days=30)
+    assert korean_month_spec.closes_at == now + timedelta(days=30)
 
 
 def test_parse_poll_command_rejects_count_mismatch():

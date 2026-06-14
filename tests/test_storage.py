@@ -110,10 +110,12 @@ def test_get_user_data_creates_and_normalizes_defaults(memory_file):
     assert user_data["affection"] == DEFAULT_AFFECTION
     assert user_data["last_seen"] is None
     assert user_data["history"] == []
+    assert user_data["brain_notes"] == []
 
     data = storage.load_memory()
     data["123"].pop("last_seen")
     data["123"].pop("history")
+    data["123"]["brain_notes"] = "한 줄 평가"
     storage.save_memory(data)
 
     normalized = storage.get_user_data(123, "Alice Updated")
@@ -121,6 +123,7 @@ def test_get_user_data_creates_and_normalizes_defaults(memory_file):
     assert normalized["name"] == "Alice Updated"
     assert normalized["last_seen"] is None
     assert normalized["history"] == []
+    assert normalized["brain_notes"] == ["한 줄 평가"]
 
 
 def test_find_user_records_by_nickname_and_conflicts(memory_file):
@@ -149,7 +152,12 @@ def test_add_history_trims_to_configured_limit():
 def test_room_data_defaults_and_history_trimming(memory_file):
     room_data = storage.get_room_data("guild:channel")
 
-    assert room_data == {"internet_mode": False, "group_mode": False, "history": []}
+    assert room_data == {
+        "internet_mode": False,
+        "group_mode": False,
+        "reasoning_effort": "medium",
+        "history": [],
+    }
 
     for index in range(MAX_ROOM_HISTORY + 3):
         storage.add_room_history(room_data, "Alice", "user", f"room-message-{index}")

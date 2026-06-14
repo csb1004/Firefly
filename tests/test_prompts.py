@@ -66,13 +66,24 @@ def test_build_system_prompt_uses_base_prompt_user_state_and_time(monkeypatch):
 
     prompt = prompts.build_system_prompt(
         123,
-        {"name": "Alice", "nickname": "Al", "affection": 50, "last_seen": "yesterday"},
+        {
+            "name": "Alice",
+            "nickname": "Al",
+            "affection": 50,
+            "last_seen": "yesterday",
+            "brain_notes": ["짧고 확실한 답을 선호한다."],
+        },
     )
 
     assert "base prompt for 123" in prompt
+    assert "6월 19일" in prompt
+    assert "123" in prompt
     assert "Alice" in prompt
     assert "Al" in prompt
     assert "50" in prompt
+    assert "반디의 뇌" in prompt
+    assert "짧고 확실한 답을 선호한다." in prompt
+    assert "기본 페르소나, 호감도 단계, 최근 대화보다 우선" in prompt
     assert "2026-05-16 12:00:00" in prompt
     assert "yesterday" in prompt
     assert "general command guide" in prompt
@@ -134,18 +145,24 @@ def test_special_command_guide_describes_poll_placeholders_before_examples():
     assert "사용자가 \"3개 정도 골라서\"라고 하면 {항목수}=3으로 쓰고 {항목1}, {항목2}, {항목3}을 모두 채운다." in guide
     assert "반드시 `/실행 /투표 ... || {프롬프트}` 형식을 사용한다." in guide
     assert "이유, 설명, 코멘트, 타이픈으로 붙인 문장은 투표 항목에 넣지 않는다." in guide
+    assert "`2주`" in guide
+    assert "`1달`" in guide
     assert "총 `{항목수}+3`조각이어야 한다." in guide
     assert "형식 검증 실패 메시지" in guide
+    assert "특정 기능별 예외" in guide
+    assert "자동 명령 실행 기록" in guide
+    assert "마감만 새 값으로 바꾼" not in guide
 
 
 def test_general_command_guide_uses_placeholder_sections_for_common_commands():
     guide = prompts.load_text_file(prompts.COMMAND_GUIDE_FILE)
 
-    format_start = guide.index("[일반 명령어 형식]")
-    variable_start = guide.index("[일반 명령어 변수]")
-    example_start = guide.index("[일반 명령어 예시]")
+    format_start = guide.index("\n[일반 명령어 형식]")
+    variable_start = guide.index("\n[일반 명령어 변수]")
+    example_start = guide.index("\n[일반 명령어 예시]")
+    attachment_start = guide.index("\n[첨부 파일 처리 규칙]")
 
-    assert format_start < variable_start < example_start
+    assert attachment_start < format_start < variable_start < example_start
     assert "/호칭 {호칭}" in guide
     assert "/프로필 {유저멘션}" in guide
     assert "/주사위 {시작숫자} {끝숫자}" in guide
@@ -163,6 +180,7 @@ def test_general_command_guide_uses_placeholder_sections_for_common_commands():
     assert "나온 숫자만큼 투표 항목 만들어줘" in guide
     assert "명령어 실행과 대화 답변을 동시에 원하면 일반 명령어를 단독 출력하지 말고 반드시 `/실행`을 사용한다." in guide
     assert "먼저 실행할 명령어가 여러 개면" in guide
+    assert "첨부 파일을 요약해 달라는 말은 `/요약` 명령이 아니라 파일 내용에 대한 자연어 답변" in guide
 
 
 def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands():
@@ -184,13 +202,26 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "/검색실행 {프롬프트}" in guide
     assert "/검색실행 {명령어들} || {프롬프트}" in guide
     assert "/인터넷모드 {상태}" in guide
+    assert "/추론 {추론단계}" in guide
+    assert "/뇌추가 {유저ID} {평가}" in guide
+    assert "/뇌수정 {유저ID} {번호} {평가}" in guide
+    assert "/뇌삭제 {유저ID} {번호}" in guide
     assert "/호칭 {유저멘션또는ID또는기존호칭} {호칭}" in guide
     assert "/호감도설정 {유저멘션} {숫자}" in guide
     assert "/최신소식 시간 {시간}" in guide
     assert "/주제 설정 {주제목록}" in guide
     assert "{상태}는 `on` 또는 `off`만 사용한다." in guide
+    assert "{추론단계}" in guide
+    assert "{평가}" in guide
+    assert "{유저ID}" in guide
+    assert "현재 메시지를 보낸 사용자를 대상으로 삼아야 하면" in guide
     assert "다른 사람의 호칭 변경 요청을 `/호칭 {호칭}`처럼 한 인자만 있는 자기 호칭 변경 명령으로 바꾸지 않는다." in guide
     assert "최종 답변 한 번에만 인터넷 검색을 사용하고 방 설정은 바꾸지 않는다." in guide
+    assert "반디의 뇌를 보자고 하면 대상 사용자를 명시" in guide
+    assert "그것만으로 저장하지 않는다" in guide
+    assert "저장하지 않기로 판단했다면 별도의 안내" in guide
+    assert "사소한 취향, 일회성 일정" in guide
+    assert "호감도 증감은 사용자가 반복적으로 배려" in guide
     assert "후속 명령어는 `/실행`이 결과를 본 뒤 고르게 둔다." in guide
     assert "이번 질문만 검색" in guide
     assert "대화=`conversation_memory.json`" in guide

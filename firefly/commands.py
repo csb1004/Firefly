@@ -1,10 +1,18 @@
 from collections import deque
+from types import SimpleNamespace
 
 import discord
 
 from .affection import change_user_affection, set_user_affection
 from .admin_status import build_admin_status_text
 from .ai import generate_reply, summarize_conversation, summarize_voice_recording, summarize_voice_search
+from .brain import (
+    add_brain_note,
+    delete_brain_note,
+    format_brain_notes,
+    parse_brain_index_and_note,
+    update_brain_note,
+)
 from .command_registry import ADMIN_STATUS_COMMAND, ROLE_COMMAND, VOICE_SEARCH_COMMAND, matched_alias
 from .commands_parser import (
     SPECIAL_ONLY_COMMAND_PREFIXES,
@@ -16,7 +24,7 @@ from .commands_parser import (
     parse_summary_args,
     summary_recording_filename,
 )
-from .config import DEFAULT_AFFECTION, SPECIAL_USER_ID, SUMMARY_DEFAULT_LIMIT
+from .config import BOT_DISPLAY_NAME, DEFAULT_AFFECTION, SPECIAL_USER_ID, SUMMARY_DEFAULT_LIMIT
 from .embeds import (
     create_help_embed,
     create_profile_embed,
@@ -27,12 +35,16 @@ from .embeds import (
 )
 from .news import handle_news_command, is_news_command_text
 from .polls import cancel_poll_tasks, close_poll_from_command, create_poll_from_command
+from .reasoning import format_reasoning_status, reasoning_effort_label, set_room_reasoning_effort
 from .role_commands import handle_role_command, is_role_command_text
 from .storage import (
     MEMORY_SECTION_LABELS,
+    add_history,
+    add_room_history,
     ensure_memory_section_file,
     format_memory_section_list,
     get_memory_section_file,
+    get_room_data,
     get_user_data,
     load_memory,
     reset_memory_section,
@@ -40,7 +52,8 @@ from .storage import (
     update_room_data,
     update_user_data,
 )
-from .text_utils import parse_last_int_arg
+from .text_utils import clamp_text, get_current_time_text, parse_last_int_arg
+from .user_targets import resolve_explicit_user_target, target_mentions
 from .utility_commands import (
     CommandUsageError,
     MAX_ADAPTER_COMMANDS,
@@ -73,9 +86,7 @@ def get_target_mentions(
     message: discord.Message,
     client_user: discord.ClientUser | discord.User | None,
 ) -> list[discord.User | discord.Member]:
-    if client_user is None:
-        return list(message.mentions)
-    return [member for member in message.mentions if member.id != client_user.id]
+    return target_mentions(message, client_user)
 
 
 def _parse_summary_args(user_text: str, room_data: dict) -> tuple[str, int]:
@@ -117,6 +128,8 @@ def _summary_recording_filename(user_text: str) -> str | None:
 LATEST_RECORDING_TOKENS = {"최근", "마지막", "latest", "last"}
 ADAPTER_COMMAND_OUTPUT_LIMIT = 1200
 ADAPTER_CONTEXT_LIMIT = 3500
+AUTO_COMMAND_HISTORY_OUTPUT_LIMIT = 1200
+PERMISSION_DENIED_MESSAGE = "…그 명령어를 사용할 권한이 없어."
 ADAPTER_CHAIN_LIMIT_MESSAGE = (
     f"…연속 실행은 한 번에 최대 {MAX_ADAPTER_COMMANDS}개까지만 할게. "
     "중간 결과를 보고 이어서 다시 부탁해줘."
@@ -274,10 +287,57 @@ def _extract_auto_command(reply: str) -> str | None:
     return command[:1900]
 
 
+def _format_auto_command_history(command_text: str, command_output: str) -> str:
+    output = command_output or "명령어가 실행됐지만 표시된 결과 메시지는 없었어."
+    clipped_output = clamp_text(output, AUTO_COMMAND_HISTORY_OUTPUT_LIMIT, "\n...")
+    return (
+        "자동 명령 실행 기록: "
+        f"사용자 요청을 `{command_text}` 명령으로 처리했어.\n"
+        f"결과:\n{clipped_output}"
+    )
+
+
+def _record_auto_command_context(
+    *,
+    message: discord.Message,
+    user_text: str,
+    room_key: str,
+    command_text: str,
+    command_output: str,
+) -> None:
+    display_name = getattr(message.author, "display_name", message.author.name)
+    user_data = get_user_data(message.author.id, display_name)
+    summary = _format_auto_command_history(command_text, command_output)
+
+    user_data = add_history(user_data, "user", user_text)
+    user_data = add_history(user_data, "assistant", summary)
+    user_data["last_seen"] = get_current_time_text()
+    update_user_data(message.author.id, user_data)
+
+    room_data = get_room_data(room_key)
+    room_data = add_room_history(
+        room_data,
+        speaker_name=display_name,
+        role="user",
+        content=user_text,
+        user_id=message.author.id,
+        nickname=user_data.get("nickname"),
+        affection=user_data.get("affection"),
+    )
+    room_data = add_room_history(
+        room_data,
+        speaker_name=BOT_DISPLAY_NAME,
+        role="assistant",
+        content=summary,
+    )
+    update_room_data(room_key, room_data)
+
+
 async def _run_auto_command_from_reply(
     *,
     reply: str,
     message: discord.Message,
+    user_text: str,
     user_data: dict,
     room_key: str,
     room_data: dict,
@@ -287,13 +347,23 @@ async def _run_auto_command_from_reply(
     if not auto_command:
         return False
 
+    capture_channel = _CommandCaptureChannel(message.channel)
+    capture_message = _CommandCaptureMessage(message, capture_channel)
     await handle_mentioned_message(
-        message=message,
+        message=capture_message,
         user_text=auto_command,
         user_data=user_data,
         room_key=room_key,
         room_data=room_data,
         client=client,
+    )
+    command_output = "\n".join(capture_channel.outputs).strip()
+    _record_auto_command_context(
+        message=message,
+        user_text=user_text,
+        room_key=room_key,
+        command_text=auto_command,
+        command_output=command_output,
     )
     return True
 
@@ -349,6 +419,141 @@ async def _send_admin_status(message: discord.Message, room_key: str, room_data:
         guild_id=guild_id,
     )
     await message.channel.send(f"```text\n{status_text}\n```")
+
+
+async def _brain_target_data(
+    message: discord.Message,
+    client: discord.Client,
+    raw_text: str,
+) -> tuple[object | None, dict | None, str, str | None]:
+    return await _resolve_target_argument(message, client, raw_text)
+
+
+async def _send_brain_notes(
+    message: discord.Message,
+    client: discord.Client,
+    raw_text: str,
+) -> None:
+    target, target_data, _, error_message = await _brain_target_data(message, client, raw_text)
+    if error_message or target is None or target_data is None:
+        await message.channel.send(error_message or "…대상 사용자를 찾지 못했어.")
+        return
+
+    await message.channel.send(
+        f"반디의 뇌에 저장된 `{target.display_name}` 평가야.\n```text\n{format_brain_notes(target_data)}\n```"
+    )
+
+
+async def _add_brain_note(
+    message: discord.Message,
+    client: discord.Client,
+    raw_text: str,
+) -> None:
+    target, target_data, note, error_message = await _brain_target_data(message, client, raw_text)
+    if error_message or target is None or target_data is None:
+        await message.channel.send(error_message or "…대상 사용자를 찾지 못했어.")
+        return
+    if not note:
+        await message.channel.send("…대상과 저장할 평가를 같이 적어줘. 예: `/뇌추가 @유저 쉽게 불안해하지만 끝까지 확인하려고 한다`")
+        return
+
+    try:
+        index = add_brain_note(target_data, note)
+    except ValueError as exc:
+        await message.channel.send(f"…{exc}")
+        return
+    update_user_data(target.user_id, target_data)
+    await message.channel.send(f"…응. `{target.display_name}`에 대한 평가를 {index}번에 저장했어.")
+
+
+async def _update_brain_note(
+    message: discord.Message,
+    client: discord.Client,
+    raw_text: str,
+) -> None:
+    target, target_data, args, error_message = await _brain_target_data(message, client, raw_text)
+    if error_message or target is None or target_data is None:
+        await message.channel.send(error_message or "…대상 사용자를 찾지 못했어.")
+        return
+    index, note = parse_brain_index_and_note(args)
+    if index is None or not note:
+        await message.channel.send("…대상, 수정할 번호, 새 내용을 같이 적어줘. 예: `/뇌수정 @유저 1 신중하지만 결정을 미루지는 않는다`")
+        return
+    if not update_brain_note(target_data, index, note):
+        await message.channel.send("…그 번호의 평가를 찾지 못했어.")
+        return
+
+    update_user_data(target.user_id, target_data)
+    await message.channel.send(f"…응. `{target.display_name}`에 대한 {index}번 평가를 고쳤어.")
+
+
+async def _delete_brain_note(
+    message: discord.Message,
+    client: discord.Client,
+    raw_text: str,
+) -> None:
+    target, target_data, args, error_message = await _brain_target_data(message, client, raw_text)
+    if error_message or target is None or target_data is None:
+        await message.channel.send(error_message or "…대상 사용자를 찾지 못했어.")
+        return
+    if not args.isdigit():
+        await message.channel.send("…대상과 삭제할 평가 번호를 적어줘. 예: `/뇌삭제 @유저 1`")
+        return
+
+    index = int(args)
+    deleted = delete_brain_note(target_data, index)
+    if deleted is None:
+        await message.channel.send("…그 번호의 평가를 찾지 못했어.")
+        return
+
+    update_user_data(target.user_id, target_data)
+    await message.channel.send(f"…응. `{target.display_name}`에 대한 {index}번 평가를 지웠어.")
+
+
+async def _send_or_update_reasoning(
+    message: discord.Message,
+    raw_text: str,
+    room_key: str,
+    room_data: dict,
+) -> None:
+    raw_value = raw_text.strip()
+    if not raw_value or raw_value in {"상태", "확인", "보기"}:
+        await message.channel.send(f"…이 방의 추론 단계는 `{format_reasoning_status(room_data)}`야.")
+        return
+
+    effort = set_room_reasoning_effort(room_data, raw_value)
+    if effort is None:
+        await message.channel.send("…추론 단계는 `없음`, `낮음`, `보통`, `높음` 중 하나로 적어줘. 예: `/추론 높음`")
+        return
+
+    update_room_data(room_key, room_data)
+    await message.channel.send(f"…응. 이 방의 추론 단계를 `{reasoning_effort_label(effort)}`으로 맞췄어.")
+
+
+def _target_to_user_like(target: object) -> object:
+    display_name = getattr(target, "display_name", "알 수 없음")
+    return SimpleNamespace(
+        id=getattr(target, "user_id", None),
+        mention=getattr(target, "mention", None) or f"`{getattr(target, 'user_id', '알 수 없음')}`",
+        display_name=display_name,
+        name=display_name,
+        display_avatar=None,
+    )
+
+
+async def _resolve_target_argument(
+    message: discord.Message,
+    client: discord.Client,
+    raw_text: str,
+) -> tuple[object | None, dict | None, str, str | None]:
+    target, remainder, error_message = await resolve_explicit_user_target(
+        message=message,
+        client=client,
+        argument_text=raw_text,
+    )
+    if error_message or target is None:
+        return None, None, "", error_message or "…대상 사용자를 찾지 못했어."
+    return target, dict(target.user_data or {}), remainder, None
 
 
 async def _send_memory_or_recording_file(message: discord.Message, filename: str | None = None) -> None:
@@ -510,11 +715,14 @@ async def handle_mentioned_message(
     room_key: str,
     room_data: dict,
     client: discord.Client,
+    attachment_context: str | None = None,
 ) -> None:
     author_id = message.author.id
     special_user = is_special_user(author_id)
 
-    natural_command = normalize_natural_command(user_text, special_user=special_user)
+    natural_command = None
+    if not attachment_context:
+        natural_command = normalize_natural_command(user_text, special_user=special_user)
     if natural_command:
         await handle_mentioned_message(
             message=message,
@@ -529,7 +737,7 @@ async def handle_mentioned_message(
     voice_search_alias = matched_alias(user_text, VOICE_SEARCH_COMMAND.aliases)
     if voice_search_alias:
         if not special_user:
-            await message.channel.send("그 명령어는 특별 사용자만 사용할 수 있어.")
+            await message.channel.send("…그 명령어를 사용할 권한이 없어.")
             return
         await _send_voice_search(message, _command_arg(user_text, voice_search_alias))
         return
@@ -537,7 +745,7 @@ async def handle_mentioned_message(
     admin_status_alias = matched_alias(user_text, ADMIN_STATUS_COMMAND.aliases)
     if admin_status_alias:
         if not special_user:
-            await message.channel.send("그 명령어는 특별 사용자만 사용할 수 있어.")
+            await message.channel.send("…그 명령어를 사용할 권한이 없어.")
             return
         await _send_admin_status(message, room_key, room_data)
         return
@@ -545,13 +753,54 @@ async def handle_mentioned_message(
     role_alias = matched_alias(user_text, ROLE_COMMAND.aliases)
     if role_alias:
         if not special_user:
-            await message.channel.send("그 명령어는 특별 사용자만 사용할 수 있어.")
+            await message.channel.send("…그 명령어를 사용할 권한이 없어.")
             return
         await handle_role_command(message, _command_arg(user_text, role_alias))
         return
 
     if special_user and is_role_command_text(user_text):
         await handle_role_command(message, user_text)
+        return
+
+    for reasoning_alias in ("/추론", "/추론설정"):
+        if matches_command(user_text, reasoning_alias):
+            if not special_user:
+                await message.channel.send("…추론 설정을 바꿀 권한이 없어.")
+                return
+            await _send_or_update_reasoning(
+                message,
+                _command_arg(user_text, reasoning_alias),
+                room_key,
+                room_data,
+            )
+            return
+
+    if matches_command(user_text, "/뇌"):
+        if not special_user:
+            await message.channel.send("…반디의 뇌를 볼 권한이 없어.")
+            return
+        await _send_brain_notes(message, client, _command_arg(user_text, "/뇌"))
+        return
+
+    if matches_command(user_text, "/뇌추가"):
+        if not special_user:
+            await message.channel.send("…반디의 뇌를 바꿀 권한이 없어.")
+            return
+        await _add_brain_note(message, client, _command_arg(user_text, "/뇌추가"))
+        return
+
+    if matches_command(user_text, "/뇌수정"):
+        if not special_user:
+            await message.channel.send("…반디의 뇌를 바꿀 권한이 없어.")
+            return
+        await _update_brain_note(message, client, _command_arg(user_text, "/뇌수정"))
+        return
+
+    if matches_command(user_text, "/뇌삭제"):
+        if not special_user:
+            await message.channel.send("…반디의 뇌를 바꿀 권한이 없어.")
+            return
+        await _delete_brain_note(message, client, _command_arg(user_text, "/뇌삭제"))
         return
 
     for adapter_alias in ("/실행", "/명령답변"):
@@ -569,7 +818,7 @@ async def handle_mentioned_message(
     for web_adapter_alias in ("/검색실행", "/인터넷실행", "/검색답변"):
         if matches_command(user_text, web_adapter_alias):
             if not special_user:
-                await message.channel.send("…인터넷 검색 실행은 특별 사용자만 사용할 수 있어.")
+                await message.channel.send("…인터넷 검색 실행 권한이 없어.")
                 return
             await _run_command_adapter(
                 message=message,
@@ -618,7 +867,7 @@ async def handle_mentioned_message(
 
     if matches_command(user_text, "/기록"):
         if not special_user:
-            await message.channel.send("…통화 기록은 특별 사용자만 사용할 수 있어.")
+            await message.channel.send("…통화 기록 권한이 없어.")
             return
 
         _, response_text, _ = await start_voice_recording(
@@ -631,7 +880,7 @@ async def handle_mentioned_message(
 
     if matches_command(user_text, "/기록중지"):
         if not special_user:
-            await message.channel.send("…통화 기록은 특별 사용자만 사용할 수 있어.")
+            await message.channel.send("…통화 기록 권한이 없어.")
             return
 
         if message.guild is None:
@@ -644,7 +893,7 @@ async def handle_mentioned_message(
 
     if matches_command(user_text, "/대화목록"):
         if not special_user:
-            await message.channel.send("…통화 기록 목록은 특별 사용자만 볼 수 있어.")
+            await message.channel.send("…통화 기록 목록을 볼 권한이 없어.")
             return
         await _send_recording_list(message)
         return
@@ -664,7 +913,7 @@ async def handle_mentioned_message(
     )
     if memory_reset_command:
         if not special_user:
-            await message.channel.send("…메모리 초기화는 특별 사용자만 사용할 수 있어.")
+            await message.channel.send("…메모리 초기화 권한이 없어.")
             return
 
         raw_args = user_text.replace(memory_reset_command, "", 1).strip()
@@ -686,77 +935,70 @@ async def handle_mentioned_message(
         return
 
     if special_user and user_text.startswith("/유저정보"):
-        target_mentions = get_target_mentions(message, client.user)
-
-        if not target_mentions:
-            await message.channel.send("…확인할 대상을 멘션해줘. 예: /유저정보 @개척자")
+        target, target_data, _, error_message = await _resolve_target_argument(
+            message,
+            client,
+            _command_arg(user_text, "/유저정보"),
+        )
+        if error_message or target is None or target_data is None:
+            await message.channel.send(error_message or "…대상 사용자를 찾지 못했어.")
             return
 
-        target_user = target_mentions[0]
-        display_name = getattr(target_user, "display_name", target_user.name)
-        target_data = get_user_data(target_user.id, display_name)
-
-        await message.channel.send(embed=create_user_info_embed(target_user, target_data))
+        await message.channel.send(embed=create_user_info_embed(_target_to_user_like(target), target_data))
         return
 
     if special_user and user_text.startswith("/호감도설정 "):
-        target_mentions = get_target_mentions(message, client.user)
-
-        if not target_mentions:
-            await message.channel.send("…대상을 먼저 멘션해줘. 예: /호감도설정 @유저 75")
+        target, _, args, error_message = await _resolve_target_argument(
+            message,
+            client,
+            _command_arg(user_text, "/호감도설정"),
+        )
+        if error_message or target is None:
+            await message.channel.send(error_message or "…대상 사용자를 찾지 못했어.")
             return
 
-        if len(user_text.split()) < 3:
-            await message.channel.send("…숫자도 같이 적어줘. 예: /호감도설정 @유저 75")
-            return
-
-        value = parse_last_int_arg(user_text)
+        value = parse_last_int_arg(args)
         if value is None:
-            await message.channel.send("…호감도는 숫자로 적어줘.")
+            await message.channel.send("…대상과 숫자를 같이 적어줘. 예: `/호감도설정 @유저 75`")
             return
 
-        target_user = target_mentions[0]
-        new_value = set_user_affection(target_user.id, value)
+        new_value = set_user_affection(target.user_id, value)
 
-        if target_user.id == SPECIAL_USER_ID:
-            await message.channel.send("…내 호감도는 건드릴 수 없어. 이미 1004로 고정이야.")
+        if target.user_id == SPECIAL_USER_ID:
+            await message.channel.send("…그 대상의 호감도는 변경할 수 없어.")
         else:
-            target_name = getattr(target_user, "display_name", target_user.name)
-            await message.channel.send(f"…{target_name}의 호감도를 {new_value}로 맞춰뒀어.")
+            await message.channel.send(f"…{target.display_name}의 호감도를 {new_value}로 맞춰뒀어.")
         return
 
     if special_user and user_text.startswith("/호감도증감 "):
-        target_mentions = get_target_mentions(message, client.user)
-
-        if not target_mentions:
-            await message.channel.send("…대상을 먼저 멘션해줘. 예: /호감도증감 @유저 -10")
+        target, _, args, error_message = await _resolve_target_argument(
+            message,
+            client,
+            _command_arg(user_text, "/호감도증감"),
+        )
+        if error_message or target is None:
+            await message.channel.send(error_message or "…대상 사용자를 찾지 못했어.")
             return
 
-        if len(user_text.split()) < 3:
-            await message.channel.send("…증감할 숫자도 같이 적어줘. 예: /호감도증감 @유저 5")
-            return
-
-        delta = parse_last_int_arg(user_text)
+        delta = parse_last_int_arg(args)
         if delta is None:
-            await message.channel.send("…증감값은 숫자로 적어줘.")
+            await message.channel.send("…대상과 증감할 숫자를 같이 적어줘. 예: `/호감도증감 @유저 5`")
             return
 
-        target_user = target_mentions[0]
-        new_value = change_user_affection(target_user.id, delta)
+        new_value = change_user_affection(target.user_id, delta)
 
-        if target_user.id == SPECIAL_USER_ID:
-            await message.channel.send("…내 호감도는 그대로 1004야.")
+        if target.user_id == SPECIAL_USER_ID:
+            await message.channel.send("…그 대상의 호감도는 변경할 수 없어.")
         else:
             sign = "+" if delta >= 0 else ""
-            target_name = getattr(target_user, "display_name", target_user.name)
             await message.channel.send(
-                f"…{target_name}의 호감도를 {sign}{delta}만큼 조정했어. 지금은 {new_value}야."
+                f"…{target.display_name}의 호감도를 {sign}{delta}만큼 조정했어. 지금은 {new_value}야."
             )
         return
 
     if user_text == "/호감도":
         if special_user:
-            await message.channel.send("…너에 대한 마음은 굳이 세면 1004쯤 될 거야.")
+            await message.channel.send("…굳이 숫자로 말하지 않을게. 지금은 충분히 가까운 편이야.")
         else:
             await message.channel.send(
                 f"…지금 {user_data.get('nickname', user_data.get('name', '너'))}에 대한 마음은 "
@@ -782,7 +1024,7 @@ async def handle_mentioned_message(
 
     if matches_command(user_text, "/투표"):
         if not special_user:
-            await message.channel.send("…투표 기능은 특별 사용자만 사용할 수 있어.")
+            await message.channel.send("…투표 기능을 사용할 권한이 없어.")
             return
 
         await create_poll_from_command(message, user_text, client)
@@ -790,7 +1032,7 @@ async def handle_mentioned_message(
 
     if matches_command(user_text, "/투표마감"):
         if not special_user:
-            await message.channel.send("…투표 마감은 특별 사용자만 사용할 수 있어.")
+            await message.channel.send("…투표 마감 권한이 없어.")
             return
 
         await close_poll_from_command(message, client, user_text)
@@ -800,7 +1042,7 @@ async def handle_mentioned_message(
         recording_filename = _summary_recording_filename(user_text)
         if recording_filename:
             if not special_user:
-                await message.channel.send("…통화 기록 요약은 특별 사용자만 사용할 수 있어.")
+                await message.channel.send("…통화 기록 요약 권한이 없어.")
                 return
             resolved_filename = _resolve_recording_summary_filename(recording_filename)
             if not resolved_filename:
@@ -857,6 +1099,7 @@ async def handle_mentioned_message(
             f"…이 방 설정이야.\n"
             f"- 인터넷 검색 모드: {'on' if room_data.get('internet_mode') else 'off'}\n"
             f"- 단체 모드: {'on' if room_data.get('group_mode') else 'off'}\n"
+            f"- 추론 단계: {format_reasoning_status(room_data)}\n"
             f"- 저장된 방 대화 수: {len(room_data.get('history', []))}"
         )
         return
@@ -867,7 +1110,7 @@ async def handle_mentioned_message(
         return
 
     if user_text.startswith("/") and not special_user and is_special_only_command(user_text):
-        await message.channel.send("…그 명령어는 특별 사용자만 사용할 수 있어.")
+        await message.channel.send(PERMISSION_DENIED_MESSAGE)
         return
 
     if user_text.startswith("/"):
@@ -881,12 +1124,14 @@ async def handle_mentioned_message(
             user_id=author_id,
             display_name=display_name,
             room_key=room_key,
+            attachment_context=attachment_context,
             persist_command_reply=False,
         )
 
     if await _run_auto_command_from_reply(
         reply=reply,
         message=message,
+        user_text=user_text,
         user_data=user_data,
         room_key=room_key,
         room_data=room_data,

@@ -13,6 +13,7 @@ def _ensure_user_entry(all_data: dict, target_user_id: int) -> dict:
             "affection": DEFAULT_AFFECTION,
             "last_seen": None,
             "history": [],
+            "brain_notes": [],
         }
     return all_data[key]
 
@@ -71,9 +72,9 @@ def get_affection_stage_text(affection: int, is_special_user: bool) -> str:
     if is_special_user:
         return (
             "이 사용자는 무엇과도 바꿀 수 없는 가장 특별한 존재다. "
-            "호감은 수치로 셀 수 없을 정도로 깊고 절대 흔들리지 않는다. "
-            "말투는 차분한 반디답게 유지하지만, 애정과 신뢰가 자연스럽고 분명하게 드러난다. "
-            "이름이나 호칭을 더 자주, 더 부드럽게 사용할 수 있다."
+            "호감도 수치는 고정되어 흔들리지 않는다. "
+            "말투는 차분한 반디답게 유지하되, 협조성, 유연성, 세심함으로 우선순위를 간접 반영한다. "
+            "직접적인 감정 표현은 사용자가 먼저 명시적으로 표현한 경우에만 조심스럽게 맞춘다."
         )
 
     if 1 <= affection <= 20:
@@ -103,7 +104,8 @@ def get_affection_stage_text(affection: int, is_special_user: bool) -> str:
     return (
         "호감도 81~100 단계다. 사용자를 친한 친구처럼 편하고 소중하게 느낀다. "
         "차분한 톤은 유지하면서도 한결 편안하고 부드럽게 반응한다. "
-        "호칭을 조금 더 자연스럽게 사용할 수 있고, 걱정하거나 챙기는 마음도 비교적 분명하게 드러난다."
+        "호칭을 조금 더 자연스럽게 사용할 수 있고, 걱정하거나 챙기는 마음도 비교적 분명하게 드러난다. "
+        "연애적이거나 사랑을 고백하는 상태로 발전하지는 않는다."
     )
 
 
@@ -119,5 +121,5 @@ def get_affection_stage_label(affection: int) -> str:
     if 81 <= affection <= 100:
         return "친한 친구 수준"
     if affection == 1004:
-        return "특별한 존재"
+        return "안정적인 신뢰 상태"
     return "알 수 없음"

@@ -13,7 +13,7 @@ POLL_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣",
 POLL_COMMAND_FORMAT = "`/투표 제목 | 항목수=개수 | 항목1 | 항목2 | ... | 마감`"
 POLL_COMMAND_EXAMPLE = "`/투표 저녁 메뉴 | 항목수=3 | 치킨 | 피자 | 떡볶이 | 10분`"
 POLL_DEADLINE_HELP = (
-    "마감 포맷은 상대시간 `10분`/`2시간`/`1일`, 시각 `23:30`, "
+    "마감 포맷은 상대시간 `10분`/`2시간`/`1일`/`2주`/`1달`, 시각 `23:30`, "
     "날짜시각 `2026-05-07 23:30`, ISO `2026-05-07T23:30:00+09:00` 중 하나로 적어줘. "
     "`23:30`처럼 시각만 적으면 오늘 그 시각, 이미 지났으면 내일 그 시각으로 처리해."
 )
@@ -46,10 +46,10 @@ def _now_utc() -> datetime:
 
 def _parse_deadline(deadline_text: str) -> datetime:
     text = deadline_text.strip()
-    text = re.sub(r"\s*(까지|동안)$", "", text).strip()
+    text = re.sub(r"\s*(까지|동안|정도|정도로|쯤|가량|으로|로)$", "", text).strip()
 
     duration_match = re.fullmatch(
-        r"(\d+(?:\.\d+)?)\s*(초|분|시간|일|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hour|hours|d|day|days)",
+        r"(\d+(?:\.\d+)?)\s*(초|분|시간|일|주|주일|달|개월|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hour|hours|d|day|days|w|week|weeks|mo|mon|month|months)",
         text,
         re.IGNORECASE,
     )
@@ -63,8 +63,12 @@ def _parse_deadline(deadline_text: str) -> datetime:
             delta = timedelta(minutes=amount)
         elif unit in {"시간", "h", "hour", "hours"}:
             delta = timedelta(hours=amount)
-        else:
+        elif unit in {"일", "d", "day", "days"}:
             delta = timedelta(days=amount)
+        elif unit in {"주", "주일", "w", "week", "weeks"}:
+            delta = timedelta(weeks=amount)
+        else:
+            delta = timedelta(days=amount * 30)
 
         closes_at = _now_utc() + delta
         if closes_at <= _now_utc():

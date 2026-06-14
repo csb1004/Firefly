@@ -19,6 +19,7 @@ def test_special_help_keeps_poll_help_short():
 
     assert "`10분`" in text
     assert "`2시간`" in text
+    assert "`2주`" in text
     assert "`23:30`" in text
     assert "ISO" not in text
 
@@ -30,7 +31,9 @@ def test_help_lists_profile_dice_team_and_adapter_commands():
     assert "/주사위 [시작] [끝]" in text
     assert "/팀나누기" in text
     assert "/실행 [명령어들] | [프롬프트]" in text
-    assert "특별 사용자 전용 명령은 여기서도 권한을 우회할 수 없어" in text
+    assert "관리 권한이 필요한 명령은 여기서도 권한을 우회할 수 없어" in text
+    assert "텍스트 파일 첨부" in text
+    assert "md" in text
 
 
 def test_special_help_lists_one_shot_web_search_command():
@@ -52,3 +55,12 @@ def test_special_help_lists_role_management_commands():
 
     assert "/역할 부여 @유저 @역할" in text
     assert "/역할 권한제거 @역할 [권한]" in text
+
+
+def test_special_help_lists_reasoning_and_brain_commands():
+    text = _field_text(create_special_help_embed())
+
+    assert "/추론 [없음/낮음/보통/높음]" in text
+    assert "/뇌추가 @유저 [평가]" in text
+    assert "/뇌수정 @유저 [번호] [평가]" in text
+    assert "/뇌삭제 @유저 [번호]" in text

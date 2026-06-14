@@ -286,4 +286,4 @@ def test_role_command_rejects_non_special_user():
     )
 
     assert member.added_roles == []
-    assert channel.sent_messages == ["그 명령어는 특별 사용자만 사용할 수 있어."]
+    assert channel.sent_messages == ["…그 명령어를 사용할 권한이 없어."]

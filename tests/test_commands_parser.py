@@ -44,3 +44,15 @@ def test_normalize_natural_command_supports_common_general_commands():
     assert commands_parser.normalize_natural_command("1부터 6까지 주사위 굴려줘") == "/주사위 1 6"
     assert commands_parser.normalize_natural_command("이 방 대화 20개 요약해줘") == "/요약 방 20"
     assert commands_parser.normalize_natural_command("최신 소식 받고 싶어") == "/최신소식 받기"
+
+
+def test_new_reasoning_and_brain_commands_are_special_only():
+    for command in (
+        "/추론",
+        "/추론설정 높음",
+        "/뇌 123456789012345",
+        "/뇌추가 123456789012345 평가",
+        "/뇌수정 123456789012345 1 평가",
+        "/뇌삭제 123456789012345 1",
+    ):
+        assert commands_parser.is_special_only_command(command)

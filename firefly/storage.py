@@ -4,6 +4,7 @@ from threading import RLock
 
 import discord
 
+from .brain import BRAIN_NOTES_KEY, normalize_brain_notes
 from .config import (
     BOT_DISPLAY_NAME,
     DAILY_NEWS_KEY,
@@ -17,6 +18,7 @@ from .config import (
     SPECIAL_USER_NAME,
     SPECIAL_USER_NICKNAME,
 )
+from .reasoning import DEFAULT_REASONING_EFFORT, normalize_room_reasoning_effort
 from .text_utils import clean_discord_content, get_current_time_text
 
 _MEMORY_LOCK = RLock()
@@ -231,6 +233,7 @@ def _new_room_data() -> dict:
     return {
         "internet_mode": False,
         "group_mode": False,
+        "reasoning_effort": DEFAULT_REASONING_EFFORT,
         "history": [],
     }
 
@@ -238,6 +241,7 @@ def _new_room_data() -> dict:
 def _normalize_room_data(room_data: dict) -> dict:
     room_data.setdefault("internet_mode", False)
     room_data.setdefault("group_mode", False)
+    normalize_room_reasoning_effort(room_data)
     room_data.setdefault("history", [])
     return room_data
 
@@ -253,12 +257,14 @@ def _new_user_data(user_id: int, display_name: str) -> dict:
         "affection": affection,
         "last_seen": None,
         "history": [],
+        BRAIN_NOTES_KEY: [],
     }
 
 
 def _normalize_user_data(user_id: int, display_name: str, user_data: dict) -> dict:
     user_data.setdefault("last_seen", None)
     user_data.setdefault("history", [])
+    normalize_brain_notes(user_data)
 
     if user_id == SPECIAL_USER_ID:
         user_data["name"] = SPECIAL_USER_NAME

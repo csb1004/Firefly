@@ -24,6 +24,7 @@ NEWS_MESSAGE_LIMIT = 1900
 NEWS_DELIVERED_ITEM_LIMIT = 200
 NEWS_PROMPT_RECENT_ITEM_LIMIT = 40
 NEWS_OWNER_BOOTSTRAPPED_KEY = "default_owner_subscription_bootstrapped"
+NEWS_PERMISSION_DENIED_MESSAGE = "…그 최신 소식 설정을 바꿀 권한이 없어."
 URL_PATTERN = re.compile(r"https?://[^\s<>()\]]+", re.IGNORECASE)
 REPORT_ITEM_PATTERN = re.compile(r"(?m)^\s*(?:\[\d+\]|\d+\.)\s+(.+)$")
 REPORT_ITEM_PREFIX_PATTERN = re.compile(r"^\s*(?:\[\d+\]|\d+\.)\s+")
@@ -629,7 +630,7 @@ async def _handle_add_command(
     target_user = await _resolve_target_user(message, client, argument_text)
 
     if target_user.id != message.author.id and not special_user:
-        await _send_command_feedback(message, "…다른 사람을 최신 소식 목록에 추가하는 건 특별 사용자만 할 수 있어.")
+        await _send_command_feedback(message, NEWS_PERMISSION_DENIED_MESSAGE)
         return
 
     settings = get_news_settings()
@@ -670,7 +671,7 @@ async def _handle_remove_command(
 
     target_user = await _resolve_target_user(message, client, argument_text)
     if target_user.id != message.author.id and not special_user:
-        await _send_command_feedback(message, "…다른 사람을 최신 소식 목록에서 제거하는 건 특별 사용자만 할 수 있어.")
+        await _send_command_feedback(message, NEWS_PERMISSION_DENIED_MESSAGE)
         return
 
     removed = _remove_subscriber(target_user.id)
@@ -701,7 +702,7 @@ async def _handle_time_command(
         return
 
     if not special_user:
-        await _send_command_feedback(message, "…발송 시간 변경은 특별 사용자만 할 수 있어.")
+        await _send_command_feedback(message, NEWS_PERMISSION_DENIED_MESSAGE)
         return
 
     try:
@@ -730,7 +731,7 @@ async def _handle_topic_command(
         return
 
     if not special_user:
-        await _send_command_feedback(message, "…최신 소식 주제 변경은 특별 사용자만 할 수 있어.")
+        await _send_command_feedback(message, NEWS_PERMISSION_DENIED_MESSAGE)
         return
 
     action, _, value = raw_text.partition(" ")
@@ -768,7 +769,7 @@ async def _handle_history_clear_command(
         return
 
     if not special_user:
-        await _send_command_feedback(message, "…최신 소식 중복 기록 삭제는 특별 사용자만 할 수 있어.")
+        await _send_command_feedback(message, NEWS_PERMISSION_DENIED_MESSAGE)
         return
 
     if confirm_text.strip() != "확인":

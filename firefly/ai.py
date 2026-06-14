@@ -25,6 +25,7 @@ from .prompts import (
     build_system_prompt,
 )
 from .relationship_events import RELATIONSHIP_EVENTS_KEY, build_relationship_event_context
+from .reasoning import normalize_room_reasoning_effort
 from .storage import (
     add_history,
     add_room_history,
@@ -223,6 +224,7 @@ async def generate_reply(
     room_key: str,
     *,
     extra_context: str | None = None,
+    attachment_context: str | None = None,
     force_web_search: bool = False,
     allow_command_output: bool = True,
     persist_command_reply: bool = True,
@@ -235,6 +237,7 @@ async def generate_reply(
 
     group_mode = room_data.get("group_mode", False)
     internet_mode = force_web_search or room_data.get("internet_mode", False)
+    reasoning_effort = normalize_room_reasoning_effort(room_data)
 
     before_affection = int(user_data.get("affection", DEFAULT_AFFECTION))
     user_data = adjust_affection(user_id, user_data, user_message)
@@ -261,6 +264,8 @@ async def generate_reply(
         system_prompt = f"{system_prompt}\n\n{group_context}"
 
     model_user_message = user_message
+    if attachment_context:
+        model_user_message = f"{model_user_message}\n\n{attachment_context}".strip()
     if extra_context:
         response_instruction = "명령어 결과를 사실로 사용해서 사용자 요청에 자연스럽게 답해."
         if allow_command_output:
@@ -304,6 +309,7 @@ async def generate_reply(
         request_kwargs = {
             "model": WEB_SEARCH_MODEL if internet_mode else DEFAULT_MODEL,
             "input": input_messages,
+            "reasoning": {"effort": reasoning_effort},
         }
 
         if internet_mode:

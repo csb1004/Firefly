@@ -68,9 +68,10 @@ def test_resolve_recording_summary_filename_returns_none_without_recordings(monk
     assert commands._resolve_recording_summary_filename("최근") is None
 
 
-def test_auto_command_runs_with_original_message_author(monkeypatch):
+def test_auto_command_runs_with_original_message_author(monkeypatch, tmp_path):
     sent_messages = []
     updated_users = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
 
     class FakeTyping:
         async def __aenter__(self):
@@ -592,9 +593,10 @@ def test_web_command_adapter_uses_web_search_for_final_reply_only(monkeypatch):
     assert reply_kwargs["persist_command_reply"] is False
 
 
-def test_auto_web_command_runs_search_adapter_without_echoing_command(monkeypatch):
+def test_auto_web_command_runs_search_adapter_without_echoing_command(monkeypatch, tmp_path):
     sent_messages = []
     reply_calls = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
 
     class FakeTyping:
         async def __aenter__(self):
@@ -647,6 +649,63 @@ def test_auto_web_command_runs_search_adapter_without_echoing_command(monkeypatc
     assert reply_calls[1]["force_web_search"] is True
     assert reply_calls[1]["allow_command_output"] is False
     assert reply_calls[1]["persist_command_reply"] is False
+
+
+def test_auto_command_failure_is_recorded_for_followup_context(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_generate_reply(**kwargs):
+        return "/투표 내일 점심밥 | 항목수=3 | 김밥 | 라멘 | 10분"
+
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="내일 점심밥 후보 3개로 투표 만들어줘",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    history = storage.load_memory()[str(commands.SPECIAL_USER_ID)]["history"]
+
+    assert "항목수를 3개로 적었지만 실제 항목은 2개" in sent_messages[0]
+    assert history[-2]["role"] == "user"
+    assert history[-2]["content"] == "내일 점심밥 후보 3개로 투표 만들어줘"
+    assert history[-1]["role"] == "assistant"
+    assert "자동 명령 실행 기록" in history[-1]["content"]
+    assert "/투표 내일 점심밥" in history[-1]["content"]
+    assert "항목수를 3개로 적었지만 실제 항목은 2개" in history[-1]["content"]
 
 
 def test_command_adapter_blocks_persistent_internet_mode():
@@ -706,7 +765,251 @@ def test_web_command_adapter_rejects_non_special_user():
         )
     )
 
-    assert sent_messages == ["…인터넷 검색 실행은 특별 사용자만 사용할 수 있어."]
+    assert sent_messages == ["…인터넷 검색 실행 권한이 없어."]
+
+
+def test_reasoning_command_updates_room_setting(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    room_data = storage.get_room_data("room-1")
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/추론 높음",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data=room_data,
+            client=client,
+        )
+    )
+
+    assert storage.load_memory()[storage.ROOMS_KEY]["room-1"]["reasoning_effort"] == "high"
+    assert sent_messages == ["…응. 이 방의 추론 단계를 `높음`으로 맞췄어."]
+
+
+def test_brain_commands_add_update_and_delete_notes(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.get_user_data(commands.SPECIAL_USER_ID, "Owner")
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    for command_text in (
+        f"/뇌추가 {commands.SPECIAL_USER_ID} 급할수록 짧고 확실한 답을 선호한다.",
+        f"/뇌수정 {commands.SPECIAL_USER_ID} 1 급할수록 짧고 실행 가능한 답을 선호한다.",
+        f"/뇌삭제 {commands.SPECIAL_USER_ID} 1",
+    ):
+        asyncio.run(
+            commands.handle_mentioned_message(
+                message=message,
+                user_text=command_text,
+                user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+                room_key="room-1",
+                room_data={},
+                client=client,
+            )
+        )
+
+    user_memory = storage.load_memory()[str(commands.SPECIAL_USER_ID)]
+    assert user_memory["brain_notes"] == []
+    assert "1번에 저장했어" in sent_messages[0]
+    assert "1번 평가를 고쳤어" in sent_messages[1]
+    assert "1번 평가를 지웠어" in sent_messages[2]
+
+
+def test_brain_command_requires_explicit_target(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/뇌추가 급할수록 짧고 확실한 답을 선호한다.",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert "대상 사용자를" in sent_messages[0] or "그 호칭으로 저장된 유저" in sent_messages[0]
+    assert "brain_notes" not in storage.load_memory().get(str(commands.SPECIAL_USER_ID), {})
+
+
+def test_brain_command_trusts_model_judgment_after_explicit_target(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.get_user_data(commands.SPECIAL_USER_ID, "Owner")
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text=f"/뇌추가 {commands.SPECIAL_USER_ID} 오늘만 피곤해서 답이 느림",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert "1번에 저장했어" in sent_messages[0]
+    assert storage.load_memory()[str(commands.SPECIAL_USER_ID)]["brain_notes"] == ["오늘만 피곤해서 답이 느림"]
+
+
+def test_affection_change_accepts_explicit_user_id(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.save_memory({
+        "123456789012345": {
+            "name": "Alice",
+            "nickname": "새별",
+            "affection": 50,
+            "history": [],
+            "brain_notes": [],
+        }
+    })
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/호감도증감 123456789012345 2",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert storage.load_memory()["123456789012345"]["affection"] == 52
+    assert sent_messages == ["…Alice의 호감도를 +2만큼 조정했어. 지금은 52야."]
+
+
+def test_attachment_context_skips_natural_summary_command(monkeypatch):
+    sent_messages = []
+    reply_kwargs = {}
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_generate_reply(**kwargs):
+        reply_kwargs.update(kwargs)
+        return "파일 내용을 기준으로 요약했어."
+
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="이 파일 요약해줘",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+            attachment_context="[첨부 파일 내용]\n[파일: note.md]\n```text\nhello\n```",
+        )
+    )
+
+    assert sent_messages == ["파일 내용을 기준으로 요약했어."]
+    assert reply_kwargs["user_message"] == "이 파일 요약해줘"
+    assert "note.md" in reply_kwargs["attachment_context"]
 
 
 def test_poll_close_command_passes_user_text_to_poll_handler(monkeypatch):

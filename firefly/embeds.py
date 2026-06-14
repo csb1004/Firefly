@@ -2,13 +2,14 @@ import discord
 
 from .affection import get_affection_stage_label
 from .config import DEFAULT_AFFECTION
+from .reasoning import format_reasoning_status
 from .text_utils import clamp_text, is_command_text
 
 
 POLL_HELP_TEXT = (
     "`/투표 제목 | 선택지개수 | 선택지1 | 선택지2 | 마감`\n"
     "이유나 설명까지 말하려면 `/실행 /투표 ... || 프롬프트`를 써줘.\n"
-    "마감 예: `10분`, `2시간`, `23:30`"
+    "마감 예: `10분`, `2시간`, `2주`, `23:30`"
 )
 TEAM_HELP_TEXT = (
     "`/팀나누기 팀수=2 | 철수, 영희, 민수, 수진`\n"
@@ -36,8 +37,9 @@ def create_help_embed() -> discord.Embed:
         ("/프로필 [@유저]", "프로필 이미지, 이름, 호감도를 보여줘."),
         ("/주사위 [시작] [끝]", "범위 안에서 숫자 하나를 뽑아."),
         ("/팀나누기", TEAM_HELP_TEXT),
-        ("/실행 [명령어들] | [프롬프트]", "일반 명령어만 묶어서 실행해. 특별 사용자 전용 명령은 여기서도 권한을 우회할 수 없어."),
+        ("/실행 [명령어들] | [프롬프트]", "일반 명령어만 묶어서 실행해. 관리 권한이 필요한 명령은 여기서도 권한을 우회할 수 없어."),
         ("/요약 [개인/방] [개수]", "최근 개인 대화나 방 대화를 요약해."),
+        ("텍스트 파일 첨부", "반디를 멘션하면서 `md`, `txt`, `json` 같은 파일을 보내면 내용을 읽고 답해."),
         ("/최신소식 [받기/그만/상태]", "기술 소식 개인 메시지 구독을 관리해."),
         ("/주제 목록", "최신 소식 주제를 확인해."),
         ("그 긴거 해줘", "등록된 긴 문장을 그대로 출력해."),
@@ -53,7 +55,7 @@ def create_help_embed() -> discord.Embed:
 def create_special_help_embed() -> discord.Embed:
     embed = discord.Embed(
         title="반디 봇 도움말",
-        description="특별 사용자 전용 명령어까지 포함한 목록이야.",
+        description="관리 권한이 필요한 명령어까지 포함한 목록이야.",
         color=0x00FFFF,
     )
 
@@ -93,6 +95,11 @@ def create_special_help_embed() -> discord.Embed:
             "`/유저정보 @유저`, `/호감도설정 @유저 [숫자]`, `/호감도증감 @유저 [숫자]`",
         ),
         (
+            "반디의 뇌",
+            "`/뇌 @유저`, `/뇌추가 @유저 [평가]`, `/뇌수정 @유저 [번호] [평가]`, `/뇌삭제 @유저 [번호]`\n"
+            "멘션 대신 디스코드 ID나 저장된 고유 호칭도 사용할 수 있어.",
+        ),
+        (
             "역할 관리",
             "`/역할 부여 @유저 @역할`, `/역할 제거 @유저 @역할`, `/역할 색 @역할 #ffaa00`\n"
             "`/역할 이름 @역할 [새이름]`, `/역할 권한추가 @역할 [권한]`, `/역할 권한제거 @역할 [권한]`",
@@ -103,7 +110,8 @@ def create_special_help_embed() -> discord.Embed:
         ),
         (
             "방/봇 관리",
-            "`/인터넷모드 [on/off]`, `/단체모드 [on/off]`, `/방상태`, `/방기억`, `/방초기화`\n"
+            "`/인터넷모드 [on/off]`, `/단체모드 [on/off]`, `/추론 [없음/낮음/보통/높음]`\n"
+            "`/방상태`, `/방기억`, `/방초기화`\n"
             "`/봇상태`, `/관리상태`",
         ),
     ]
@@ -128,6 +136,7 @@ def create_room_history_embed(message: discord.Message, room_data: dict) -> disc
 
     embed.add_field(name="인터넷 검색 모드", value="on" if internet_mode else "off", inline=False)
     embed.add_field(name="단체 모드", value="on" if group_mode else "off", inline=False)
+    embed.add_field(name="추론 단계", value=format_reasoning_status(room_data), inline=False)
 
     lines = []
     for i, item in enumerate(history[-8:], start=1):

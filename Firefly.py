@@ -4,6 +4,7 @@ import logging
 import discord
 from discord import app_commands
 
+from firefly.attachments import read_text_attachments
 from firefly.commands import handle_mentioned_message
 from firefly.config import DISCORD_BOT_TOKEN, SPECIAL_USER_ID
 from firefly.news import handle_news_command, is_news_command_text, start_daily_news_task
@@ -143,7 +144,7 @@ async def _require_special_interaction(interaction: discord.Interaction) -> bool
     if interaction.user.id == SPECIAL_USER_ID:
         return True
 
-    text = "…그 명령어는 특별 사용자만 사용할 수 있어."
+    text = "…그 명령어를 사용할 권한이 없어."
     if interaction.response.is_done():
         await interaction.followup.send(text, ephemeral=True)
     else:
@@ -239,7 +240,7 @@ async def command_adapter_slash(
     await _run_text_command_slash(interaction, f"/실행 {command_text} {separator} {prompt}")
 
 
-@tree.command(name="검색실행", description="이 답변 한 번만 인터넷 검색을 사용해 반디가 답해요. 특별 사용자 전용.")
+@tree.command(name="검색실행", description="이 답변 한 번만 인터넷 검색을 사용해 반디가 답해요. 권한 필요.")
 @app_commands.rename(prompt="프롬프트", command_text="명령어")
 @app_commands.describe(
     prompt="인터넷 검색을 사용해서 답할 요청",
@@ -258,7 +259,91 @@ async def web_command_adapter_slash(
     await _run_text_command_slash(interaction, user_text)
 
 
-@tree.command(name="역할", description="역할 부여, 제거, 색, 이름, 권한을 바꿔요. 특별 사용자 전용.")
+@tree.command(name="추론", description="이 방의 OpenAI 추론 단계를 보거나 바꿔요. 권한 필요.")
+@app_commands.rename(value="단계")
+@app_commands.describe(value="비우면 현재 단계. 없음, 낮음, 보통, 높음 중 하나를 선택해요.")
+@app_commands.choices(
+    value=[
+        app_commands.Choice(name="없음", value="none"),
+        app_commands.Choice(name="낮음", value="low"),
+        app_commands.Choice(name="보통", value="medium"),
+        app_commands.Choice(name="높음", value="high"),
+    ]
+)
+async def reasoning_slash(
+    interaction: discord.Interaction,
+    value: str | None = None,
+):
+    user_text = f"/추론 {value}" if value else "/추론"
+    await _run_text_command_slash(interaction, user_text, ephemeral=True)
+
+
+@tree.command(name="뇌", description="반디의 사용자 장기 평가를 보여줘요. 권한 필요.")
+@app_commands.rename(target="유저")
+@app_commands.describe(target="확인할 유저")
+async def brain_slash(interaction: discord.Interaction, target: discord.User):
+    user_text = f"/뇌 {_mention_text(target)}".strip()
+    await _run_text_command_slash(
+        interaction,
+        user_text,
+        mentions=[target] if target is not None else None,
+        ephemeral=True,
+    )
+
+
+@tree.command(name="뇌추가", description="반디의 사용자 장기 평가를 추가해요. 권한 필요.")
+@app_commands.rename(note="내용", target="유저")
+@app_commands.describe(note="추가할 평가", target="대상 유저")
+async def brain_add_slash(
+    interaction: discord.Interaction,
+    note: str,
+    target: discord.User,
+):
+    user_text = f"/뇌추가 {_mention_text(target)} {note}".strip()
+    await _run_text_command_slash(
+        interaction,
+        user_text,
+        mentions=[target] if target is not None else None,
+        ephemeral=True,
+    )
+
+
+@tree.command(name="뇌수정", description="반디의 사용자 장기 평가를 수정해요. 권한 필요.")
+@app_commands.rename(index="번호", note="내용", target="유저")
+@app_commands.describe(index="수정할 평가 번호", note="새 평가 내용", target="대상 유저")
+async def brain_update_slash(
+    interaction: discord.Interaction,
+    index: int,
+    note: str,
+    target: discord.User,
+):
+    user_text = f"/뇌수정 {_mention_text(target)} {index} {note}".strip()
+    await _run_text_command_slash(
+        interaction,
+        user_text,
+        mentions=[target] if target is not None else None,
+        ephemeral=True,
+    )
+
+
+@tree.command(name="뇌삭제", description="반디의 사용자 장기 평가를 삭제해요. 권한 필요.")
+@app_commands.rename(index="번호", target="유저")
+@app_commands.describe(index="삭제할 평가 번호", target="대상 유저")
+async def brain_delete_slash(
+    interaction: discord.Interaction,
+    index: int,
+    target: discord.User,
+):
+    user_text = f"/뇌삭제 {_mention_text(target)} {index}".strip()
+    await _run_text_command_slash(
+        interaction,
+        user_text,
+        mentions=[target] if target is not None else None,
+        ephemeral=True,
+    )
+
+
+@tree.command(name="역할", description="역할 부여, 제거, 색, 이름, 권한을 바꿔요. 권한 필요.")
 @app_commands.rename(command_text="명령")
 @app_commands.describe(command_text="예: 부여 @유저 @역할, 색 @역할 #ffaa00, 권한제거 @역할 관리자")
 async def role_slash(interaction: discord.Interaction, command_text: str):
@@ -320,12 +405,12 @@ async def voice_search_slash(interaction: discord.Interaction, query: str):
     await _run_text_command_slash(interaction, f"/녹음검색 {query}", ephemeral=True)
 
 
-@tree.command(name="봇상태", description="메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 특별 사용자 전용.")
+@tree.command(name="봇상태", description="메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 권한 필요.")
 async def bot_status_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/봇상태", ephemeral=True)
 
 
-@tree.command(name="관리상태", description="메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 특별 사용자 전용.")
+@tree.command(name="관리상태", description="메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 권한 필요.")
 async def admin_status_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/관리상태", ephemeral=True)
 
@@ -357,7 +442,7 @@ async def memory_file_slash(interaction: discord.Interaction, filename: str | No
     await _run_text_command_slash(interaction, user_text, ephemeral=True)
 
 
-@tree.command(name="메모리초기화", description="대화/방/투표/뉴스 메모리 파일 중 하나를 비워요. 특별 사용자 전용.")
+@tree.command(name="메모리초기화", description="대화/방/투표/뉴스 메모리 파일 중 하나를 비워요. 권한 필요.")
 @app_commands.rename(target="대상", confirm_text="확인문구")
 @app_commands.describe(
     target="대화, 방, 투표, 뉴스 또는 conversation_memory.json 같은 파일 이름",
@@ -371,7 +456,7 @@ async def memory_reset_slash(interaction: discord.Interaction, target: str, conf
     )
 
 
-@tree.command(name="메모리파일초기화", description="대화/방/투표/뉴스 메모리 파일 중 하나를 비워요. 특별 사용자 전용.")
+@tree.command(name="메모리파일초기화", description="대화/방/투표/뉴스 메모리 파일 중 하나를 비워요. 권한 필요.")
 @app_commands.rename(target="대상", confirm_text="확인문구")
 @app_commands.describe(
     target="대화, 방, 투표, 뉴스 또는 conversation_memory.json 같은 파일 이름",
@@ -385,7 +470,7 @@ async def memory_file_reset_slash(interaction: discord.Interaction, target: str,
     )
 
 
-@tree.command(name="유저정보", description="유저의 저장 정보와 최근 대화를 확인해요. 특별 사용자 전용.")
+@tree.command(name="유저정보", description="유저의 저장 정보와 최근 대화를 확인해요. 권한 필요.")
 @app_commands.rename(target="유저")
 @app_commands.describe(target="확인할 유저")
 async def user_info_slash(interaction: discord.Interaction, target: discord.User):
@@ -397,7 +482,7 @@ async def user_info_slash(interaction: discord.Interaction, target: discord.User
     )
 
 
-@tree.command(name="호감도설정", description="유저의 호감도를 특정 값으로 맞춰요. 특별 사용자 전용.")
+@tree.command(name="호감도설정", description="유저의 호감도를 특정 값으로 맞춰요. 권한 필요.")
 @app_commands.rename(target="유저", value="숫자")
 @app_commands.describe(target="대상 유저", value="설정할 호감도")
 async def set_affection_slash(interaction: discord.Interaction, target: discord.User, value: int):
@@ -409,7 +494,7 @@ async def set_affection_slash(interaction: discord.Interaction, target: discord.
     )
 
 
-@tree.command(name="호감도증감", description="유저의 호감도를 증감해요. 특별 사용자 전용.")
+@tree.command(name="호감도증감", description="유저의 호감도를 증감해요. 권한 필요.")
 @app_commands.rename(target="유저", delta="숫자")
 @app_commands.describe(target="대상 유저", delta="더하거나 뺄 값")
 async def change_affection_slash(interaction: discord.Interaction, target: discord.User, delta: int):
@@ -421,14 +506,14 @@ async def change_affection_slash(interaction: discord.Interaction, target: disco
     )
 
 
-@tree.command(name="투표", description="투표를 만들어요. 특별 사용자 전용.")
+@tree.command(name="투표", description="투표를 만들어요. 권한 필요.")
 @app_commands.rename(poll_text="내용")
-@app_commands.describe(poll_text="예: 저녁 메뉴 | 항목수=3 | 치킨 | 피자 | 떡볶이 | 10분")
+@app_commands.describe(poll_text="예: 저녁 메뉴 | 항목수=3 | 치킨 | 피자 | 떡볶이 | 2주")
 async def poll_slash(interaction: discord.Interaction, poll_text: str):
     await _run_text_command_slash(interaction, f"/투표 {poll_text}")
 
 
-@tree.command(name="투표마감", description="진행 중인 투표를 마감해요. 특별 사용자 전용.")
+@tree.command(name="투표마감", description="진행 중인 투표를 마감해요. 권한 필요.")
 @app_commands.rename(message_id="메시지id")
 @app_commands.describe(message_id="생략하면 현재 채널의 유일한 진행 중 투표, 최근이면 최신 투표를 마감")
 async def close_poll_slash(interaction: discord.Interaction, message_id: str | None = None):
@@ -436,7 +521,7 @@ async def close_poll_slash(interaction: discord.Interaction, message_id: str | N
     await _run_text_command_slash(interaction, user_text, ephemeral=True)
 
 
-@tree.command(name="인터넷모드", description="이 방의 인터넷 검색 모드를 켜거나 꺼요. 특별 사용자 전용.")
+@tree.command(name="인터넷모드", description="이 방의 인터넷 검색 모드를 켜거나 꺼요. 권한 필요.")
 @app_commands.rename(value="값")
 @app_commands.describe(value="on 또는 off")
 @app_commands.choices(
@@ -449,7 +534,7 @@ async def internet_mode_slash(interaction: discord.Interaction, value: app_comma
     await _run_text_command_slash(interaction, f"/인터넷모드 {value.value}", ephemeral=True)
 
 
-@tree.command(name="단체모드", description="이 방의 단체 대화 기억 모드를 켜거나 꺼요. 특별 사용자 전용.")
+@tree.command(name="단체모드", description="이 방의 단체 대화 기억 모드를 켜거나 꺼요. 권한 필요.")
 @app_commands.rename(value="값")
 @app_commands.describe(value="on 또는 off")
 @app_commands.choices(
@@ -462,24 +547,24 @@ async def group_mode_slash(interaction: discord.Interaction, value: app_commands
     await _run_text_command_slash(interaction, f"/단체모드 {value.value}", ephemeral=True)
 
 
-@tree.command(name="방기억", description="현재 방의 단체 모드 기억을 보여줘요. 특별 사용자 전용.")
+@tree.command(name="방기억", description="현재 방의 단체 모드 기억을 보여줘요. 권한 필요.")
 async def room_history_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/방기억", ephemeral=True)
 
 
-@tree.command(name="방초기화", description="현재 방의 단체 기억을 비워요. 특별 사용자 전용.")
+@tree.command(name="방초기화", description="현재 방의 단체 기억을 비워요. 권한 필요.")
 async def room_reset_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/방초기화", ephemeral=True)
 
 
-@tree.command(name="방상태", description="현재 방의 인터넷/단체 모드 상태를 보여줘요. 특별 사용자 전용.")
+@tree.command(name="방상태", description="현재 방의 인터넷/단체 모드 상태를 보여줘요. 권한 필요.")
 async def room_status_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/방상태", ephemeral=True)
 
 
 @news_group.command(name="받기", description="최신 소식 개인 메시지를 구독해요.")
 @app_commands.rename(target="유저")
-@app_commands.describe(target="특별 사용자만 다른 사람을 지정할 수 있어요.")
+@app_commands.describe(target="관리 권한이 있으면 다른 사람을 지정할 수 있어요.")
 async def news_subscribe_slash(interaction: discord.Interaction, target: discord.User | None = None):
     user_text = f"/최신 소식 받기 {_mention_text(target)}".strip()
     await _run_text_command_slash(
@@ -492,7 +577,7 @@ async def news_subscribe_slash(interaction: discord.Interaction, target: discord
 
 @news_group.command(name="그만", description="최신 소식 개인 메시지 구독을 해제해요.")
 @app_commands.rename(target="유저")
-@app_commands.describe(target="특별 사용자만 다른 사람을 지정할 수 있어요.")
+@app_commands.describe(target="관리 권한이 있으면 다른 사람을 지정할 수 있어요.")
 async def news_unsubscribe_slash(interaction: discord.Interaction, target: discord.User | None = None):
     user_text = f"/최신 소식 그만 {_mention_text(target)}".strip()
     await _run_text_command_slash(
@@ -513,7 +598,7 @@ async def news_list_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/최신 소식 목록", ephemeral=True)
 
 
-@news_group.command(name="시간", description="최신 소식 발송 시간을 보거나 바꿔요. 변경은 특별 사용자 전용.")
+@news_group.command(name="시간", description="최신 소식 발송 시간을 보거나 바꿔요. 변경은 권한 필요.")
 @app_commands.rename(time_text="시간")
 @app_commands.describe(time_text="예: 09:00, 오전 9시. 비워두면 현재 시간을 보여줘요.")
 async def news_time_slash(interaction: discord.Interaction, time_text: str | None = None):
@@ -521,28 +606,28 @@ async def news_time_slash(interaction: discord.Interaction, time_text: str | Non
     await _run_text_command_slash(interaction, user_text, ephemeral=True)
 
 
-@news_group.command(name="중복초기화", description="이미 보낸 최신 소식 기록을 비워요. 특별 사용자 전용.")
+@news_group.command(name="중복초기화", description="이미 보낸 최신 소식 기록을 비워요. 권한 필요.")
 @app_commands.rename(confirm_text="확인문구")
 @app_commands.describe(confirm_text="정말 비우려면 확인이라고 입력")
 async def news_history_reset_slash(interaction: discord.Interaction, confirm_text: str):
     await _run_text_command_slash(interaction, f"/최신 소식 중복초기화 {confirm_text}", ephemeral=True)
 
 
-@news_group.command(name="중복삭제", description="이미 보낸 최신 소식 기록을 비워요. 특별 사용자 전용.")
+@news_group.command(name="중복삭제", description="이미 보낸 최신 소식 기록을 비워요. 권한 필요.")
 @app_commands.rename(confirm_text="확인문구")
 @app_commands.describe(confirm_text="정말 비우려면 확인이라고 입력")
 async def news_history_delete_slash(interaction: discord.Interaction, confirm_text: str):
     await _run_text_command_slash(interaction, f"/최신 소식 중복삭제 {confirm_text}", ephemeral=True)
 
 
-@news_group.command(name="기록초기화", description="이미 보낸 최신 소식 기록을 비워요. 특별 사용자 전용.")
+@news_group.command(name="기록초기화", description="이미 보낸 최신 소식 기록을 비워요. 권한 필요.")
 @app_commands.rename(confirm_text="확인문구")
 @app_commands.describe(confirm_text="정말 비우려면 확인이라고 입력")
 async def news_record_reset_slash(interaction: discord.Interaction, confirm_text: str):
     await _run_text_command_slash(interaction, f"/최신 소식 기록초기화 {confirm_text}", ephemeral=True)
 
 
-@news_group.command(name="중복기록초기화", description="이미 보낸 최신 소식 기록을 비워요. 특별 사용자 전용.")
+@news_group.command(name="중복기록초기화", description="이미 보낸 최신 소식 기록을 비워요. 권한 필요.")
 @app_commands.rename(confirm_text="확인문구")
 @app_commands.describe(confirm_text="정말 비우려면 확인이라고 입력")
 async def news_duplicate_record_reset_slash(interaction: discord.Interaction, confirm_text: str):
@@ -554,28 +639,28 @@ async def topic_list_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/주제 목록", ephemeral=True)
 
 
-@topic_group.command(name="추가", description="최신 소식 주제를 추가해요. 특별 사용자 전용.")
+@topic_group.command(name="추가", description="최신 소식 주제를 추가해요. 권한 필요.")
 @app_commands.rename(topic="주제")
 @app_commands.describe(topic="추가할 주제")
 async def topic_add_slash(interaction: discord.Interaction, topic: str):
     await _run_text_command_slash(interaction, f"/주제 추가 {topic}", ephemeral=True)
 
 
-@topic_group.command(name="제거", description="최신 소식 주제를 제거해요. 특별 사용자 전용.")
+@topic_group.command(name="제거", description="최신 소식 주제를 제거해요. 권한 필요.")
 @app_commands.rename(topic="주제")
 @app_commands.describe(topic="제거할 주제")
 async def topic_remove_slash(interaction: discord.Interaction, topic: str):
     await _run_text_command_slash(interaction, f"/주제 제거 {topic}", ephemeral=True)
 
 
-@topic_group.command(name="설정", description="최신 소식 주제 목록을 새로 설정해요. 특별 사용자 전용.")
+@topic_group.command(name="설정", description="최신 소식 주제 목록을 새로 설정해요. 권한 필요.")
 @app_commands.rename(topics="주제목록")
 @app_commands.describe(topics="쉼표로 구분한 주제 목록")
 async def topic_set_slash(interaction: discord.Interaction, topics: str):
     await _run_text_command_slash(interaction, f"/주제 설정 {topics}", ephemeral=True)
 
 
-@topic_group.command(name="변경", description="최신 소식 주제 목록을 새로 변경해요. 특별 사용자 전용.")
+@topic_group.command(name="변경", description="최신 소식 주제 목록을 새로 변경해요. 권한 필요.")
 @app_commands.rename(topics="주제목록")
 @app_commands.describe(topics="쉼표로 구분한 주제 목록")
 async def topic_change_slash(interaction: discord.Interaction, topics: str):
@@ -648,6 +733,10 @@ async def on_message(message: discord.Message):
             bot_user_id=client.user.id,
             remove_bot_mention=True,
         )
+        attachment_context = await read_text_attachments(getattr(message, "attachments", []))
+
+        if not user_text and attachment_context:
+            user_text = "첨부 파일을 읽어줘."
 
         if not user_text:
             await message.channel.send("응, 불렀어?")
@@ -663,6 +752,7 @@ async def on_message(message: discord.Message):
             room_key=room_key,
             room_data=room_data,
             client=client,
+            attachment_context=attachment_context,
         )
         return
 
