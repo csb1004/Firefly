@@ -3,8 +3,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from predict_tool import DEFAULT_MODEL, select_tool
-from reward_function import calculate_reward
+try:
+    from .predict_tool import DEFAULT_MODEL, select_tool
+    from .reward_function import calculate_reward
+except ImportError:
+    from predict_tool import DEFAULT_MODEL, select_tool
+    from reward_function import calculate_reward
 
 
 ROOT = Path(__file__).resolve().parent

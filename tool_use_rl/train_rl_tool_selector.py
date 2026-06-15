@@ -6,8 +6,12 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from reward_function import calculate_reward
-from train_tool_selector import tokenize
+try:
+    from .reward_function import calculate_reward
+    from .train_tool_selector import tokenize
+except ImportError:
+    from reward_function import calculate_reward
+    from train_tool_selector import tokenize
 
 
 ROOT = Path(__file__).resolve().parent

@@ -2,7 +2,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from reward_function import calculate_reward
+try:
+    from .reward_function import calculate_reward
+except ImportError:
+    from reward_function import calculate_reward
 
 
 try:

@@ -1,10 +1,12 @@
 import json
 
-import predict_tool
-import reward_function
-import train_rl_tool_selector
-import tool_discovery
-import train_tool_selector
+from tool_use_rl import (
+    predict_tool,
+    reward_function,
+    tool_discovery,
+    train_rl_tool_selector,
+    train_tool_selector,
+)
 
 
 def test_reward_function_supports_partial_multi_tool_credit():

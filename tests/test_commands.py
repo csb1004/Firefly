@@ -595,6 +595,82 @@ def test_command_adapter_runs_result_dependent_followup_command(monkeypatch):
     assert "[2] 명령어: /투표 내일 점심밥" in reply_calls[1]["extra_context"]
 
 
+def test_poll_request_with_white_option_does_not_route_to_role(monkeypatch):
+    sent_messages = []
+    poll_commands = []
+    role_calls = []
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_generate_reply(**kwargs):
+        return (
+            "/투표 새 숙소 투표 | 항목수=3 | "
+            "더 화이트(8만원정도 추가비용 나올 수 있음) | "
+            "힐스토리(2시간 반+픽업시간, 컴퓨터 말고 딱히 할거X, 방 2개 잡아야됨) | "
+            "둘 다 도저히 못고르겠다. | 1주일"
+        )
+
+    async def fake_create_poll_from_command(message, user_text, client):
+        poll_commands.append(user_text)
+        await message.channel.send("투표 생성됨: 새 숙소 투표")
+
+    async def fake_handle_role_command(message, raw_text):
+        role_calls.append(raw_text)
+
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+    monkeypatch.setattr(commands, "create_poll_from_command", fake_create_poll_from_command)
+    monkeypatch.setattr(commands, "handle_role_command", fake_handle_role_command)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        role_mentions=[],
+        guild=SimpleNamespace(roles=[]),
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text=(
+                "제목은 '새 숙소 투표', 항목은 '더 화이트(8만원정도 추가비용 나올 수 있음)', "
+                "'힐스토리(2시간 반+픽업시간, 컴퓨터 말고 딱히 할거X, 방 2개 잡아야됨)', "
+                "'둘 다 도저히 못고르겠다.' 기한은 1주일로 투표 만들어줘"
+            ),
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert role_calls == []
+    assert poll_commands == [
+        "/투표 새 숙소 투표 | 항목수=3 | "
+        "더 화이트(8만원정도 추가비용 나올 수 있음) | "
+        "힐스토리(2시간 반+픽업시간, 컴퓨터 말고 딱히 할거X, 방 2개 잡아야됨) | "
+        "둘 다 도저히 못고르겠다. | 1주일"
+    ]
+    assert sent_messages == ["투표 생성됨: 새 숙소 투표"]
+
+
 def test_command_adapter_stops_result_dependent_loop_at_limit(monkeypatch):
     sent_messages = []
     reply_calls = []

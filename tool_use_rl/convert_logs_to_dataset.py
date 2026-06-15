@@ -3,7 +3,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tool_usage_logger import DEFAULT_LOG_PATH
+try:
+    from .tool_usage_logger import DEFAULT_LOG_PATH
+except ImportError:
+    from tool_usage_logger import DEFAULT_LOG_PATH
 
 
 ROOT = Path(__file__).resolve().parent

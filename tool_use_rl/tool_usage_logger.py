@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parent
-DEFAULT_LOG_PATH = ROOT / "logs" / "tool_usage.jsonl"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_LOG_PATH = PROJECT_ROOT / "logs" / "tool_usage.jsonl"
 
 
 def _now_iso() -> str:

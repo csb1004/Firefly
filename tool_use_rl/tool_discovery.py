@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parent
-SCHEMA_PATH = ROOT / "tools_schema.json"
-REPORT_PATH = ROOT / "tool_discovery_report.md"
+ARTIFACT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = ARTIFACT_ROOT.parent
+SCHEMA_PATH = ARTIFACT_ROOT / "tools_schema.json"
+REPORT_PATH = ARTIFACT_ROOT / "tool_discovery_report.md"
 
 
 def _literal_string(node: ast.AST | None) -> str | None:
@@ -43,7 +44,7 @@ def _group_prefix(call_name: str) -> str:
 
 
 def _source_path(path: Path) -> str:
-    return path.relative_to(ROOT).as_posix()
+    return path.relative_to(PROJECT_ROOT).as_posix()
 
 
 def _arguments_from_function(node: ast.AsyncFunctionDef | ast.FunctionDef) -> list[dict[str, Any]]:
@@ -59,7 +60,7 @@ def _arguments_from_function(node: ast.AsyncFunctionDef | ast.FunctionDef) -> li
     return args
 
 
-def discover_slash_commands(path: Path = ROOT / "Firefly.py") -> list[dict[str, Any]]:
+def discover_slash_commands(path: Path = PROJECT_ROOT / "Firefly.py") -> list[dict[str, Any]]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     tools: list[dict[str, Any]] = []
 
@@ -92,7 +93,9 @@ def discover_slash_commands(path: Path = ROOT / "Firefly.py") -> list[dict[str, 
     return tools
 
 
-def discover_registered_text_commands(path: Path = ROOT / "firefly" / "command_registry.py") -> list[dict[str, Any]]:
+def discover_registered_text_commands(
+    path: Path = PROJECT_ROOT / "firefly" / "command_registry.py",
+) -> list[dict[str, Any]]:
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     tools: list[dict[str, Any]] = []
@@ -136,7 +139,7 @@ def discover_registered_text_commands(path: Path = ROOT / "firefly" / "command_r
     return tools
 
 
-def discover_command_literals(path: Path = ROOT / "firefly" / "commands.py") -> list[dict[str, Any]]:
+def discover_command_literals(path: Path = PROJECT_ROOT / "firefly" / "commands.py") -> list[dict[str, Any]]:
     source = path.read_text(encoding="utf-8")
     commands = {}
     for match in re.finditer(r"matches_command\(user_text,\s*[\"']([^\"']+)[\"']\)", source):

@@ -85,7 +85,7 @@ python Firefly.py
 Run syntax checks:
 
 ```powershell
-python -m compileall Firefly.py firefly
+python -m compileall Firefly.py firefly tool_use_rl
 ```
 
 Run tests:
@@ -95,4 +95,25 @@ python -m pytest
 ```
 
 Tests should not require real Discord or OpenAI credentials and should not write to production `data/`, `memory.json`, or split memory files.
+
+## Tool-Use RL
+
+Tool-use discovery, datasets, behavior-cloning baseline, and reward-based RL training live under `tool_use_rl/`.
+
+Regenerate and train the current artifacts:
+
+```powershell
+python -m tool_use_rl.tool_discovery
+python -m tool_use_rl.generate_dataset --samples 5000 --seed 42
+python -m tool_use_rl.train_tool_selector --dataset tool_use_rl/synthetic_tool_dataset.jsonl
+python -m tool_use_rl.generate_env_tasks --tasks 5000 --seed 42
+python -m tool_use_rl.train_rl_tool_selector --tasks tool_use_rl/env_tasks.jsonl --episodes 30 --learning-rate 0.18 --epsilon 0.25 --epsilon-decay 0.97 --seed 42 --max-sequence-actions 50 --negative-samples 16 --evaluation-interval 10
+python -m tool_use_rl.evaluate_tool_policy --dataset tool_use_rl/synthetic_tool_dataset.jsonl --model tool_use_rl/tool_selector_model.json
+```
+
+For a longer RL run, use:
+
+```powershell
+python -m tool_use_rl.train_rl_tool_selector --tasks tool_use_rl/env_tasks.jsonl --episodes 200 --learning-rate 0.15 --epsilon 0.35 --epsilon-decay 0.985 --seed 42 --max-sequence-actions 200 --negative-samples 32 --evaluation-interval 20
+```
 

@@ -167,6 +167,25 @@ ADAPTER_BLOCKED_COMMAND_PREFIXES = (
     "/role",
 )
 SILENT_GROUP_MEMORY_COMMAND_PREFIXES = ("/뇌추가", "/뇌삭제", "/호감도증감")
+POLL_INTENT_TOKENS = ("투표", "poll", "vote", "설문")
+POLL_REQUEST_TOKENS = (
+    "만들",
+    "생성",
+    "올려",
+    "열어",
+    "항목",
+    "선택지",
+    "기한",
+    "마감",
+    "제목",
+)
+
+
+def _looks_like_poll_request(user_text: str) -> bool:
+    text = user_text.casefold()
+    return any(token in text for token in POLL_INTENT_TOKENS) and any(
+        token in text for token in POLL_REQUEST_TOKENS
+    )
 
 
 def _resolve_recording_summary_filename(filename: str) -> str | None:
@@ -882,7 +901,7 @@ async def handle_mentioned_message(
         await handle_role_command(message, _command_arg(user_text, role_alias))
         return
 
-    if special_user and is_role_command_text(user_text):
+    if special_user and is_role_command_text(user_text) and not _looks_like_poll_request(user_text):
         await handle_role_command(message, user_text)
         return
 

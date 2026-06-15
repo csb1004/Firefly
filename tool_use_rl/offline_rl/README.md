@@ -8,13 +8,14 @@ Current baseline:
 - `train_tool_selector.py` trains a lightweight behavior-cloning ranker.
 - `mini_tool_env.py` exposes a Gymnasium-style environment over generated tasks.
 - `reward_function.py` provides exact and partial multi-tool rewards.
+- `train_rl_tool_selector.py` trains the current standard-library contextual-bandit policy.
 
 Extension path:
 
 1. Use `convert_logs_to_dataset.py` to merge real Discord tool usage into training data.
 2. Keep behavior cloning as the initialization policy.
 3. Add IQL or CQL only behind optional dependencies so the Discord bot runtime stays stable.
-4. Evaluate with `evaluate_tool_policy.py` before any runtime integration.
+4. Evaluate with `evaluate_tool_policy.py` and `rl_training_report.md` before any runtime integration.
 
 Non-goals for this baseline:
 

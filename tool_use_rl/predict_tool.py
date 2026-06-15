@@ -2,7 +2,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from train_tool_selector import tokenize
+try:
+    from .train_tool_selector import tokenize
+except ImportError:
+    from train_tool_selector import tokenize
 
 
 ROOT = Path(__file__).resolve().parent
