@@ -1,0 +1,1403 @@
+{
+  "tools": [
+    {
+      "name": "memoryfile",
+      "aliases": [
+        "/memoryfile"
+      ],
+      "type": "slash_command",
+      "description": "메모리 JSON 파일을 받아와요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "filename",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:470",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.storage"
+      ],
+      "related_tools": [
+        "관리상태",
+        "뇌",
+        "뇌삭제",
+        "뇌수정",
+        "뇌추가",
+        "단체모드",
+        "메모리초기화",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "검색실행",
+      "aliases": [
+        "/검색실행"
+      ],
+      "type": "slash_command",
+      "description": "이 답변 한 번만 인터넷 검색을 사용해 반디가 답해요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "prompt",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "command_text",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:271",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.ai"
+      ],
+      "related_tools": [
+        "기록검색",
+        "녹음검색",
+        "요약",
+        "인터넷모드"
+      ]
+    },
+    {
+      "name": "관리상태",
+      "aliases": [
+        "/관리상태"
+      ],
+      "type": "slash_command",
+      "description": "메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 권한 필요.",
+      "arguments": [],
+      "source_file": "Firefly.py:436",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.polls",
+        "firefly.storage",
+        "firefly.news",
+        "firefly.voice"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "기록",
+        "기록검색",
+        "기록중지",
+        "녹음검색",
+        "뇌",
+        "뇌삭제",
+        "뇌수정"
+      ]
+    },
+    {
+      "name": "기록",
+      "aliases": [
+        "/기록"
+      ],
+      "type": "slash_command",
+      "description": "현재 들어가 있는 통화방의 대화를 전사해서 저장해요.",
+      "arguments": [],
+      "source_file": "Firefly.py:376",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.voice"
+      ],
+      "related_tools": [
+        "관리상태",
+        "기록검색",
+        "기록중지",
+        "녹음검색",
+        "대화목록",
+        "메모리파일",
+        "봇상태",
+        "요약"
+      ]
+    },
+    {
+      "name": "기록검색",
+      "aliases": [
+        "/record-search",
+        "/기록검색",
+        "/녹음검색"
+      ],
+      "type": "slash_command",
+      "description": "저장된 통화 기록에서 질문이나 키워드로 필요한 내용을 찾아요.",
+      "arguments": [
+        {
+          "name": "query",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:419",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.ai",
+        "firefly.commands",
+        "firefly.voice"
+      ],
+      "related_tools": [
+        "검색실행",
+        "관리상태",
+        "기록",
+        "기록중지",
+        "녹음검색",
+        "대화목록",
+        "메모리파일",
+        "봇상태"
+      ]
+    },
+    {
+      "name": "기록중지",
+      "aliases": [
+        "/기록중지"
+      ],
+      "type": "slash_command",
+      "description": "진행 중인 통화 기록을 마쳐요.",
+      "arguments": [],
+      "source_file": "Firefly.py:394",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.voice"
+      ],
+      "related_tools": [
+        "관리상태",
+        "기록",
+        "기록검색",
+        "녹음검색",
+        "대화목록",
+        "메모리파일",
+        "봇상태",
+        "요약"
+      ]
+    },
+    {
+      "name": "녹음검색",
+      "aliases": [
+        "/녹음검색"
+      ],
+      "type": "slash_command",
+      "description": "저장된 통화 기록에서 질문이나 키워드로 필요한 내용을 찾아요.",
+      "arguments": [
+        {
+          "name": "query",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:426",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.voice_search",
+        "firefly.voice",
+        "firefly.ai"
+      ],
+      "related_tools": [
+        "검색실행",
+        "관리상태",
+        "기록",
+        "기록검색",
+        "기록중지",
+        "대화목록",
+        "메모리파일",
+        "봇상태"
+      ]
+    },
+    {
+      "name": "뇌",
+      "aliases": [
+        "/뇌"
+      ],
+      "type": "slash_command",
+      "description": "반디의 사용자 단기/장기 기억을 보여줘요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:306",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.brain",
+        "firefly.storage"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "뇌삭제",
+        "뇌수정",
+        "뇌추가",
+        "단체모드",
+        "메모리초기화",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "뇌삭제",
+      "aliases": [
+        "/뇌삭제"
+      ],
+      "type": "slash_command",
+      "description": "반디의 사용자 기억을 삭제해요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "index",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:354",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.brain",
+        "firefly.storage"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "뇌",
+        "뇌수정",
+        "뇌추가",
+        "단체모드",
+        "메모리초기화",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "뇌수정",
+      "aliases": [
+        "/뇌수정"
+      ],
+      "type": "slash_command",
+      "description": "반디의 사용자 장기 기억을 수정해요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "index",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "note",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:336",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.brain",
+        "firefly.storage"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "뇌",
+        "뇌삭제",
+        "뇌추가",
+        "단체모드",
+        "메모리초기화",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "뇌추가",
+      "aliases": [
+        "/뇌추가"
+      ],
+      "type": "slash_command",
+      "description": "반디의 사용자 단기 기억 후보를 추가해요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "note",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:319",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.brain",
+        "firefly.storage"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "뇌",
+        "뇌삭제",
+        "뇌수정",
+        "단체모드",
+        "메모리초기화",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "단체모드",
+      "aliases": [
+        "/단체모드"
+      ],
+      "type": "slash_command",
+      "description": "이 방의 단체 대화 기억 모드를 켜거나 꺼요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "value",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:576",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.storage"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "뇌",
+        "뇌삭제",
+        "뇌수정",
+        "뇌추가",
+        "메모리초기화",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "대화목록",
+      "aliases": [
+        "/대화목록"
+      ],
+      "type": "slash_command",
+      "description": "최근 7일 동안 저장된 통화 기록 파일 목록을 보여줘요.",
+      "arguments": [],
+      "source_file": "Firefly.py:408",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.voice"
+      ],
+      "related_tools": [
+        "관리상태",
+        "기록",
+        "기록검색",
+        "기록중지",
+        "녹음검색",
+        "메모리파일",
+        "봇상태",
+        "요약"
+      ]
+    },
+    {
+      "name": "도움말",
+      "aliases": [
+        "/도움말"
+      ],
+      "type": "slash_command",
+      "description": "사용 가능한 명령어 목록을 보여줘요.",
+      "arguments": [],
+      "source_file": "Firefly.py:184",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    },
+    {
+      "name": "메모리초기화",
+      "aliases": [
+        "/메모리초기화"
+      ],
+      "type": "slash_command",
+      "description": "대화/방/투표/뉴스 메모리 파일 중 하나를 비워요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "confirm_text",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:481",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.polls",
+        "firefly.storage",
+        "firefly.news"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "뇌",
+        "뇌삭제",
+        "뇌수정",
+        "뇌추가",
+        "단체모드",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "메모리파일",
+      "aliases": [
+        "/메모리파일"
+      ],
+      "type": "slash_command",
+      "description": "대화/방/투표/뉴스 메모리 파일 또는 통화 기록 원본 파일을 받아와요.",
+      "arguments": [
+        {
+          "name": "filename",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:462",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.polls",
+        "firefly.storage",
+        "firefly.news",
+        "firefly.voice"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "기록",
+        "기록검색",
+        "기록중지",
+        "녹음검색",
+        "뇌",
+        "뇌삭제"
+      ]
+    },
+    {
+      "name": "메모리파일초기화",
+      "aliases": [
+        "/메모리파일초기화"
+      ],
+      "type": "slash_command",
+      "description": "대화/방/투표/뉴스 메모리 파일 중 하나를 비워요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "confirm_text",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:495",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.polls",
+        "firefly.storage",
+        "firefly.news"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "뇌",
+        "뇌삭제",
+        "뇌수정",
+        "뇌추가",
+        "단체모드",
+        "메모리초기화"
+      ]
+    },
+    {
+      "name": "방기억",
+      "aliases": [
+        "/방기억"
+      ],
+      "type": "slash_command",
+      "description": "현재 방의 단체 모드 기억을 보여줘요. 권한 필요.",
+      "arguments": [],
+      "source_file": "Firefly.py:581",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.storage"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "뇌",
+        "뇌삭제",
+        "뇌수정",
+        "뇌추가",
+        "단체모드",
+        "메모리초기화"
+      ]
+    },
+    {
+      "name": "방상태",
+      "aliases": [
+        "/방상태"
+      ],
+      "type": "slash_command",
+      "description": "현재 방의 인터넷/단체 모드 상태를 보여줘요. 권한 필요.",
+      "arguments": [],
+      "source_file": "Firefly.py:591",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    },
+    {
+      "name": "방초기화",
+      "aliases": [
+        "/방초기화"
+      ],
+      "type": "slash_command",
+      "description": "현재 방의 단체 기억을 비워요. 권한 필요.",
+      "arguments": [],
+      "source_file": "Firefly.py:586",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.storage"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "뇌",
+        "뇌삭제",
+        "뇌수정",
+        "뇌추가",
+        "단체모드",
+        "메모리초기화"
+      ]
+    },
+    {
+      "name": "봇상태",
+      "aliases": [
+        "/bot-status",
+        "/관리상태",
+        "/봇상태"
+      ],
+      "type": "slash_command",
+      "description": "메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 권한 필요.",
+      "arguments": [],
+      "source_file": "Firefly.py:431",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.commands",
+        "firefly.news",
+        "firefly.polls",
+        "firefly.storage",
+        "firefly.voice"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "기록",
+        "기록검색",
+        "기록중지",
+        "녹음검색",
+        "뇌",
+        "뇌삭제"
+      ]
+    },
+    {
+      "name": "실행",
+      "aliases": [
+        "/실행"
+      ],
+      "type": "slash_command",
+      "description": "명령어를 먼저 실행하고 그 결과를 반영해 반디가 답해요.",
+      "arguments": [
+        {
+          "name": "command_text",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "prompt",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:256",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    },
+    {
+      "name": "역할",
+      "aliases": [
+        "/role",
+        "/역할"
+      ],
+      "type": "slash_command",
+      "description": "역할 부여, 제거, 색, 이름, 권한을 바꿔요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "command_text",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:371",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.commands",
+        "firefly.role_commands"
+      ],
+      "related_tools": [
+        "기록검색",
+        "봇상태"
+      ]
+    },
+    {
+      "name": "요약",
+      "aliases": [
+        "/요약"
+      ],
+      "type": "slash_command",
+      "description": "최근 개인/방 대화 또는 통화 기록 파일을 요약해요.",
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "limit",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:446",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.voice",
+        "firefly.ai"
+      ],
+      "related_tools": [
+        "검색실행",
+        "관리상태",
+        "기록",
+        "기록검색",
+        "기록중지",
+        "녹음검색",
+        "대화목록",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "유저정보",
+      "aliases": [
+        "/유저정보"
+      ],
+      "type": "slash_command",
+      "description": "유저의 저장 정보와 최근 대화를 확인해요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:506",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    },
+    {
+      "name": "인터넷모드",
+      "aliases": [
+        "/인터넷모드"
+      ],
+      "type": "slash_command",
+      "description": "이 방의 인터넷 검색 모드를 켜거나 꺼요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "value",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:563",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.ai"
+      ],
+      "related_tools": [
+        "검색실행",
+        "기록검색",
+        "녹음검색",
+        "요약"
+      ]
+    },
+    {
+      "name": "주사위",
+      "aliases": [
+        "/주사위"
+      ],
+      "type": "slash_command",
+      "description": "지정한 범위 안에서 숫자 하나를 뽑아요.",
+      "arguments": [
+        {
+          "name": "start",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "end",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:221",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    },
+    {
+      "name": "주제 목록",
+      "aliases": [
+        "/주제 목록"
+      ],
+      "type": "slash_command",
+      "description": "최신 소식 주제를 보여줘요.",
+      "arguments": [],
+      "source_file": "Firefly.py:668",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 변경",
+        "주제 설정",
+        "주제 제거"
+      ]
+    },
+    {
+      "name": "주제 변경",
+      "aliases": [
+        "/주제 변경"
+      ],
+      "type": "slash_command",
+      "description": "최신 소식 주제 목록을 새로 변경해요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "topics",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:696",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 설정",
+        "주제 제거"
+      ]
+    },
+    {
+      "name": "주제 설정",
+      "aliases": [
+        "/주제 설정"
+      ],
+      "type": "slash_command",
+      "description": "최신 소식 주제 목록을 새로 설정해요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "topics",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:689",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 제거"
+      ]
+    },
+    {
+      "name": "주제 제거",
+      "aliases": [
+        "/주제 제거"
+      ],
+      "type": "slash_command",
+      "description": "최신 소식 주제를 제거해요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "topic",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:682",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 설정"
+      ]
+    },
+    {
+      "name": "주제 추가",
+      "aliases": [
+        "/주제 추가"
+      ],
+      "type": "slash_command",
+      "description": "최신 소식 주제를 추가해요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "topic",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:675",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 설정"
+      ]
+    },
+    {
+      "name": "초기화",
+      "aliases": [
+        "/초기화"
+      ],
+      "type": "slash_command",
+      "description": "최근 개인 대화 기억을 비워요.",
+      "arguments": [],
+      "source_file": "Firefly.py:194",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.storage"
+      ],
+      "related_tools": [
+        "memoryfile",
+        "관리상태",
+        "뇌",
+        "뇌삭제",
+        "뇌수정",
+        "뇌추가",
+        "단체모드",
+        "메모리초기화"
+      ]
+    },
+    {
+      "name": "최신소식 그만",
+      "aliases": [
+        "/최신소식 그만"
+      ],
+      "type": "slash_command",
+      "description": "최신 소식 개인 메시지 구독을 해제해요.",
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:611",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 설정"
+      ]
+    },
+    {
+      "name": "최신소식 기록초기화",
+      "aliases": [
+        "/최신소식 기록초기화"
+      ],
+      "type": "slash_command",
+      "description": "이미 보낸 최신 소식 기록을 비워요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "confirm_text",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:656",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news",
+        "firefly.voice"
+      ],
+      "related_tools": [
+        "관리상태",
+        "기록",
+        "기록검색",
+        "기록중지",
+        "녹음검색",
+        "대화목록",
+        "메모리초기화",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "최신소식 목록",
+      "aliases": [
+        "/최신소식 목록"
+      ],
+      "type": "slash_command",
+      "description": "최신 소식 구독자 목록과 설정을 보여줘요.",
+      "arguments": [],
+      "source_file": "Firefly.py:627",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 설정"
+      ]
+    },
+    {
+      "name": "최신소식 받기",
+      "aliases": [
+        "/최신소식 받기"
+      ],
+      "type": "slash_command",
+      "description": "최신 소식 개인 메시지를 구독해요.",
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:598",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 설정"
+      ]
+    },
+    {
+      "name": "최신소식 상태",
+      "aliases": [
+        "/최신소식 상태"
+      ],
+      "type": "slash_command",
+      "description": "최신 소식 구독과 발송 설정을 보여줘요.",
+      "arguments": [],
+      "source_file": "Firefly.py:622",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 설정"
+      ]
+    },
+    {
+      "name": "최신소식 시간",
+      "aliases": [
+        "/최신소식 시간"
+      ],
+      "type": "slash_command",
+      "description": "최신 소식 발송 시간을 보거나 바꿔요. 변경은 권한 필요.",
+      "arguments": [
+        {
+          "name": "time_text",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:634",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 설정"
+      ]
+    },
+    {
+      "name": "최신소식 중복기록초기화",
+      "aliases": [
+        "/최신소식 중복기록초기화"
+      ],
+      "type": "slash_command",
+      "description": "이미 보낸 최신 소식 기록을 비워요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "confirm_text",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:663",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news",
+        "firefly.voice"
+      ],
+      "related_tools": [
+        "관리상태",
+        "기록",
+        "기록검색",
+        "기록중지",
+        "녹음검색",
+        "대화목록",
+        "메모리초기화",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "최신소식 중복삭제",
+      "aliases": [
+        "/최신소식 중복삭제"
+      ],
+      "type": "slash_command",
+      "description": "이미 보낸 최신 소식 기록을 비워요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "confirm_text",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:649",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news",
+        "firefly.voice"
+      ],
+      "related_tools": [
+        "관리상태",
+        "기록",
+        "기록검색",
+        "기록중지",
+        "녹음검색",
+        "대화목록",
+        "메모리초기화",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "최신소식 중복초기화",
+      "aliases": [
+        "/최신소식 중복초기화"
+      ],
+      "type": "slash_command",
+      "description": "이미 보낸 최신 소식 기록을 비워요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "confirm_text",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:642",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.news",
+        "firefly.voice"
+      ],
+      "related_tools": [
+        "관리상태",
+        "기록",
+        "기록검색",
+        "기록중지",
+        "녹음검색",
+        "대화목록",
+        "메모리초기화",
+        "메모리파일"
+      ]
+    },
+    {
+      "name": "추론",
+      "aliases": [
+        "/추론"
+      ],
+      "type": "slash_command",
+      "description": "이 방의 OpenAI 추론 단계를 보거나 바꿔요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "value",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:295",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    },
+    {
+      "name": "투표",
+      "aliases": [
+        "/투표"
+      ],
+      "type": "slash_command",
+      "description": "투표를 만들어요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "poll_text",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:542",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.polls"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "투표마감"
+      ]
+    },
+    {
+      "name": "투표마감",
+      "aliases": [
+        "/투표마감"
+      ],
+      "type": "slash_command",
+      "description": "진행 중인 투표를 마감해요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "message_id",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:549",
+      "confidence": 1.0,
+      "dependencies": [
+        "firefly.polls"
+      ],
+      "related_tools": [
+        "관리상태",
+        "메모리초기화",
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "투표"
+      ]
+    },
+    {
+      "name": "팀나누기",
+      "aliases": [
+        "/팀나누기"
+      ],
+      "type": "slash_command",
+      "description": "참가자를 섞어서 균형 있게 팀으로 나눠요.",
+      "arguments": [
+        {
+          "name": "members",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "team_count",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "members_per_team",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:233",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    },
+    {
+      "name": "프로필",
+      "aliases": [
+        "/프로필"
+      ],
+      "type": "slash_command",
+      "description": "유저의 프로필 이미지, 이름, 호감도를 보여줘요.",
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:208",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    },
+    {
+      "name": "호감도",
+      "aliases": [
+        "/호감도"
+      ],
+      "type": "slash_command",
+      "description": "현재 너에 대한 반디의 호감도를 확인해요.",
+      "arguments": [],
+      "source_file": "Firefly.py:189",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    },
+    {
+      "name": "호감도설정",
+      "aliases": [
+        "/호감도설정"
+      ],
+      "type": "slash_command",
+      "description": "유저의 호감도를 특정 값으로 맞춰요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "value",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:518",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    },
+    {
+      "name": "호감도증감",
+      "aliases": [
+        "/호감도증감"
+      ],
+      "type": "slash_command",
+      "description": "유저의 호감도를 증감해요. 권한 필요.",
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "delta",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:530",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    },
+    {
+      "name": "호칭",
+      "aliases": [
+        "/호칭"
+      ],
+      "type": "slash_command",
+      "description": "반디가 너를 부를 호칭을 바꿔요.",
+      "arguments": [
+        {
+          "name": "nickname",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "source_file": "Firefly.py:201",
+      "confidence": 1.0,
+      "dependencies": [],
+      "related_tools": []
+    }
+  ]
+}
