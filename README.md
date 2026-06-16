@@ -34,6 +34,10 @@ Optional:
 - `DEFAULT_PROMPT_FILE`: Default character prompt path. Defaults to `prompt.txt`.
 - `SPECIAL_PROMPT_FILE`: Special-user prompt path. Defaults to `prompt_special.txt`.
 - `NEWS_PROMPT_FILE`: Daily news prompt path. Defaults to `prompt_news.txt`.
+- `TOOL_PLANNER_PROMPT_FILE`: Tool-planner-only prompt path. Defaults to `prompt_tool_planner.txt`.
+- `STATE_UPDATER_PROMPT_FILE`: Internal memory/affection update prompt path. Defaults to `prompt_state_updater.txt`.
+- `TOOL_PLANNER_MODEL`: Model used for command/tool planning. Defaults to `DEFAULT_MODEL`.
+- `STATE_UPDATER_MODEL`: Model used for hidden brain/affection updates before persona replies. Defaults to `DEFAULT_MODEL`.
 - `VOICE_TRANSCRIPTION_MODEL`
 - `VOICE_FALLBACK_TRANSCRIPTION_MODEL`
 - `VOICE_REALTIME_TRANSCRIPTION_URL`
@@ -51,6 +55,8 @@ Optional:
 ## Data And Prompts
 
 - `prompt.txt`, `prompt_special.txt`, and `prompt_news.txt` define bot behavior and should be reviewed carefully before changing.
+- `prompt_tool_planner.txt` is intentionally not a persona prompt. It only decides whether to return `chat`, `command`, `command_then_reply`, `clarify`, or `reject`.
+- `prompt_state_updater.txt` is a separate internal state prompt. For non-command chat it may choose hidden `/뇌추가` and `/호감도증감` updates before the normal Bandi persona replies.
 - Runtime memory is split by concern and stored next to `MEMORY_FILE`: `conversation_memory.json`, `room_memory.json`, `poll_memory.json`, and `news_memory.json`. Existing legacy `memory.json` data is still read as a fallback until split files exist.
 - `memory.json`, split memory files, and `data/` are local runtime state and are ignored by git.
 - Voice recordings are stored under `data/voice_records/` by default.
@@ -70,7 +76,7 @@ Optional:
 - `/호칭 @유저 새호칭` or `/호칭 기존호칭 새호칭`: special users can change another user's nickname by mention, Discord ID, or a unique stored nickname.
 - `/메모리초기화 [대화/방/투표/뉴스] 확인`: special-user-only targeted reset for one split memory file.
 - Voice recording commands accept list indexes such as `1번`, `#1`, or `index:1` wherever a recording filename is accepted.
-- Natural phrasing is accepted for common commands such as nickname changes, dice rolls, summaries, profile/help requests, and news subscription commands.
+- Natural messages are first checked by the tool planner instead of local keyword routing. If it selects `command`, commands run directly; if it selects `command_then_reply`, command results are fed into Bandi's reply; if it selects `chat`, hidden brain/affection updates run first and then the normal Bandi persona answers with command output disabled for that turn.
 
 ## Deployment
 

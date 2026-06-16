@@ -142,3 +142,76 @@ def test_generate_silent_auto_command_does_not_persist_hidden_reply(monkeypatch,
     assert [item["content"] for item in data[ROOMS_KEY]["room-1"]["history"]] == [
         "나는 반디를 좋아해."
     ]
+
+
+def test_plan_tool_use_returns_structured_command_plan(monkeypatch, tmp_path):
+    _use_temp_memory(monkeypatch, tmp_path)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            output_text=(
+                '{"mode":"command","commands":["/투표 새 숙소 투표 | 항목수=2 | 더 화이트 | 힐스토리 | 1주일"],'
+                '"response":"","confidence":0.94}'
+            )
+        )
+
+    monkeypatch.setattr(ai.client_openai.responses, "create", fake_create)
+
+    plan = asyncio.run(
+        ai.plan_tool_use(
+            "화이트랑 힐스토리로 투표 만들어줘",
+            user_id=SPECIAL_USER_ID,
+            display_name="상범",
+            room_key="room-1",
+            special_user=True,
+        )
+    )
+
+    assert plan is not None
+    assert plan.mode == "command"
+    assert plan.commands == ("/투표 새 숙소 투표 | 항목수=2 | 더 화이트 | 힐스토리 | 1주일",)
+    assert plan.confidence == 0.94
+    assert "도구 선택 전용 규칙" in captured["input"][0]["content"]
+    assert "반디의 성격" in captured["input"][0]["content"]
+
+
+def test_plan_state_updates_returns_allowed_hidden_commands(monkeypatch, tmp_path):
+    _use_temp_memory(monkeypatch, tmp_path)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    target_id = 123456789012345
+    storage.save_memory({
+        str(target_id): {"name": "Alice", "nickname": "개척자", "affection": 48, "history": []},
+    })
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            output_text=(
+                '{"mode":"command","commands":['
+                '"/뇌추가 123456789012345 범주=preference 중요도=중간 사용자는 짧은 답을 선호한다.",'
+                '"/호감도증감 123456789012345 2",'
+                '"/주사위 1 6"],"response":"","confidence":0.88}'
+            )
+        )
+
+    monkeypatch.setattr(ai.client_openai.responses, "create", fake_create)
+
+    planned = asyncio.run(
+        ai.plan_state_updates(
+            "짧게 답해주면 좋아.",
+            user_id=target_id,
+            display_name="Alice",
+            room_key="room-1",
+        )
+    )
+
+    assert planned == (
+        "/뇌추가 123456789012345 범주=preference 중요도=중간 사용자는 짧은 답을 선호한다.",
+        "/호감도증감 123456789012345 2",
+    )
+    assert "대화 상태 업데이트 전용 규칙" in captured["input"][0]["content"]
+    assert "현재 호감도: 48" in captured["input"][1]["content"]

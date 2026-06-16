@@ -1,17 +1,25 @@
 import asyncio
+import os
 import re
 
 from openai import APIError, OpenAI, RateLimitError
 
 from .affection import adjust_affection
+from .brain import format_brain_notes
 from .config import (
     BOT_DISPLAY_NAME,
+    COMMAND_GUIDE_FILE,
     DEFAULT_AFFECTION,
     DEFAULT_MODEL,
     NEWS_PROMPT_FILE,
     OPENAI_API_KEY,
     SPECIAL_USER_ID,
+    SPECIAL_COMMAND_GUIDE_FILE,
+    STATE_UPDATER_MODEL,
+    STATE_UPDATER_PROMPT_FILE,
     SUMMARY_DEFAULT_LIMIT,
+    TOOL_PLANNER_MODEL,
+    TOOL_PLANNER_PROMPT_FILE,
     VOICE_SUMMARY_CHUNK_CHARS,
     VOICE_SUMMARY_FALLBACK_MODEL,
     VOICE_SUMMARY_MODEL,
@@ -35,9 +43,13 @@ from .storage import (
     update_user_data,
 )
 from .text_utils import get_current_time_text, is_command_text, load_text_file
+from .tool_planner import PLAN_CHAT, ToolPlan, parse_tool_plan
 from .voice_search import format_voice_search_context
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
+STATE_UPDATE_COMMAND_PREFIXES = ("/뇌추가", "/호감도증감")
+MAX_STATE_UPDATE_COMMANDS = 2
+STATE_UPDATE_CONTEXT_HISTORY_LIMIT = 6
 
 
 def _is_auto_command_reply(reply: str) -> bool:
@@ -47,6 +59,24 @@ def _is_auto_command_reply(reply: str) -> bool:
 
 def _format_allowed_command_prefixes(command_prefixes: tuple[str, ...]) -> str:
     return ", ".join(command_prefixes)
+
+
+def _matches_state_update_command(command_text: str) -> bool:
+    return any(
+        command_text == prefix or command_text.startswith(f"{prefix} ")
+        for prefix in STATE_UPDATE_COMMAND_PREFIXES
+    )
+
+
+def _format_state_history(entries: list[dict], *, limit: int = STATE_UPDATE_CONTEXT_HISTORY_LIMIT) -> str:
+    lines = []
+    for entry in entries[-limit:]:
+        role = str(entry.get("role") or "unknown")
+        speaker = str(entry.get("speaker") or role)
+        content = str(entry.get("content") or "").strip()
+        if content:
+            lines.append(f"- {speaker}: {content[:500]}")
+    return "\n".join(lines) if lines else "- 없음"
 
 
 async def generate_silent_auto_command(
@@ -120,6 +150,146 @@ async def generate_silent_auto_command(
     ):
         return None
     return reply[:1900]
+
+
+def _build_tool_planner_system_prompt(*, special_user: bool) -> str:
+    guides = [load_text_file(COMMAND_GUIDE_FILE)]
+    if special_user:
+        guides.append(load_text_file(SPECIAL_COMMAND_GUIDE_FILE))
+    command_guides = "\n\n".join(guides)
+    return f"""
+{load_text_file(TOOL_PLANNER_PROMPT_FILE)}
+
+[사용 가능한 명령어 규칙]
+{command_guides}
+""".strip()
+
+
+async def plan_tool_use(
+    user_message: str,
+    user_id: int,
+    display_name: str,
+    room_key: str,
+    *,
+    special_user: bool,
+    attachment_context: str | None = None,
+) -> ToolPlan | None:
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return None
+    if user_message.strip().startswith("/"):
+        return None
+
+    room_data = get_room_data(room_key)
+    user_data = get_user_data(user_id, display_name)
+    system_prompt = _build_tool_planner_system_prompt(special_user=special_user)
+
+    context_lines = [
+        f"- 사용자 디스코드 ID: {user_id}",
+        f"- 사용자 표시 이름: {display_name}",
+        f"- 관리 권한 사용자 여부: {'yes' if special_user else 'no'}",
+        f"- 단체 모드: {'on' if room_data.get('group_mode') else 'off'}",
+        f"- 인터넷 모드: {'on' if room_data.get('internet_mode') else 'off'}",
+        f"- 저장된 호칭: {user_data.get('nickname', '없음')}",
+    ]
+    if attachment_context:
+        context_lines.append("- 첨부 파일 내용이 함께 있음: yes")
+
+    planner_user_message = f"""
+[현재 컨텍스트]
+{chr(10).join(context_lines)}
+
+[사용자 입력]
+{user_message}
+""".strip()
+
+    try:
+        response = await asyncio.to_thread(
+            client_openai.responses.create,
+            model=TOOL_PLANNER_MODEL,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": planner_user_message},
+            ],
+        )
+    except Exception as exc:
+        print("Tool planner error:", exc)
+        return None
+
+    plan = parse_tool_plan(response.output_text.strip())
+    if plan is None:
+        return None
+    if plan.mode == PLAN_CHAT:
+        return plan
+    if plan.confidence < 0.2:
+        return None
+    return plan
+
+
+async def plan_state_updates(
+    user_message: str,
+    user_id: int,
+    display_name: str,
+    room_key: str,
+    *,
+    attachment_context: str | None = None,
+) -> tuple[str, ...]:
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return ()
+    if user_message.strip().startswith("/"):
+        return ()
+
+    room_data = get_room_data(room_key)
+    user_data = get_user_data(user_id, display_name)
+    brain_context = format_brain_notes(dict(user_data))
+    attachment_line = ""
+    if attachment_context:
+        attachment_line = f"\n[첨부 맥락]\n{attachment_context[:1800]}"
+
+    planner_user_message = f"""
+[현재 사용자]
+- 디스코드 ID: {user_id}
+- 표시 이름: {display_name}
+- 저장된 호칭: {user_data.get('nickname', '없음')}
+- 현재 호감도: {user_data.get('affection', DEFAULT_AFFECTION)}
+- 특별 사용자 여부: {'yes' if user_id == SPECIAL_USER_ID else 'no'}
+
+[반디가 저장 중인 기억]
+{brain_context}
+
+[최근 개인 대화]
+{_format_state_history(user_data.get('history', []))}
+
+[최근 방 대화]
+{_format_state_history(room_data.get('history', []))}
+{attachment_line}
+
+[이번 사용자 입력]
+{user_message}
+""".strip()
+
+    try:
+        response = await asyncio.to_thread(
+            client_openai.responses.create,
+            model=STATE_UPDATER_MODEL,
+            input=[
+                {"role": "system", "content": load_text_file(STATE_UPDATER_PROMPT_FILE)},
+                {"role": "user", "content": planner_user_message},
+            ],
+        )
+    except Exception as exc:
+        print("State updater planner error:", exc)
+        return ()
+
+    plan = parse_tool_plan(response.output_text.strip())
+    if plan is None or plan.mode != "command" or plan.confidence < 0.2:
+        return ()
+
+    commands = [
+        command
+        for command in plan.commands
+        if _matches_state_update_command(command)
+    ]
+    return tuple(commands[:MAX_STATE_UPDATE_COMMANDS])
 
 
 NEWS_FIELD_LABELS = ("무슨 일", "왜 중요해", "확인 링크")

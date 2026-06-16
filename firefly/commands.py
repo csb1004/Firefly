@@ -6,8 +6,12 @@ import discord
 from .affection import change_user_affection, set_user_affection
 from .admin_status import build_admin_status_text
 from .ai import (
+    MAX_STATE_UPDATE_COMMANDS,
+    STATE_UPDATE_COMMAND_PREFIXES,
     generate_reply,
     generate_silent_auto_command,
+    plan_state_updates,
+    plan_tool_use,
     summarize_conversation,
     summarize_voice_recording,
     summarize_voice_search,
@@ -29,11 +33,10 @@ from .commands_parser import (
     command_arg,
     is_special_only_command,
     matches_command,
-    normalize_natural_command,
     parse_summary_args,
     summary_recording_filename,
 )
-from .config import BOT_DISPLAY_NAME, DEFAULT_AFFECTION, SPECIAL_USER_ID, SUMMARY_DEFAULT_LIMIT
+from .config import BOT_DISPLAY_NAME, DEFAULT_AFFECTION, SPECIAL_USER_ID, SPECIAL_USER_NAME, SUMMARY_DEFAULT_LIMIT
 from .embeds import (
     create_help_embed,
     create_profile_embed,
@@ -45,7 +48,7 @@ from .embeds import (
 from .news import handle_news_command, is_news_command_text
 from .polls import cancel_poll_tasks, close_poll_from_command, create_poll_from_command
 from .reasoning import format_reasoning_status, reasoning_effort_label, set_room_reasoning_effort
-from .role_commands import handle_role_command, is_role_command_text
+from .role_commands import handle_role_command
 from .storage import (
     MEMORY_SECTION_LABELS,
     add_history,
@@ -62,6 +65,7 @@ from .storage import (
     update_user_data,
 )
 from .text_utils import clamp_text, get_current_time_text, parse_last_int_arg
+from .tool_planner import PLAN_CHAT, PLAN_CLARIFY, PLAN_COMMAND, PLAN_COMMAND_THEN_REPLY, PLAN_REJECT, ToolPlan
 from .user_targets import resolve_explicit_user_target, target_mentions
 from .utility_commands import (
     CommandUsageError,
@@ -167,25 +171,11 @@ ADAPTER_BLOCKED_COMMAND_PREFIXES = (
     "/role",
 )
 SILENT_GROUP_MEMORY_COMMAND_PREFIXES = ("/뇌추가", "/뇌삭제", "/호감도증감")
-POLL_INTENT_TOKENS = ("투표", "poll", "vote", "설문")
-POLL_REQUEST_TOKENS = (
-    "만들",
-    "생성",
-    "올려",
-    "열어",
-    "항목",
-    "선택지",
-    "기한",
-    "마감",
-    "제목",
-)
 
 
-def _looks_like_poll_request(user_text: str) -> bool:
-    text = user_text.casefold()
-    return any(token in text for token in POLL_INTENT_TOKENS) and any(
-        token in text for token in POLL_REQUEST_TOKENS
-    )
+def _planner_adapter_raw_text(commands: tuple[str, ...], prompt: str) -> str:
+    separator = " || " if any("|" in command for command in commands) else " | "
+    return f"{' && '.join(commands)}{separator}{prompt}"
 
 
 def _resolve_recording_summary_filename(filename: str) -> str | None:
@@ -275,11 +265,19 @@ class _CommandCaptureChannel:
 
 
 class _CommandCaptureMessage:
-    def __init__(self, original: discord.Message, channel: _CommandCaptureChannel):
-        self.author = original.author
+    def __init__(
+        self,
+        original: discord.Message,
+        channel: _CommandCaptureChannel,
+        *,
+        author=None,
+        mentions=None,
+    ):
+        self.author = author or original.author
         self.channel = channel
         self.guild = original.guild
-        self.mentions = getattr(original, "mentions", [])
+        self.mentions = getattr(original, "mentions", []) if mentions is None else mentions
+        self.role_mentions = getattr(original, "role_mentions", [])
         self.reference = getattr(original, "reference", None)
         self.content = getattr(original, "content", "")
 
@@ -293,6 +291,17 @@ def _adapter_command_allowed(command_text: str) -> bool:
 
 def _matches_any_command_prefix(command_text: str, prefixes: tuple[str, ...]) -> bool:
     return any(matches_command(command_text, prefix) for prefix in prefixes)
+
+
+def _split_state_update_commands(commands: tuple[str, ...]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    state_updates = []
+    visible_commands = []
+    for command in commands:
+        if _matches_any_command_prefix(command, STATE_UPDATE_COMMAND_PREFIXES):
+            state_updates.append(command)
+        else:
+            visible_commands.append(command)
+    return tuple(state_updates), tuple(visible_commands)
 
 
 def _adapter_blocked_message(command_text: str) -> str:
@@ -415,6 +424,51 @@ async def _run_auto_command_from_reply(
             room_key=room_key,
             command_text=auto_command,
             command_output=command_output,
+        )
+    return True
+
+
+def _state_update_author():
+    return SimpleNamespace(
+        id=SPECIAL_USER_ID,
+        name=SPECIAL_USER_NAME,
+        display_name=SPECIAL_USER_NAME,
+        mention=f"<@{SPECIAL_USER_ID}>",
+    )
+
+
+async def _run_silent_state_update_commands(
+    *,
+    commands: tuple[str, ...],
+    message: discord.Message,
+    room_key: str,
+    room_data: dict,
+    client: discord.Client,
+) -> bool:
+    runnable_commands = [
+        command
+        for command in commands
+        if _matches_any_command_prefix(command, STATE_UPDATE_COMMAND_PREFIXES)
+    ]
+    if not runnable_commands:
+        return False
+
+    capture_channel = _CommandCaptureChannel(message.channel, forward=False)
+    capture_message = _CommandCaptureMessage(
+        message,
+        capture_channel,
+        author=_state_update_author(),
+        mentions=[],
+    )
+    state_user_data = get_user_data(SPECIAL_USER_ID, SPECIAL_USER_NAME)
+    for command_text in runnable_commands[:MAX_STATE_UPDATE_COMMANDS]:
+        await handle_mentioned_message(
+            message=capture_message,
+            user_text=command_text,
+            user_data=state_user_data,
+            room_key=room_key,
+            room_data=room_data,
+            client=client,
         )
     return True
 
@@ -851,6 +905,67 @@ async def _run_command_adapter(
         command_queue.append(followup_command)
 
 
+async def _run_tool_plan(
+    *,
+    plan: ToolPlan,
+    message: discord.Message,
+    user_text: str,
+    user_data: dict,
+    room_key: str,
+    room_data: dict,
+    client: discord.Client,
+) -> bool:
+    if plan.mode == PLAN_CHAT:
+        return False
+
+    if plan.mode in {PLAN_CLARIFY, PLAN_REJECT}:
+        await message.channel.send(plan.response[:1900])
+        return True
+
+    if plan.mode not in {PLAN_COMMAND, PLAN_COMMAND_THEN_REPLY}:
+        return False
+
+    commands = tuple(command for command in plan.commands if command.startswith("/"))
+    state_update_commands, visible_commands = _split_state_update_commands(commands)
+    if state_update_commands:
+        await _run_silent_state_update_commands(
+            commands=state_update_commands,
+            message=message,
+            room_key=room_key,
+            room_data=room_data,
+            client=client,
+        )
+
+    commands = visible_commands
+    if not commands:
+        return False
+    if len(commands) > MAX_ADAPTER_COMMANDS:
+        await message.channel.send(ADAPTER_CHAIN_LIMIT_MESSAGE)
+        return True
+
+    if plan.mode == PLAN_COMMAND_THEN_REPLY:
+        await _run_command_adapter(
+            message=message,
+            raw_text=_planner_adapter_raw_text(commands, user_text),
+            user_data=user_data,
+            room_key=room_key,
+            room_data=room_data,
+            client=client,
+        )
+        return True
+
+    for command_text in commands:
+        await handle_mentioned_message(
+            message=message,
+            user_text=command_text,
+            user_data=user_data,
+            room_key=room_key,
+            room_data=room_data,
+            client=client,
+        )
+    return True
+
+
 async def handle_mentioned_message(
     message: discord.Message,
     user_text: str,
@@ -862,20 +977,53 @@ async def handle_mentioned_message(
 ) -> None:
     author_id = message.author.id
     special_user = is_special_user(author_id)
+    planner_chat_only = False
+    state_updates_already_run = False
 
-    natural_command = None
-    if not attachment_context:
-        natural_command = normalize_natural_command(user_text, special_user=special_user)
-    if natural_command:
-        await handle_mentioned_message(
-            message=message,
-            user_text=natural_command,
-            user_data=user_data,
+    if not attachment_context and not user_text.strip().startswith("/"):
+        display_name = getattr(message.author, "display_name", message.author.name)
+        tool_plan = await plan_tool_use(
+            user_message=user_text,
+            user_id=author_id,
+            display_name=display_name,
             room_key=room_key,
-            room_data=room_data,
-            client=client,
+            special_user=special_user,
         )
-        return
+        if tool_plan is not None:
+            if tool_plan.mode == PLAN_CHAT:
+                planner_chat_only = True
+            elif tool_plan.mode in {PLAN_COMMAND, PLAN_COMMAND_THEN_REPLY}:
+                state_update_commands, visible_commands = _split_state_update_commands(tool_plan.commands)
+                if state_update_commands and not visible_commands:
+                    await _run_silent_state_update_commands(
+                        commands=state_update_commands,
+                        message=message,
+                        room_key=room_key,
+                        room_data=room_data,
+                        client=client,
+                    )
+                    planner_chat_only = True
+                    state_updates_already_run = True
+                elif await _run_tool_plan(
+                    plan=tool_plan,
+                    message=message,
+                    user_text=user_text,
+                    user_data=user_data,
+                    room_key=room_key,
+                    room_data=room_data,
+                    client=client,
+                ):
+                    return
+            elif await _run_tool_plan(
+                plan=tool_plan,
+                message=message,
+                user_text=user_text,
+                user_data=user_data,
+                room_key=room_key,
+                room_data=room_data,
+                client=client,
+            ):
+                return
 
     voice_search_alias = matched_alias(user_text, VOICE_SEARCH_COMMAND.aliases)
     if voice_search_alias:
@@ -899,10 +1047,6 @@ async def handle_mentioned_message(
             await message.channel.send("…그 명령어를 사용할 권한이 없어.")
             return
         await handle_role_command(message, _command_arg(user_text, role_alias))
-        return
-
-    if special_user and is_role_command_text(user_text) and not _looks_like_poll_request(user_text):
-        await handle_role_command(message, user_text)
         return
 
     for reasoning_alias in ("/추론", "/추론설정"):
@@ -1264,18 +1408,36 @@ async def handle_mentioned_message(
         await message.channel.send("그 명령어는 잘 모르겠어. '/도움말'을 불러서 사용 가능한 명령어들을 확인해봐.")
         return
 
+    display_name = getattr(message.author, "display_name", message.author.name)
+    if not state_updates_already_run:
+        state_update_commands = await plan_state_updates(
+            user_message=user_text,
+            user_id=author_id,
+            display_name=display_name,
+            room_key=room_key,
+            attachment_context=attachment_context,
+        )
+        if state_update_commands:
+            await _run_silent_state_update_commands(
+                commands=state_update_commands,
+                message=message,
+                room_key=room_key,
+                room_data=room_data,
+                client=client,
+            )
+
     async with message.channel.typing():
-        display_name = getattr(message.author, "display_name", message.author.name)
         reply = await generate_reply(
             user_message=user_text,
             user_id=author_id,
             display_name=display_name,
             room_key=room_key,
             attachment_context=attachment_context,
+            allow_command_output=not planner_chat_only,
             persist_command_reply=False,
         )
 
-    if await _run_auto_command_from_reply(
+    if not planner_chat_only and await _run_auto_command_from_reply(
         reply=reply,
         message=message,
         user_text=user_text,

@@ -84,6 +84,10 @@ COMMAND_GUIDE_FILE = _resolve_project_path(os.getenv("COMMAND_GUIDE_FILE", "prom
 SPECIAL_COMMAND_GUIDE_FILE = _resolve_project_path(
     os.getenv("SPECIAL_COMMAND_GUIDE_FILE", "prompt_commands_special.txt")
 )
+TOOL_PLANNER_PROMPT_FILE = _resolve_project_path(os.getenv("TOOL_PLANNER_PROMPT_FILE", "prompt_tool_planner.txt"))
+STATE_UPDATER_PROMPT_FILE = _resolve_project_path(
+    os.getenv("STATE_UPDATER_PROMPT_FILE", "prompt_state_updater.txt")
+)
 
 DATA_DIR = _resolve_data_dir()
 MEMORY_FILE = _resolve_memory_file(DATA_DIR)
@@ -113,6 +117,8 @@ NEWS_DEFAULT_MINUTE = 0
 NEWS_DEFAULT_TOPICS = ["인공지능", "프로그래밍"]
 
 DEFAULT_MODEL = "gpt-5.3-codex"
+TOOL_PLANNER_MODEL = os.getenv("TOOL_PLANNER_MODEL", DEFAULT_MODEL)
+STATE_UPDATER_MODEL = os.getenv("STATE_UPDATER_MODEL", DEFAULT_MODEL)
 WEB_SEARCH_MODEL = "gpt-5.4"
 VOICE_TRANSCRIPTION_MODEL = os.getenv("VOICE_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
 VOICE_FALLBACK_TRANSCRIPTION_MODEL = os.getenv(

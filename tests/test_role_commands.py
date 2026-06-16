@@ -128,12 +128,21 @@ def test_role_color_parser_accepts_natural_color_names_and_loose_hex():
     assert _parse_color_value("#0af로") == 0x00AAFF
 
 
-def test_role_command_renames_and_recolors_in_one_message():
+def test_role_command_renames_and_recolors_in_one_message(monkeypatch):
     channel = FakeChannel()
     member = FakeMember()
     role = FakeRole(name="일레이나")
     message = _message(channel, member, role)
     client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(
+            mode=commands.PLAN_COMMAND,
+            commands=('/역할 일레이나 역할을 "관리자"로 이름 바꿔줘. 색은 하늘색 계열로 해줘',),
+            confidence=0.91,
+        )
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
 
     asyncio.run(
         commands.handle_mentioned_message(
@@ -174,6 +183,14 @@ def test_color_followup_without_role_asks_for_role_instead_of_calling_model(monk
     async def fail_generate_reply(**kwargs):
         raise AssertionError("color follow-up should not call the model")
 
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(
+            mode=commands.PLAN_CLARIFY,
+            response="…대상 역할을 멘션하거나 정확한 역할 이름을 적어줘.",
+            confidence=0.86,
+        )
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
     monkeypatch.setattr(commands, "generate_reply", fail_generate_reply)
 
     asyncio.run(

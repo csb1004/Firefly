@@ -224,7 +224,7 @@ def test_silent_group_memory_update_can_delete_short_term_candidate(monkeypatch,
     assert data[str(SPECIAL_USER_ID)]["short_term_memory"] == []
 
 
-def test_natural_nickname_command_runs_without_model(monkeypatch):
+def test_tool_planner_nickname_command_runs_without_persona(monkeypatch):
     sent_messages = []
     updated_users = []
 
@@ -233,11 +233,19 @@ def test_natural_nickname_command_runs_without_model(monkeypatch):
             sent_messages.append(content)
 
     async def fail_generate_reply(**kwargs):
-        raise AssertionError("natural command should not call the model")
+        raise AssertionError("planner command should not call the persona model")
+
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(
+            mode=commands.PLAN_COMMAND,
+            commands=("/호칭 새별",),
+            confidence=0.93,
+        )
 
     def fake_update_user_data(user_id, user_data):
         updated_users.append((user_id, dict(user_data)))
 
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
     monkeypatch.setattr(commands, "generate_reply", fail_generate_reply)
     monkeypatch.setattr(nickname_commands, "update_user_data", fake_update_user_data)
 
@@ -265,7 +273,7 @@ def test_natural_nickname_command_runs_without_model(monkeypatch):
     assert sent_messages == ["응. 이제부터는 새별(이)라고 불러볼게."]
 
 
-def test_special_user_changes_mentioned_user_nickname_from_natural_phrase(monkeypatch, tmp_path):
+def test_special_user_changes_mentioned_user_nickname_from_planner_command(monkeypatch, tmp_path):
     sent_messages = []
     monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
     storage.save_memory({
@@ -288,6 +296,15 @@ def test_special_user_changes_mentioned_user_nickname_from_natural_phrase(monkey
         guild=None,
     )
     client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(
+            mode=commands.PLAN_COMMAND,
+            commands=("/호칭 @이카맘 이카",),
+            confidence=0.92,
+        )
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
 
     asyncio.run(
         commands.handle_mentioned_message(
@@ -330,7 +347,7 @@ def test_special_user_changes_user_nickname_by_existing_nickname(monkeypatch, tm
     asyncio.run(
         commands.handle_mentioned_message(
             message=message,
-            user_text="이카의 칭호를 이카2로 바꿔줘",
+            user_text="/호칭 이카 이카2",
             user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
             room_key="room-1",
             room_data={},
@@ -369,7 +386,7 @@ def test_special_user_nickname_lookup_rejects_ambiguous_existing_nickname(monkey
     asyncio.run(
         commands.handle_mentioned_message(
             message=message,
-            user_text="이카의 칭호를 이카2로 바꿔줘",
+            user_text="/호칭 이카 이카2",
             user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
             room_key="room-1",
             room_data={},
@@ -410,7 +427,7 @@ def test_nickname_change_rejects_duplicate_new_nickname(monkeypatch, tmp_path):
     asyncio.run(
         commands.handle_mentioned_message(
             message=message,
-            user_text="이카의 칭호를 이카2로 바꿔줘",
+            user_text="/호칭 이카 이카2",
             user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
             room_key="room-1",
             room_data={},
@@ -669,6 +686,356 @@ def test_poll_request_with_white_option_does_not_route_to_role(monkeypatch):
         "둘 다 도저히 못고르겠다. | 1주일"
     ]
     assert sent_messages == ["투표 생성됨: 새 숙소 투표"]
+
+
+def test_tool_planner_command_executes_poll_without_persona(monkeypatch):
+    sent_messages = []
+    poll_commands = []
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(
+            mode=commands.PLAN_COMMAND,
+            commands=(
+                "/투표 새 숙소 투표 | 항목수=3 | "
+                "더 화이트(8만원정도 추가비용 나올 수 있음) | "
+                "힐스토리(2시간 반+픽업시간, 컴퓨터 말고 딱히 할거X, 방 2개 잡아야됨) | "
+                "둘 다 도저히 못고르겠다. | 1주일",
+            ),
+            confidence=0.95,
+        )
+
+    async def fake_generate_reply(**kwargs):
+        raise AssertionError("planner command should not call persona reply")
+
+    async def fake_create_poll_from_command(message, user_text, client):
+        poll_commands.append(user_text)
+        await message.channel.send("투표 생성됨: 새 숙소 투표")
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+    monkeypatch.setattr(commands, "create_poll_from_command", fake_create_poll_from_command)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        role_mentions=[],
+        guild=SimpleNamespace(roles=[]),
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text=(
+                "제목은 '새 숙소 투표', 항목은 '더 화이트(8만원정도 추가비용 나올 수 있음)', "
+                "'힐스토리(2시간 반+픽업시간, 컴퓨터 말고 딱히 할거X, 방 2개 잡아야됨)', "
+                "'둘 다 도저히 못고르겠다.' 기한은 1주일로 투표 만들어줘"
+            ),
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert poll_commands == [
+        "/투표 새 숙소 투표 | 항목수=3 | "
+        "더 화이트(8만원정도 추가비용 나올 수 있음) | "
+        "힐스토리(2시간 반+픽업시간, 컴퓨터 말고 딱히 할거X, 방 2개 잡아야됨) | "
+        "둘 다 도저히 못고르겠다. | 1주일"
+    ]
+    assert sent_messages == ["투표 생성됨: 새 숙소 투표"]
+
+
+def test_tool_planner_chat_uses_persona_without_command_output(monkeypatch):
+    sent_messages = []
+    reply_kwargs = {}
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(mode=commands.PLAN_CHAT, confidence=0.91)
+
+    async def fake_generate_reply(**kwargs):
+        reply_kwargs.update(kwargs)
+        return "그건 그냥 대화로 답할게."
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="오늘은 그냥 잡담하자",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == ["그건 그냥 대화로 답할게."]
+    assert reply_kwargs["allow_command_output"] is False
+
+
+def test_tool_planner_chat_runs_state_updates_before_persona(monkeypatch, tmp_path):
+    sent_messages = []
+    target_id = 123456789012345
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.save_memory({
+        str(target_id): {"name": "Alice", "nickname": "Alice", "affection": 50, "history": []},
+    })
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(mode=commands.PLAN_CHAT, confidence=0.91)
+
+    async def fake_plan_state_updates(**kwargs):
+        return (
+            "/뇌추가 123456789012345 범주=preference 중요도=중간 사용자는 짧은 답을 선호한다.",
+            "/호감도증감 123456789012345 2",
+        )
+
+    async def fake_generate_reply(**kwargs):
+        data = storage.load_memory()[str(target_id)]
+        assert data["affection"] == 52
+        assert data["short_term_memory"][0]["content"] == "사용자는 짧은 답을 선호한다."
+        return "짧게 답할게."
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
+    monkeypatch.setattr(commands, "plan_state_updates", fake_plan_state_updates)
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=target_id, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999), get_user=lambda user_id: None)
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="앞으로는 짧게 답해주면 좋아.",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == ["짧게 답할게."]
+
+
+def test_tool_planner_state_only_command_is_hidden_then_persona_replies(monkeypatch, tmp_path):
+    sent_messages = []
+    target_id = 123456789012345
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    storage.save_memory({
+        str(target_id): {"name": "Alice", "nickname": "Alice", "affection": 50, "history": []},
+    })
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(
+            mode=commands.PLAN_COMMAND,
+            commands=("/뇌추가 123456789012345 범주=preference 중요도=중간 사용자는 짧은 답을 선호한다.",),
+            confidence=0.9,
+        )
+
+    async def fail_plan_state_updates(**kwargs):
+        raise AssertionError("state-only tool plan already ran the hidden update")
+
+    async def fake_generate_reply(**kwargs):
+        data = storage.load_memory()[str(target_id)]
+        assert data["short_term_memory"][0]["content"] == "사용자는 짧은 답을 선호한다."
+        return "기억해둘게."
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
+    monkeypatch.setattr(commands, "plan_state_updates", fail_plan_state_updates)
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=target_id, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999), get_user=lambda user_id: None)
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="앞으로는 짧게 답해주는 걸 기억해줘.",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == ["기억해둘게."]
+
+
+def test_tool_planner_command_then_reply_uses_adapter(monkeypatch):
+    sent_messages = []
+    reply_kwargs = {}
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(
+            mode=commands.PLAN_COMMAND_THEN_REPLY,
+            commands=("/주사위 1 1",),
+            confidence=0.9,
+        )
+
+    async def fake_generate_reply(**kwargs):
+        reply_kwargs.update(kwargs)
+        return "주사위 결과를 보고 답했어."
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="주사위 굴리고 그 결과로 한마디 해줘",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == [
+        "주사위 결과: **1** (`1`~`1`)",
+        "주사위 결과를 보고 답했어.",
+    ]
+    assert "[1] 명령어: /주사위 1 1" in reply_kwargs["extra_context"]
+    assert reply_kwargs["user_message"] == "주사위 굴리고 그 결과로 한마디 해줘"
+
+
+def test_tool_planner_clarify_sends_question_without_persona(monkeypatch):
+    sent_messages = []
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(
+            mode=commands.PLAN_CLARIFY,
+            response="어떤 역할을 바꿀지 역할 이름이나 멘션을 알려줘.",
+            confidence=0.82,
+        )
+
+    async def fake_generate_reply(**kwargs):
+        raise AssertionError("clarify plan should not call persona reply")
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=SimpleNamespace(roles=[]),
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="역할 색을 하얀색으로 바꿔줘",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == ["어떤 역할을 바꿀지 역할 이름이나 멘션을 알려줘."]
 
 
 def test_command_adapter_stops_result_dependent_loop_at_limit(monkeypatch):

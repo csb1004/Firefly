@@ -22,15 +22,6 @@ ACTION_RENAME = "rename"
 ACTION_ALLOW_PERMISSIONS = "allow_permissions"
 ACTION_DENY_PERMISSIONS = "deny_permissions"
 ACTION_HELP = "help"
-ROLE_ACTIONS = {
-    ACTION_ASSIGN,
-    ACTION_REMOVE,
-    ACTION_COLOR,
-    ACTION_RENAME,
-    ACTION_ALLOW_PERMISSIONS,
-    ACTION_DENY_PERMISSIONS,
-}
-
 ASSIGN_WORDS = ("부여", "지급", "달아", "달기", "줘", "주기", "추가")
 REMOVE_WORDS = ("제거", "해제", "빼", "빼기", "박탈", "삭제")
 COLOR_WORDS = ("색", "색상", "컬러", "color")
@@ -404,17 +395,6 @@ def _requests_from_text(message: discord.Message, text: str) -> list[RoleRequest
     if requests:
         return requests
     return [_request_from_text(message, text)]
-
-
-def is_role_command_text(user_text: str) -> bool:
-    text = _normalize_spaces(user_text)
-    if text.startswith("/역할") or text.startswith("/role"):
-        return True
-    return _parse_action(text) in ROLE_ACTIONS and (
-        "역할" in text
-        or bool(_parse_color_value(text))
-        or _contains_color_word(text)
-    )
 
 
 def _format_role(role: discord.Role) -> str:
