@@ -873,6 +873,65 @@ def test_tool_planner_chat_uses_persona_without_command_output(monkeypatch):
     assert reply_kwargs["allow_command_output"] is False
 
 
+def test_handle_mentioned_message_starts_typing_before_tool_planner(monkeypatch):
+    events = []
+    sent_messages = []
+
+    class FakeTyping:
+        async def __aenter__(self):
+            events.append("typing_enter")
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            events.append("typing_exit")
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    async def fake_plan_tool_use(**kwargs):
+        events.append("plan_tool_use")
+        assert events[0] == "typing_enter"
+        return commands.ToolPlan(mode=commands.PLAN_CHAT, confidence=0.91)
+
+    async def fake_plan_state_updates(**kwargs):
+        return ()
+
+    async def fake_generate_reply(**kwargs):
+        return "기다리게 해서 미안. 여기 있어."
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
+    monkeypatch.setattr(commands, "plan_state_updates", fake_plan_state_updates)
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="오늘은 그냥 잡담하자",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == ["기다리게 해서 미안. 여기 있어."]
+    assert "plan_tool_use" in events
+    assert events[-1] == "typing_exit"
+
+
 def test_tool_planner_chat_runs_state_updates_before_persona(monkeypatch, tmp_path):
     sent_messages = []
     target_id = 123456789012345

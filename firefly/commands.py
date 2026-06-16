@@ -1,4 +1,6 @@
+import asyncio
 from collections import deque
+from contextlib import suppress
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -148,6 +150,7 @@ ADAPTER_COMMAND_OUTPUT_LIMIT = 1200
 ADAPTER_CONTEXT_LIMIT = 3500
 AUTO_COMMAND_HISTORY_OUTPUT_LIMIT = 1200
 MAX_MEMORY_FILE_SEND_BYTES = 24 * 1024 * 1024
+TYPING_KEEPALIVE_SECONDS = 7.0
 PERMISSION_DENIED_MESSAGE = "…그 명령어를 사용할 권한이 없어."
 MEMORY_FILE_COMMAND_ALIASES = (
     "/메모리파일",
@@ -280,6 +283,40 @@ class _CommandCaptureMessage:
         self.role_mentions = getattr(original, "role_mentions", [])
         self.reference = getattr(original, "reference", None)
         self.content = getattr(original, "content", "")
+
+
+class _TypingKeepalive:
+    def __init__(self, channel, *, interval: float = TYPING_KEEPALIVE_SECONDS):
+        self._channel = channel
+        self._interval = interval
+        self._task: asyncio.Task | None = None
+
+    async def __aenter__(self):
+        typing = getattr(self._channel, "typing", None)
+        if not callable(typing):
+            return self
+        self._task = asyncio.create_task(self._run(typing))
+        await asyncio.sleep(0)
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        if self._task is None:
+            return False
+        self._task.cancel()
+        with suppress(asyncio.CancelledError):
+            await self._task
+        return False
+
+    async def _run(self, typing):
+        while True:
+            try:
+                async with typing():
+                    await asyncio.sleep(self._interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print("Typing keepalive error:", exc)
+                return
 
 
 def _adapter_command_allowed(command_text: str) -> bool:
@@ -421,6 +458,7 @@ async def _run_auto_command_from_reply(
         room_key=room_key,
         room_data=room_data,
         client=client,
+        keep_typing=False,
     )
     if record_context:
         command_output = "\n".join(capture_channel.outputs).strip()
@@ -474,6 +512,7 @@ async def _run_silent_state_update_commands(
             room_key=room_key,
             room_data=room_data,
             client=client,
+            keep_typing=False,
         )
     return _StateUpdateExecutionResult(
         ran=True,
@@ -890,6 +929,7 @@ async def _run_command_adapter_request(
                     room_key=room_key,
                     room_data=room_data,
                     client=client,
+                    keep_typing=False,
                 )
             except Exception as exc:
                 print("Command adapter execution error:", exc)
@@ -982,6 +1022,7 @@ async def _run_tool_plan(
             room_key=room_key,
             room_data=room_data,
             client=client,
+            keep_typing=False,
         )
     return True
 
@@ -994,7 +1035,22 @@ async def handle_mentioned_message(
     room_data: dict,
     client: discord.Client,
     attachment_context: str | None = None,
+    keep_typing: bool = True,
 ) -> None:
+    if keep_typing:
+        async with _TypingKeepalive(message.channel):
+            await handle_mentioned_message(
+                message=message,
+                user_text=user_text,
+                user_data=user_data,
+                room_key=room_key,
+                room_data=room_data,
+                client=client,
+                attachment_context=attachment_context,
+                keep_typing=False,
+            )
+        return
+
     author_id = message.author.id
     special_user = is_special_user(author_id)
     planner_chat_only = False
