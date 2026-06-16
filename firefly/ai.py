@@ -1,5 +1,4 @@
 import asyncio
-import os
 import re
 
 from openai import APIError, OpenAI, RateLimitError
@@ -42,13 +41,12 @@ from .storage import (
     update_room_data,
     update_user_data,
 )
+from .state_updates import filter_hidden_state_update_commands
 from .text_utils import get_current_time_text, is_command_text, load_text_file
 from .tool_planner import PLAN_CHAT, ToolPlan, parse_tool_plan
 from .voice_search import format_voice_search_context
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
-STATE_UPDATE_COMMAND_PREFIXES = ("/뇌추가", "/호감도증감")
-MAX_STATE_UPDATE_COMMANDS = 2
 STATE_UPDATE_CONTEXT_HISTORY_LIMIT = 6
 
 
@@ -59,13 +57,6 @@ def _is_auto_command_reply(reply: str) -> bool:
 
 def _format_allowed_command_prefixes(command_prefixes: tuple[str, ...]) -> str:
     return ", ".join(command_prefixes)
-
-
-def _matches_state_update_command(command_text: str) -> bool:
-    return any(
-        command_text == prefix or command_text.startswith(f"{prefix} ")
-        for prefix in STATE_UPDATE_COMMAND_PREFIXES
-    )
 
 
 def _format_state_history(entries: list[dict], *, limit: int = STATE_UPDATE_CONTEXT_HISTORY_LIMIT) -> str:
@@ -174,8 +165,6 @@ async def plan_tool_use(
     special_user: bool,
     attachment_context: str | None = None,
 ) -> ToolPlan | None:
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        return None
     if user_message.strip().startswith("/"):
         return None
 
@@ -218,10 +207,10 @@ async def plan_tool_use(
     plan = parse_tool_plan(response.output_text.strip())
     if plan is None:
         return None
-    if plan.mode == PLAN_CHAT:
-        return plan
     if plan.confidence < 0.2:
         return None
+    if plan.mode == PLAN_CHAT:
+        return plan
     return plan
 
 
@@ -233,8 +222,6 @@ async def plan_state_updates(
     *,
     attachment_context: str | None = None,
 ) -> tuple[str, ...]:
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        return ()
     if user_message.strip().startswith("/"):
         return ()
 
@@ -284,12 +271,7 @@ async def plan_state_updates(
     if plan is None or plan.mode != "command" or plan.confidence < 0.2:
         return ()
 
-    commands = [
-        command
-        for command in plan.commands
-        if _matches_state_update_command(command)
-    ]
-    return tuple(commands[:MAX_STATE_UPDATE_COMMANDS])
+    return filter_hidden_state_update_commands(plan.commands, user_id=user_id)
 
 
 NEWS_FIELD_LABELS = ("무슨 일", "왜 중요해", "확인 링크")
@@ -476,6 +458,7 @@ async def generate_reply(
     force_web_search: bool = False,
     allow_command_output: bool = True,
     persist_command_reply: bool = True,
+    apply_affection_adjustment: bool = True,
 ) -> str:
     if user_message.strip() == "그 긴거 해줘":
         return LONG_SAM_LINE
@@ -488,7 +471,8 @@ async def generate_reply(
     reasoning_effort = normalize_room_reasoning_effort(room_data)
 
     before_affection = int(user_data.get("affection", DEFAULT_AFFECTION))
-    user_data = adjust_affection(user_id, user_data, user_message)
+    if apply_affection_adjustment:
+        user_data = adjust_affection(user_id, user_data, user_message)
     after_affection = int(user_data.get("affection", DEFAULT_AFFECTION))
     applied_delta = after_affection - before_affection
 

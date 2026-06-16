@@ -53,11 +53,6 @@ USER_SUMMARY_SCOPE_TOKENS = {"개인", "나", "dm", "user"}
 SUMMARY_SCOPE_TOKENS = ROOM_SUMMARY_SCOPE_TOKENS | USER_SUMMARY_SCOPE_TOKENS
 
 
-def normalize_natural_command(user_text: str, *, special_user: bool = False) -> str | None:
-    """Compatibility shim; natural-language command selection now lives in the LLM tool planner."""
-    return None
-
-
 def is_special_only_command(user_text: str) -> bool:
     return any(matches_command(user_text, command) for command in SPECIAL_ONLY_COMMAND_PREFIXES)
 

@@ -96,6 +96,37 @@ def test_generate_reply_passes_room_reasoning_effort(monkeypatch, tmp_path):
     assert captured["reasoning"] == {"effort": "high"}
 
 
+def test_generate_reply_can_skip_keyword_affection_adjustment(monkeypatch, tmp_path):
+    _use_temp_memory(monkeypatch, tmp_path)
+    storage.save_memory({
+        "123456789012345": {
+            "name": "Alice",
+            "nickname": "Alice",
+            "affection": 52,
+            "history": [],
+        },
+    })
+    monkeypatch.setattr(
+        ai.client_openai.responses,
+        "create",
+        lambda **kwargs: SimpleNamespace(output_text="나도 고마워."),
+    )
+
+    asyncio.run(
+        ai.generate_reply(
+            "고마워",
+            user_id=123456789012345,
+            display_name="Alice",
+            room_key="room-1",
+            apply_affection_adjustment=False,
+        )
+    )
+
+    data = storage.load_memory()["123456789012345"]
+    assert data["affection"] == 52
+    assert data["history"][1]["affection_delta"] == 0
+
+
 def test_generate_silent_auto_command_does_not_persist_hidden_reply(monkeypatch, tmp_path):
     _use_temp_memory(monkeypatch, tmp_path)
     storage.save_memory({
@@ -146,7 +177,6 @@ def test_generate_silent_auto_command_does_not_persist_hidden_reply(monkeypatch,
 
 def test_plan_tool_use_returns_structured_command_plan(monkeypatch, tmp_path):
     _use_temp_memory(monkeypatch, tmp_path)
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     captured = {}
 
     def fake_create(**kwargs):
@@ -178,9 +208,32 @@ def test_plan_tool_use_returns_structured_command_plan(monkeypatch, tmp_path):
     assert "반디의 성격" in captured["input"][0]["content"]
 
 
+def test_plan_tool_use_ignores_low_confidence_chat_plan(monkeypatch, tmp_path):
+    _use_temp_memory(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        ai.client_openai.responses,
+        "create",
+        lambda **kwargs: SimpleNamespace(
+            output_text='{"mode":"chat","commands":[],"response":"","confidence":0.0}'
+        ),
+    )
+
+    plan = asyncio.run(
+        ai.plan_tool_use(
+            "프로필 보여줘",
+            user_id=123,
+            display_name="Alice",
+            room_key="room-1",
+            special_user=False,
+        )
+    )
+
+    assert plan is None
+
+
 def test_plan_state_updates_returns_allowed_hidden_commands(monkeypatch, tmp_path):
     _use_temp_memory(monkeypatch, tmp_path)
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     target_id = 123456789012345
     storage.save_memory({
         str(target_id): {"name": "Alice", "nickname": "개척자", "affection": 48, "history": []},
@@ -194,6 +247,9 @@ def test_plan_state_updates_returns_allowed_hidden_commands(monkeypatch, tmp_pat
                 '{"mode":"command","commands":['
                 '"/뇌추가 123456789012345 범주=preference 중요도=중간 사용자는 짧은 답을 선호한다.",'
                 '"/호감도증감 123456789012345 2",'
+                '"/뇌추가 123456789012345 범주=project 중요도=낮음 사용자는 테스트를 좋아한다.",'
+                '"/호감도증감 999999999999999 -5",'
+                '"/호감도증감 123456789012345 9",'
                 '"/주사위 1 6"],"response":"","confidence":0.88}'
             )
         )

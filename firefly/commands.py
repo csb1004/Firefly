@@ -1,4 +1,5 @@
 from collections import deque
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 import discord
@@ -6,8 +7,6 @@ import discord
 from .affection import change_user_affection, set_user_affection
 from .admin_status import build_admin_status_text
 from .ai import (
-    MAX_STATE_UPDATE_COMMANDS,
-    STATE_UPDATE_COMMAND_PREFIXES,
     generate_reply,
     generate_silent_auto_command,
     plan_state_updates,
@@ -64,10 +63,16 @@ from .storage import (
     update_room_data,
     update_user_data,
 )
+from .state_updates import (
+    filter_hidden_state_update_commands,
+    has_hidden_affection_update,
+    is_state_update_command,
+)
 from .text_utils import clamp_text, get_current_time_text, parse_last_int_arg
 from .tool_planner import PLAN_CHAT, PLAN_CLARIFY, PLAN_COMMAND, PLAN_COMMAND_THEN_REPLY, PLAN_REJECT, ToolPlan
 from .user_targets import resolve_explicit_user_target, target_mentions
 from .utility_commands import (
+    CommandAdapterRequest,
     CommandUsageError,
     MAX_ADAPTER_COMMANDS,
     format_dice_result,
@@ -171,11 +176,6 @@ ADAPTER_BLOCKED_COMMAND_PREFIXES = (
     "/role",
 )
 SILENT_GROUP_MEMORY_COMMAND_PREFIXES = ("/뇌추가", "/뇌삭제", "/호감도증감")
-
-
-def _planner_adapter_raw_text(commands: tuple[str, ...], prompt: str) -> str:
-    separator = " || " if any("|" in command for command in commands) else " | "
-    return f"{' && '.join(commands)}{separator}{prompt}"
 
 
 def _resolve_recording_summary_filename(filename: str) -> str | None:
@@ -297,11 +297,17 @@ def _split_state_update_commands(commands: tuple[str, ...]) -> tuple[tuple[str, 
     state_updates = []
     visible_commands = []
     for command in commands:
-        if _matches_any_command_prefix(command, STATE_UPDATE_COMMAND_PREFIXES):
+        if is_state_update_command(command):
             state_updates.append(command)
         else:
             visible_commands.append(command)
     return tuple(state_updates), tuple(visible_commands)
+
+
+@dataclass(frozen=True)
+class _StateUpdateExecutionResult:
+    ran: bool = False
+    affection_updated: bool = False
 
 
 def _adapter_blocked_message(command_text: str) -> str:
@@ -444,14 +450,13 @@ async def _run_silent_state_update_commands(
     room_key: str,
     room_data: dict,
     client: discord.Client,
-) -> bool:
-    runnable_commands = [
-        command
-        for command in commands
-        if _matches_any_command_prefix(command, STATE_UPDATE_COMMAND_PREFIXES)
-    ]
+) -> _StateUpdateExecutionResult:
+    runnable_commands = filter_hidden_state_update_commands(
+        commands,
+        user_id=message.author.id,
+    )
     if not runnable_commands:
-        return False
+        return _StateUpdateExecutionResult()
 
     capture_channel = _CommandCaptureChannel(message.channel, forward=False)
     capture_message = _CommandCaptureMessage(
@@ -461,7 +466,7 @@ async def _run_silent_state_update_commands(
         mentions=[],
     )
     state_user_data = get_user_data(SPECIAL_USER_ID, SPECIAL_USER_NAME)
-    for command_text in runnable_commands[:MAX_STATE_UPDATE_COMMANDS]:
+    for command_text in runnable_commands:
         await handle_mentioned_message(
             message=capture_message,
             user_text=command_text,
@@ -470,7 +475,10 @@ async def _run_silent_state_update_commands(
             room_data=room_data,
             client=client,
         )
-    return True
+    return _StateUpdateExecutionResult(
+        ran=True,
+        affection_updated=has_hidden_affection_update(runnable_commands, user_id=message.author.id),
+    )
 
 
 async def handle_silent_group_memory_update(
@@ -818,6 +826,28 @@ async def _run_command_adapter(
         await message.channel.send(str(exc))
         return
 
+    await _run_command_adapter_request(
+        message=message,
+        request=request,
+        user_data=user_data,
+        room_key=room_key,
+        room_data=room_data,
+        client=client,
+        force_web_search=force_web_search,
+    )
+
+
+async def _run_command_adapter_request(
+    *,
+    message: discord.Message,
+    request: CommandAdapterRequest,
+    user_data: dict,
+    room_key: str,
+    room_data: dict,
+    client: discord.Client,
+    force_web_search: bool = False,
+) -> None:
+
     for command_text in request.command_texts:
         if not _adapter_command_allowed(command_text):
             await message.channel.send(_adapter_blocked_message(command_text))
@@ -926,17 +956,7 @@ async def _run_tool_plan(
         return False
 
     commands = tuple(command for command in plan.commands if command.startswith("/"))
-    state_update_commands, visible_commands = _split_state_update_commands(commands)
-    if state_update_commands:
-        await _run_silent_state_update_commands(
-            commands=state_update_commands,
-            message=message,
-            room_key=room_key,
-            room_data=room_data,
-            client=client,
-        )
-
-    commands = visible_commands
+    _, commands = _split_state_update_commands(commands)
     if not commands:
         return False
     if len(commands) > MAX_ADAPTER_COMMANDS:
@@ -944,9 +964,9 @@ async def _run_tool_plan(
         return True
 
     if plan.mode == PLAN_COMMAND_THEN_REPLY:
-        await _run_command_adapter(
+        await _run_command_adapter_request(
             message=message,
-            raw_text=_planner_adapter_raw_text(commands, user_text),
+            request=CommandAdapterRequest(command_texts=commands, prompt=user_text),
             user_data=user_data,
             room_key=room_key,
             room_data=room_data,
@@ -978,7 +998,7 @@ async def handle_mentioned_message(
     author_id = message.author.id
     special_user = is_special_user(author_id)
     planner_chat_only = False
-    state_updates_already_run = False
+    state_affection_updated = False
 
     if not attachment_context and not user_text.strip().startswith("/"):
         display_name = getattr(message.author, "display_name", message.author.name)
@@ -992,28 +1012,6 @@ async def handle_mentioned_message(
         if tool_plan is not None:
             if tool_plan.mode == PLAN_CHAT:
                 planner_chat_only = True
-            elif tool_plan.mode in {PLAN_COMMAND, PLAN_COMMAND_THEN_REPLY}:
-                state_update_commands, visible_commands = _split_state_update_commands(tool_plan.commands)
-                if state_update_commands and not visible_commands:
-                    await _run_silent_state_update_commands(
-                        commands=state_update_commands,
-                        message=message,
-                        room_key=room_key,
-                        room_data=room_data,
-                        client=client,
-                    )
-                    planner_chat_only = True
-                    state_updates_already_run = True
-                elif await _run_tool_plan(
-                    plan=tool_plan,
-                    message=message,
-                    user_text=user_text,
-                    user_data=user_data,
-                    room_key=room_key,
-                    room_data=room_data,
-                    client=client,
-                ):
-                    return
             elif await _run_tool_plan(
                 plan=tool_plan,
                 message=message,
@@ -1409,22 +1407,22 @@ async def handle_mentioned_message(
         return
 
     display_name = getattr(message.author, "display_name", message.author.name)
-    if not state_updates_already_run:
-        state_update_commands = await plan_state_updates(
-            user_message=user_text,
-            user_id=author_id,
-            display_name=display_name,
+    state_update_commands = await plan_state_updates(
+        user_message=user_text,
+        user_id=author_id,
+        display_name=display_name,
+        room_key=room_key,
+        attachment_context=attachment_context,
+    )
+    if state_update_commands:
+        state_update_result = await _run_silent_state_update_commands(
+            commands=state_update_commands,
+            message=message,
             room_key=room_key,
-            attachment_context=attachment_context,
+            room_data=room_data,
+            client=client,
         )
-        if state_update_commands:
-            await _run_silent_state_update_commands(
-                commands=state_update_commands,
-                message=message,
-                room_key=room_key,
-                room_data=room_data,
-                client=client,
-            )
+        state_affection_updated = state_update_result.affection_updated
 
     async with message.channel.typing():
         reply = await generate_reply(
@@ -1435,6 +1433,7 @@ async def handle_mentioned_message(
             attachment_context=attachment_context,
             allow_command_output=not planner_chat_only,
             persist_command_reply=False,
+            apply_affection_adjustment=not state_affection_updated,
         )
 
     if not planner_chat_only and await _run_auto_command_from_reply(

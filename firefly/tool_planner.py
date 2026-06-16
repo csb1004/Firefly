@@ -1,7 +1,6 @@
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
 
 
 PLAN_CHAT = "chat"
@@ -78,6 +77,8 @@ def parse_tool_plan(text: str) -> ToolPlan | None:
     except (TypeError, ValueError):
         confidence = 0.0
 
+    if mode == PLAN_CHAT and normalized_commands:
+        return None
     if mode in {PLAN_COMMAND, PLAN_COMMAND_THEN_REPLY} and not normalized_commands:
         return None
     if mode in {PLAN_CLARIFY, PLAN_REJECT} and not response:
@@ -89,12 +90,3 @@ def parse_tool_plan(text: str) -> ToolPlan | None:
         response=response[:1900],
         confidence=max(0.0, min(1.0, confidence)),
     )
-
-
-def serialize_tool_plan(plan: ToolPlan) -> dict[str, Any]:
-    return {
-        "mode": plan.mode,
-        "commands": list(plan.commands),
-        "response": plan.response,
-        "confidence": plan.confidence,
-    }

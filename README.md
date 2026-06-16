@@ -76,7 +76,7 @@ Optional:
 - `/호칭 @유저 새호칭` or `/호칭 기존호칭 새호칭`: special users can change another user's nickname by mention, Discord ID, or a unique stored nickname.
 - `/메모리초기화 [대화/방/투표/뉴스] 확인`: special-user-only targeted reset for one split memory file.
 - Voice recording commands accept list indexes such as `1번`, `#1`, or `index:1` wherever a recording filename is accepted.
-- Natural messages are first checked by the tool planner instead of local keyword routing. If it selects `command`, commands run directly; if it selects `command_then_reply`, command results are fed into Bandi's reply; if it selects `chat`, hidden brain/affection updates run first and then the normal Bandi persona answers with command output disabled for that turn.
+- Natural messages are first checked by the tool planner instead of local keyword routing. If it selects `command`, commands run directly; if it selects `command_then_reply`, command results are fed into Bandi's reply; if it selects `chat`, hidden brain/affection updates run first and then the normal Bandi persona answers with command output disabled for that turn. Hidden state updates are only accepted for the current speaker and are validated before any special-user command path runs.
 
 ## Deployment
 
