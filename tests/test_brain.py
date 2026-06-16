@@ -63,6 +63,46 @@ def test_repeated_short_term_memory_promotes_to_long_term(monkeypatch):
     assert user_data["brain_notes"] == ["사용자는 긴 설명보다 실행 가능한 요약을 좋아한다."]
 
 
+def test_similar_short_term_memory_merges_raw_samples_and_frequency(monkeypatch):
+    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
+    user_data = {}
+
+    first = brain.add_brain_note(user_data, "범주=preference 사용자는 긴 설명보다 실행 가능한 요약을 좋아한다.")
+    second = brain.add_brain_note(user_data, "범주=preference 사용자는 실행 가능한 요약 답변을 선호한다.")
+
+    assert first.status == "short_term"
+    assert second.status == "short_term"
+    assert len(user_data["short_term_memory"]) == 1
+    memory = user_data["short_term_memory"][0]
+    assert memory["frequency_score"] == 2
+    assert memory["memory_category"] == "preference"
+    assert "실행" in memory["content"]
+    assert "요약" in memory["content"]
+    assert len(memory["raw_samples"]) == 2
+    assert memory["raw_samples"][0]["content"] == "사용자는 긴 설명보다 실행 가능한 요약을 좋아한다."
+    assert memory["raw_samples"][1]["content"] == "사용자는 실행 가능한 요약 답변을 선호한다."
+
+
+def test_similar_short_term_memory_promotes_abstract_long_term_and_clears_short_term(monkeypatch):
+    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
+    user_data = {}
+
+    brain.add_brain_note(user_data, "범주=preference 사용자는 긴 설명보다 실행 가능한 요약을 좋아한다.")
+    brain.add_brain_note(user_data, "범주=preference 사용자는 실행 가능한 요약 답변을 선호한다.")
+    result = brain.add_brain_note(user_data, "범주=preference 사용자는 실행 가능한 요약 중심 답변을 자주 원한다.")
+
+    assert result.status == "promoted"
+    assert user_data["short_term_memory"] == []
+    assert len(user_data["long_term_memory"]) == 1
+    memory = user_data["long_term_memory"][0]
+    assert memory["memory_type"] == "long_term"
+    assert memory["frequency_score"] == brain.PROMOTION_FREQUENCY_THRESHOLD
+    assert "실행" in memory["content"]
+    assert "요약" in memory["content"]
+    assert len(memory["raw_samples"]) == 3
+    assert user_data["brain_notes"] == [memory["content"]]
+
+
 def test_high_importance_candidate_promotes_immediately(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {}
@@ -187,7 +227,8 @@ def test_established_profiles_do_not_store_routine_affection_as_new_memory(monke
 
     assert result.status == "ignored"
     assert user_data["short_term_memory"] == []
-    assert len(user_data["long_term_memory"]) == 8
+    assert len(user_data["long_term_memory"]) == 1
+    assert user_data["long_term_memory"][0]["frequency_score"] == 8
 
 
 def test_abrupt_relationship_change_promotes_even_for_dense_profiles(monkeypatch):

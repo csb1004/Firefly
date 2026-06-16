@@ -57,6 +57,7 @@ Optional:
 - `prompt.txt`, `prompt_special.txt`, and `prompt_news.txt` define bot behavior and should be reviewed carefully before changing.
 - `prompt_tool_planner.txt` is intentionally not a persona prompt. It only decides whether to return `chat`, `command`, `command_then_reply`, `clarify`, or `reject`.
 - `prompt_state_updater.txt` is a separate internal state prompt. For non-command chat it may choose hidden `/뇌추가` and `/호감도증감` updates before the normal Bandi persona replies.
+- Short-term memory stores an abstract repeatable memory plus hidden raw samples. Similar short-term signals merge into one candidate by category/token overlap, increase `frequency_score`, and promote to long-term memory when the promotion threshold is reached; promoted entries are removed from short-term memory.
 - Runtime memory is split by concern and stored next to `MEMORY_FILE`: `conversation_memory.json`, `room_memory.json`, `poll_memory.json`, and `news_memory.json`. Existing legacy `memory.json` data is still read as a fallback until split files exist.
 - `memory.json`, split memory files, and `data/` are local runtime state and are ignored by git.
 - Voice recordings are stored under `data/voice_records/` by default.

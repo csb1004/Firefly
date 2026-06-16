@@ -13,6 +13,7 @@ MEMORY_STATS_KEY = "memory_stats"
 MEMORY_SCHEMA_VERSION = 1
 MAX_BRAIN_NOTES = 50
 MAX_BRAIN_NOTE_CHARS = 400
+MAX_RAW_MEMORY_SAMPLES = 5
 MAX_SHORT_TERM_MEMORIES = 30
 MAX_LONG_TERM_MEMORIES = 50
 SHORT_TERM_MEMORY_TTL_DAYS = 14
@@ -22,6 +23,8 @@ SPARSE_PROFILE_MEMORY_LIMIT = 2
 DENSE_MEMORY_LIMIT = 8
 ABRUPT_RELATIONSHIP_INTENSITY_THRESHOLD = 0.9
 DEFAULT_IMPORTANCE_SCORE = 0.55
+MEMORY_SIMILARITY_THRESHOLD = 0.36
+MEMORY_SIMILARITY_MIN_SHARED_TOKENS = 2
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -48,6 +51,33 @@ ROUTINE_AFFECTION_KEYWORDS = (
     "좋아해", "사랑해", "애정", "호감", "보고 싶", "고마워", "고맙",
 )
 RELATIONSHIP_TARGET_KEYWORDS = ("반디", "나를", "나에게", "내게", "봇에게")
+MEMORY_TOKEN_STOPWORDS = {
+    "사용자",
+    "사용자는",
+    "사용자가",
+    "사용자를",
+    "사용자의",
+    "최근",
+    "요즘",
+    "오늘",
+    "이번",
+    "방금",
+    "자주",
+    "계속",
+    "반복해서",
+    "매우",
+    "정말",
+    "조금",
+    "관련",
+    "경향",
+    "보인다",
+    "한다",
+    "했다",
+    "있다",
+    "것을",
+    "것",
+    "대한",
+}
 
 
 @dataclass
@@ -82,6 +112,113 @@ def _normalize_content(content: object) -> str:
 
 def _content_key(content: object) -> str:
     return re.sub(r"\s+", " ", str(content or "").strip()).casefold()
+
+
+def _token_stem(token: str) -> str:
+    for suffix in (
+        "하는",
+        "한다",
+        "했다",
+        "하고",
+        "하기",
+        "하게",
+        "되는",
+        "된다",
+        "됐다",
+        "보다",
+        "으로",
+        "에게",
+        "에서",
+        "에는",
+        "은",
+        "는",
+        "을",
+        "를",
+        "이",
+        "가",
+    ):
+        if len(token) > len(suffix) + 1 and token.endswith(suffix):
+            return token[: -len(suffix)]
+    return token
+
+
+def _memory_tokens(content: object) -> tuple[str, ...]:
+    tokens = []
+    seen = set()
+    for raw_token in re.findall(r"[가-힣A-Za-z0-9]{2,}", str(content or "").casefold()):
+        token = _token_stem(raw_token)
+        if len(token) < 2 or token in MEMORY_TOKEN_STOPWORDS:
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        tokens.append(token)
+    return tuple(tokens)
+
+
+def _canonical_memory_key(content: object, metadata: dict | None = None) -> str:
+    category = str((metadata or {}).get("memory_category") or "general")
+    tokens = sorted(_memory_tokens(content))
+    if not tokens:
+        return f"{category}:{_content_key(content)}"
+    return f"{category}:{'|'.join(tokens[:12])}"
+
+
+def _raw_memory_sample(content: str, timestamp: str) -> dict:
+    return {
+        "content": _normalize_content(content),
+        "created_at": timestamp,
+    }
+
+
+def _normalize_raw_samples(raw_samples: object, *, fallback_content: str, fallback_time: str) -> list[dict]:
+    normalized = []
+    if isinstance(raw_samples, str):
+        raw_samples = [raw_samples]
+    if not isinstance(raw_samples, list):
+        raw_samples = []
+
+    for raw_sample in raw_samples:
+        if isinstance(raw_sample, dict):
+            content = _normalize_content(raw_sample.get("content"))
+            created_at = str(raw_sample.get("created_at") or fallback_time)
+        else:
+            content = _normalize_content(raw_sample)
+            created_at = fallback_time
+        if content:
+            normalized.append(_raw_memory_sample(content, created_at))
+
+    if not normalized and fallback_content:
+        normalized.append(_raw_memory_sample(fallback_content, fallback_time))
+
+    return normalized[-MAX_RAW_MEMORY_SAMPLES:]
+
+
+def _merge_raw_samples(existing_samples: object, new_samples: object) -> list[dict]:
+    merged = []
+    seen = set()
+    for sample in _normalize_raw_samples(
+        existing_samples,
+        fallback_content="",
+        fallback_time=_now_text(),
+    ) + _normalize_raw_samples(
+        new_samples,
+        fallback_content="",
+        fallback_time=_now_text(),
+    ):
+        key = _content_key(sample.get("content"))
+        if not key or key in seen:
+            continue
+        merged.append(sample)
+        seen.add(key)
+    return merged[-MAX_RAW_MEMORY_SAMPLES:]
+
+
+def _append_raw_sample(entry: dict, raw_content: str, now: str) -> None:
+    entry["raw_samples"] = _merge_raw_samples(
+        entry.get("raw_samples", []),
+        [_raw_memory_sample(raw_content, now)],
+    )
 
 
 def _parse_timestamp(value: object) -> datetime | None:
@@ -314,6 +451,7 @@ def _new_memory_entry(
     *,
     memory_type: str,
     content: str,
+    raw_content: str | None = None,
     importance_score: float = DEFAULT_IMPORTANCE_SCORE,
     frequency_score: int = 1,
     now: str | None = None,
@@ -329,6 +467,8 @@ def _new_memory_entry(
         "memory_id": _memory_id(memory_type, content, timestamp),
         "memory_type": memory_type,
         "content": content,
+        "canonical_key": _canonical_memory_key(content, classified),
+        "raw_samples": [_raw_memory_sample(raw_content or content, timestamp)],
         "importance_score": classified["importance_score"],
         "frequency_score": _to_frequency(frequency_score),
         "memory_category": classified["memory_category"],
@@ -376,6 +516,11 @@ def _normalize_memory_entry(raw_entry: object, memory_type: str) -> dict | None:
         "memory_id": str(raw_entry.get("memory_id") or _memory_id(memory_type, content, created_at)),
         "memory_type": memory_type,
         "content": content,
+        "raw_samples": _normalize_raw_samples(
+            raw_entry.get("raw_samples"),
+            fallback_content=content,
+            fallback_time=created_at,
+        ),
         "importance_score": _to_score(raw_entry.get("importance_score"), DEFAULT_IMPORTANCE_SCORE),
         "frequency_score": _to_frequency(raw_entry.get("frequency_score")),
         "memory_category": _normalize_category(raw_entry.get("memory_category")),
@@ -387,6 +532,7 @@ def _normalize_memory_entry(raw_entry: object, memory_type: str) -> dict | None:
     }
     classified = _classify_memory_content(content, entry)
     entry.update(classified)
+    entry["canonical_key"] = str(raw_entry.get("canonical_key") or _canonical_memory_key(content, entry))
     if memory_type == "long_term":
         entry["promotion_reason"] = str(raw_entry.get("promotion_reason") or "normalized long-term memory")
         entry["promoted_at"] = str(raw_entry.get("promoted_at") or created_at)
@@ -397,7 +543,7 @@ def _dedupe_memories(entries: list[dict]) -> list[dict]:
     deduped = {}
     order = []
     for entry in entries:
-        key = _content_key(entry.get("content"))
+        key = str(entry.get("canonical_key") or _canonical_memory_key(entry.get("content"), entry))
         if not key:
             continue
         if key not in deduped:
@@ -405,13 +551,17 @@ def _dedupe_memories(entries: list[dict]) -> list[dict]:
             order.append(key)
             continue
         existing = deduped[key]
-        existing["frequency_score"] = max(
-            _to_frequency(existing.get("frequency_score")),
-            _to_frequency(entry.get("frequency_score")),
+        existing["frequency_score"] = (
+            _to_frequency(existing.get("frequency_score"))
+            + _to_frequency(entry.get("frequency_score"))
         )
         existing["importance_score"] = max(
             _to_score(existing.get("importance_score"), DEFAULT_IMPORTANCE_SCORE),
             _to_score(entry.get("importance_score"), DEFAULT_IMPORTANCE_SCORE),
+        )
+        existing["raw_samples"] = _merge_raw_samples(
+            existing.get("raw_samples", []),
+            entry.get("raw_samples", []),
         )
         existing["updated_at"] = max(str(existing.get("updated_at", "")), str(entry.get("updated_at", "")))
         existing["last_used_at"] = max(str(existing.get("last_used_at", "")), str(entry.get("last_used_at", "")))
@@ -433,15 +583,88 @@ def _merge_memory_metadata(entry: dict, metadata: dict) -> None:
         entry["memory_category"] = classified["memory_category"]
     entry["affective_score"] = classified["affective_score"]
     entry["distance_score"] = classified["distance_score"]
+    entry["canonical_key"] = _canonical_memory_key(entry.get("content"), entry)
+
+
+def _memory_similarity(entry: dict, content: str, metadata: dict) -> float:
+    if _content_key(entry.get("content")) == _content_key(content):
+        return 1.0
+
+    entry_category = str(entry.get("memory_category") or "general")
+    candidate_category = str(metadata.get("memory_category") or "general")
+    if entry_category != candidate_category:
+        return 0.0
+
+    entry_tokens = set(_memory_tokens(entry.get("content")))
+    for sample in entry.get("raw_samples", []):
+        if isinstance(sample, dict):
+            entry_tokens.update(_memory_tokens(sample.get("content")))
+        else:
+            entry_tokens.update(_memory_tokens(sample))
+
+    candidate_tokens = set(_memory_tokens(content))
+    if not entry_tokens or not candidate_tokens:
+        return 0.0
+
+    shared = entry_tokens & candidate_tokens
+    if len(shared) < MEMORY_SIMILARITY_MIN_SHARED_TOKENS:
+        return 0.0
+    return len(shared) / len(entry_tokens | candidate_tokens)
+
+
+def _find_similar_memory(entries: list[dict], content: str, metadata: dict) -> dict | None:
+    best_entry = None
+    best_score = 0.0
+    for entry in entries:
+        score = _memory_similarity(entry, content, metadata)
+        if score > best_score:
+            best_score = score
+            best_entry = entry
+    if best_score >= MEMORY_SIMILARITY_THRESHOLD:
+        return best_entry
+    return None
+
+
+def _abstract_repeated_memory(existing_content: str, new_content: str, metadata: dict) -> str:
+    if _content_key(existing_content) == _content_key(new_content):
+        return existing_content
+
+    existing_tokens = _memory_tokens(existing_content)
+    new_tokens = set(_memory_tokens(new_content))
+    shared_tokens = [token for token in existing_tokens if token in new_tokens]
+    if not shared_tokens:
+        return existing_content
+
+    focus = " ".join(shared_tokens[:6])
+    category = metadata.get("memory_category")
+    if category == "preference":
+        return _normalize_content(f"사용자는 {focus} 관련 방식을 선호하는 경향이 있다.")
+    if category == "project":
+        return _normalize_content(f"사용자는 {focus} 관련 작업 신호를 반복해서 보인다.")
+    if category == "relationship":
+        return _normalize_content(f"사용자는 {focus} 관련 관계 신호를 반복해서 보인다.")
+    return _normalize_content(f"사용자는 {focus} 관련 신호를 반복해서 보인다.")
+
+
+def _merge_repeated_memory(entry: dict, content: str, metadata: dict, now: str) -> None:
+    entry["frequency_score"] = _to_frequency(entry.get("frequency_score")) + 1
+    entry["content"] = _abstract_repeated_memory(str(entry.get("content", "")), content, metadata)
+    _merge_memory_metadata(entry, metadata)
+    _append_raw_sample(entry, content, now)
+    entry["updated_at"] = now
+    entry["last_used_at"] = now
 
 
 def _memory_count(user_data: dict) -> int:
-    return len(user_data.get(SHORT_TERM_MEMORY_KEY, [])) + len(user_data.get(LONG_TERM_MEMORY_KEY, []))
+    return sum(
+        _to_frequency(entry.get("frequency_score"))
+        for entry in user_data.get(SHORT_TERM_MEMORY_KEY, []) + user_data.get(LONG_TERM_MEMORY_KEY, [])
+    )
 
 
 def _relationship_memory_count(user_data: dict) -> int:
     return sum(
-        1
+        _to_frequency(entry.get("frequency_score"))
         for entry in user_data.get(SHORT_TERM_MEMORY_KEY, []) + user_data.get(LONG_TERM_MEMORY_KEY, [])
         if entry.get("memory_category") == "relationship"
     )
@@ -534,15 +757,11 @@ class ShortTermMemoryManager:
         if not _should_store_candidate(user_data, content, metadata):
             return MemoryActionResult(status="ignored", index=0, entry={})
 
-        content_key = _content_key(content)
         importance_score = _to_score(metadata.get("importance_score"), DEFAULT_IMPORTANCE_SCORE)
 
-        existing_long_term = _find_memory_by_content(user_data[LONG_TERM_MEMORY_KEY], content_key)
+        existing_long_term = _find_similar_memory(user_data[LONG_TERM_MEMORY_KEY], content, metadata)
         if existing_long_term is not None:
-            existing_long_term["frequency_score"] = _to_frequency(existing_long_term.get("frequency_score")) + 1
-            _merge_memory_metadata(existing_long_term, metadata)
-            existing_long_term["updated_at"] = now
-            existing_long_term["last_used_at"] = now
+            _merge_repeated_memory(existing_long_term, content, metadata, now)
             _sync_brain_notes(user_data)
             return MemoryActionResult(
                 status="merged_long_term",
@@ -550,17 +769,15 @@ class ShortTermMemoryManager:
                 entry=existing_long_term,
             )
 
-        existing_short_term = _find_memory_by_content(user_data[SHORT_TERM_MEMORY_KEY], content_key)
+        existing_short_term = _find_similar_memory(user_data[SHORT_TERM_MEMORY_KEY], content, metadata)
         if existing_short_term is not None:
-            existing_short_term["frequency_score"] = _to_frequency(existing_short_term.get("frequency_score")) + 1
-            _merge_memory_metadata(existing_short_term, metadata)
-            existing_short_term["updated_at"] = now
-            existing_short_term["last_used_at"] = now
+            _merge_repeated_memory(existing_short_term, content, metadata, now)
             return MemoryManager.evaluate_candidate(user_data, existing_short_term)
 
         entry = _new_memory_entry(
             memory_type="short_term",
             content=content,
+            raw_content=content,
             importance_score=importance_score,
             now=now,
             metadata=metadata,
@@ -662,13 +879,6 @@ class MemoryManager:
             return LongTermMemoryManager.promote(user_data, entry, reason)
         index = user_data[SHORT_TERM_MEMORY_KEY].index(entry) + 1
         return MemoryActionResult(status="short_term", index=index, entry=entry)
-
-
-def _find_memory_by_content(entries: list[dict], content_key: str) -> dict | None:
-    for entry in entries:
-        if _content_key(entry.get("content")) == content_key:
-            return entry
-    return None
 
 
 def _normalize_legacy_brain_notes(raw_notes: object) -> list[str]:
