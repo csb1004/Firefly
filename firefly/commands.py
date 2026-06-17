@@ -178,6 +178,7 @@ ADAPTER_BLOCKED_COMMAND_PREFIXES = (
     "/역할",
     "/role",
 )
+PLANNER_COMMAND_ADAPTER_ALIASES = ("/실행", "/명령답변")
 SILENT_GROUP_MEMORY_COMMAND_PREFIXES = ("/뇌추가", "/뇌삭제", "/호감도증감")
 
 
@@ -339,6 +340,34 @@ def _split_state_update_commands(commands: tuple[str, ...]) -> tuple[tuple[str, 
         else:
             visible_commands.append(command)
     return tuple(state_updates), tuple(visible_commands)
+
+
+def _unwrap_planner_adapter_commands(commands: tuple[str, ...]) -> tuple[tuple[str, ...], bool]:
+    unwrapped_commands = []
+    used_adapter = False
+    for command_text in commands:
+        adapter_alias = next(
+            (
+                alias
+                for alias in PLANNER_COMMAND_ADAPTER_ALIASES
+                if matches_command(command_text, alias)
+            ),
+            None,
+        )
+        if adapter_alias is None:
+            unwrapped_commands.append(command_text)
+            continue
+
+        try:
+            request = parse_command_adapter_args(_command_arg(command_text, adapter_alias))
+        except CommandUsageError:
+            unwrapped_commands.append(command_text)
+            continue
+
+        unwrapped_commands.extend(request.command_texts)
+        used_adapter = True
+
+    return tuple(unwrapped_commands), used_adapter
 
 
 @dataclass(frozen=True)
@@ -997,13 +1026,15 @@ async def _run_tool_plan(
 
     commands = tuple(command for command in plan.commands if command.startswith("/"))
     _, commands = _split_state_update_commands(commands)
+    commands, used_adapter = _unwrap_planner_adapter_commands(commands)
+    _, commands = _split_state_update_commands(commands)
     if not commands:
         return False
     if len(commands) > MAX_ADAPTER_COMMANDS:
         await message.channel.send(ADAPTER_CHAIN_LIMIT_MESSAGE)
         return True
 
-    if plan.mode == PLAN_COMMAND_THEN_REPLY:
+    if plan.mode == PLAN_COMMAND_THEN_REPLY or used_adapter:
         await _run_command_adapter_request(
             message=message,
             request=CommandAdapterRequest(command_texts=commands, prompt=user_text),

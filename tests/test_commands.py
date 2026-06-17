@@ -1251,6 +1251,84 @@ def test_tool_planner_command_then_reply_keeps_prompt_with_double_pipe(monkeypat
     assert "[1] 명령어: /투표 새 숙소 | 항목수=2 | 더 화이트 | 힐스토리 | 1주일" in reply_kwargs["extra_context"]
 
 
+def test_tool_planner_unwraps_adapter_poll_command_with_separate_explanation(monkeypatch):
+    sent_messages = []
+    poll_commands = []
+    reply_kwargs = {}
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    prompt = (
+        "투표를 하나 만들어줬으면 하는데, 여행 장소 투표야. 항목은 가평 호명나루165풀빌라, "
+        "가평 풀플러스 풀빌라이고, 기한은 3일 정도로 해줘. 그리고 아래에 추가로 항목에 "
+        "대한 설명을 투표에 적지 말고 따로 적어줘."
+    )
+
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(
+            mode=commands.PLAN_COMMAND_THEN_REPLY,
+            commands=(
+                "/실행 /투표 여행 장소 | 항목수=2 | 가평 호명나루165풀빌라 | "
+                "가평 풀플러스 풀빌라 | 3일 || "
+                "투표 생성 뒤 각 항목 설명을 따로 적어줘",
+            ),
+            confidence=0.9,
+        )
+
+    async def fake_create_poll_from_command(message, user_text, client):
+        poll_commands.append(user_text)
+        await message.channel.send("투표 생성됨: 여행 장소")
+
+    async def fake_generate_reply(**kwargs):
+        reply_kwargs.update(kwargs)
+        return "호명나루는 노래방이 있고, 풀플러스는 같은 층으로 잡기 좋아."
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
+    monkeypatch.setattr(commands, "create_poll_from_command", fake_create_poll_from_command)
+    monkeypatch.setattr(commands, "generate_reply", fake_generate_reply)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=commands.SPECIAL_USER_ID, name="Owner", display_name="Owner"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text=prompt,
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert poll_commands == [
+        "/투표 여행 장소 | 항목수=2 | 가평 호명나루165풀빌라 | 가평 풀플러스 풀빌라 | 3일"
+    ]
+    assert sent_messages == [
+        "투표 생성됨: 여행 장소",
+        "호명나루는 노래방이 있고, 풀플러스는 같은 층으로 잡기 좋아.",
+    ]
+    assert reply_kwargs["user_message"] == prompt
+    assert "[1] 명령어: /투표 여행 장소 | 항목수=2 | 가평 호명나루165풀빌라 | 가평 풀플러스 풀빌라 | 3일" in reply_kwargs["extra_context"]
+
+
 def test_tool_planner_clarify_sends_question_without_persona(monkeypatch):
     sent_messages = []
 

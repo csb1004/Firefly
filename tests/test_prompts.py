@@ -1,4 +1,5 @@
 from firefly import prompts
+from firefly.config import TOOL_PLANNER_PROMPT_FILE
 
 
 def test_build_model_history_keeps_recent_chat_messages_and_skips_commands(monkeypatch):
@@ -144,6 +145,7 @@ def test_special_command_guide_describes_poll_placeholders_before_examples():
     assert "{항목수}는 실제로 출력한 투표 항목의 개수와 반드시 같아야 한다." in guide
     assert "사용자가 \"3개 정도 골라서\"라고 하면 {항목수}=3으로 쓰고 {항목1}, {항목2}, {항목3}을 모두 채운다." in guide
     assert "반드시 `/실행 /투표 ... || {프롬프트}` 형식을 사용한다." in guide
+    assert "도구 선택기 JSON으로 계획할 때는 `/실행`을 `commands`에 넣지 말고" in guide
     assert "이유, 설명, 코멘트, 타이픈으로 붙인 문장은 투표 항목에 넣지 않는다." in guide
     assert "`2주`" in guide
     assert "`1달`" in guide
@@ -152,6 +154,13 @@ def test_special_command_guide_describes_poll_placeholders_before_examples():
     assert "특정 기능별 예외" in guide
     assert "자동 명령 실행 기록" in guide
     assert "마감만 새 값으로 바꾼" not in guide
+
+
+def test_tool_planner_prompt_unwraps_poll_explanation_intent():
+    guide = prompts.load_text_file(TOOL_PLANNER_PROMPT_FILE)
+
+    assert "JSON 계획 안에서는 `/실행`, `/명령답변` 같은 명령 어댑터를 `commands`에 넣지 않는다." in guide
+    assert "투표 항목에는 후보명만 넣고 링크, 가격, 장단점, 이유는 후속 답변에서 다룬다." in guide
 
 
 def test_general_command_guide_uses_placeholder_sections_for_common_commands():
