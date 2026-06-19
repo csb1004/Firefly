@@ -185,6 +185,7 @@ def test_general_command_guide_uses_placeholder_sections_for_common_commands():
     assert "{범위}는 `개인` 또는 `방` 중 하나다." in guide
     assert "{개수}는 생략할 수 있는 숫자이며, 사용자가 말한 요약할 최근 메시지 수다." in guide
     assert "9명 중 3명은 1팀, 6명은 2팀이면 `팀별=3,6`" in guide
+    assert "팀별=술래:3,숨는 사람:6" in guide
     assert "반디 자신의 이름이나 봇 이름 변경 요청에는 `/호칭`을 출력하지 않는다." in guide
     assert "주사위 결과로 이어서 계산하거나 판단해야 하면" in guide
     assert "뒤 명령어의 입력값이 앞 명령어 결과에 따라 달라지면" in guide

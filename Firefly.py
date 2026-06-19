@@ -234,7 +234,7 @@ async def dice_slash(interaction: discord.Interaction, start: int, end: int | No
     members="쉼표 또는 | 로 구분해요. 예: 철수, 영희, 민수, 수진",
     team_count="만들 팀 수. 팀당인원/팀별인원과 하나만 입력해요.",
     members_per_team="한 팀당 인원. 팀수/팀별인원과 하나만 입력해요.",
-    team_sizes="팀마다 인원 수. 예: 3,6 (1팀 3명, 2팀 6명)",
+    team_sizes="팀마다 인원 수와 이름. 예: 3,6 또는 술래:3, 숨는 사람:6",
 )
 async def team_split_slash(
     interaction: discord.Interaction,
@@ -243,9 +243,10 @@ async def team_split_slash(
     members_per_team: int | None = None,
     team_sizes: str | None = None,
 ):
+    normalized_team_sizes = team_sizes.strip() if team_sizes is not None else None
     provided_options = [
         option
-        for option in (team_count, members_per_team, team_sizes)
+        for option in (team_count, members_per_team, normalized_team_sizes)
         if option is not None and option != ""
     ]
     if len(provided_options) > 1:
@@ -260,7 +261,7 @@ async def team_split_slash(
     elif members_per_team is not None:
         option = f"팀당={members_per_team}"
     else:
-        option = f"팀별={''.join(team_sizes.split())}"
+        option = f"팀별={normalized_team_sizes}"
     await _run_text_command_slash(interaction, f"/팀나누기 {option} | {members}")
 
 

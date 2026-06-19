@@ -69,7 +69,7 @@ Optional:
 - `/봇상태`: special-user-only runtime status for memory, rooms, polls, news, and voice recordings.
 - `/프로필 [@유저]`: show a user's profile avatar, name, nickname, affection, and last-seen time.
 - `/주사위 [시작] [끝]`: roll one number inside the inclusive range, e.g. `/주사위 1 6`.
-- `/팀나누기 팀수=2 | Alice, Bob, Carol, Dana`: shuffle members into teams. Use `팀당=3` to split by team size or `팀별=3,6` to set each team's size explicitly.
+- `/팀나누기 팀수=2 | Alice, Bob, Carol, Dana`: shuffle members into teams. Use `팀당=3` to split by team size, `팀별=3,6` to set each team's size explicitly, or `팀별=tagger:3,hiders:6` to name those teams.
 - `/실행 [명령어들] | [프롬프트]`: run bot commands first, print their results, then answer with those results as context. Separate independent commands with `&&`; if a later command depends on an earlier result, `/실행` queues the next command after seeing that result. Use `||` as the prompt separator when any command contains `|`.
 - `/검색실행 [프롬프트]` or `/검색실행 [명령어들] || [프롬프트]`: special-user-only one-shot web search for the final reply without changing the room's persistent internet mode.
 - `/투표마감 [메시지ID/최근]`: special-user-only early close for a poll by message ID, replied poll, latest poll, or the only active poll in the current channel.

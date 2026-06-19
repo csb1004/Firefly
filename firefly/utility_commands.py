@@ -26,6 +26,7 @@ class TeamSplitRequest:
     members: tuple[str, ...]
     team_count: int
     team_sizes: tuple[int, ...] | None = None
+    team_names: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -91,27 +92,57 @@ def _parse_positive_int(value: str, label: str) -> int:
     return parsed
 
 
-def _parse_team_sizes(value: str) -> tuple[int, ...]:
-    parts = [part for part in re.split(r"[,/+:;]+", value) if part.strip()]
+def _parse_team_size_count(value: str) -> int:
+    return _parse_positive_int(value.strip().removesuffix("명"), "팀별 인원")
+
+
+def _parse_team_size_specs(value: str) -> tuple[tuple[int, ...], tuple[str, ...] | None]:
+    parts = [part for part in re.split(r"[,/+;]+", value) if part.strip()]
     if len(parts) < 2:
         raise CommandUsageError("팀별 인원은 2개 이상 적어줘. 예: `팀별=3,6`")
 
-    team_sizes = tuple(
-        _parse_positive_int(part.strip().removesuffix("명"), "팀별 인원")
-        for part in parts
-    )
-    return team_sizes
+    team_sizes = []
+    team_names = []
+    named_count = 0
+
+    for part in parts:
+        spec = part.strip()
+        if ":" in spec:
+            raw_name, raw_size = spec.rsplit(":", 1)
+            name = raw_name.strip()
+            if not name:
+                raise CommandUsageError("팀 이름은 비워둘 수 없어. 예: `팀별=술래:3,숨는 사람:6`")
+            team_names.append(name)
+            team_sizes.append(_parse_team_size_count(raw_size))
+            named_count += 1
+        else:
+            team_names.append("")
+            team_sizes.append(_parse_team_size_count(spec))
+
+    if named_count not in {0, len(team_sizes)}:
+        raise CommandUsageError(
+            "팀 이름을 쓰려면 모든 팀에 이름을 적어줘. 예: `팀별=술래:3,숨는 사람:6`"
+        )
+
+    names = tuple(team_names) if named_count else None
+    return tuple(team_sizes), names
 
 
-def _normalize_explicit_size_tokens(head: str) -> str:
+def _extract_explicit_size_option(
+    head: str,
+) -> tuple[str, tuple[int, ...] | None, tuple[str, ...] | None]:
     explicit_size_keys = "|".join(re.escape(key) for key in TEAM_EXPLICIT_SIZE_KEYS)
-    return re.sub(
-        rf"(^|\s)({explicit_size_keys})\s*=\s*([0-9명\s,/:;+]+)",
-        lambda match: (
-            f"{match.group(1)}{match.group(2)}={''.join(match.group(3).split())}"
-        ),
+    match = re.search(
+        rf"(^|\s)({explicit_size_keys})\s*=\s*(.+)$",
         head,
+        flags=re.IGNORECASE,
     )
+    if not match:
+        return head, None, None
+
+    remaining_head = head[:match.start()].strip()
+    team_sizes, team_names = _parse_team_size_specs(match.group(3).strip())
+    return remaining_head, team_sizes, team_names
 
 
 def _split_member_segments(segments: list[str]) -> list[str]:
@@ -135,12 +166,19 @@ def parse_team_split_args(raw_text: str) -> TeamSplitRequest:
         )
 
     pipe_parts = [part.strip() for part in text.split("|") if part.strip()]
-    head = _normalize_explicit_size_tokens(pipe_parts[0]) if pipe_parts else ""
+    head = pipe_parts[0] if pipe_parts else ""
     member_segments = pipe_parts[1:]
     mode = None
     value = None
     team_sizes = None
+    team_names = None
     residual_tokens = []
+
+    head, extracted_team_sizes, extracted_team_names = _extract_explicit_size_option(head)
+    if extracted_team_sizes is not None:
+        mode = "explicit_sizes"
+        team_sizes = extracted_team_sizes
+        team_names = extracted_team_names
 
     for token in head.split():
         normalized = token.strip()
@@ -165,7 +203,7 @@ def parse_team_split_args(raw_text: str) -> TeamSplitRequest:
                 if mode is not None and mode != "explicit_sizes":
                     raise CommandUsageError("`팀수`, `팀당`, `팀별`은 하나만 써줘.")
                 mode = "explicit_sizes"
-                team_sizes = _parse_team_sizes(raw_value)
+                team_sizes, team_names = _parse_team_size_specs(raw_value)
             else:
                 residual_tokens.append(normalized)
         elif mode is None and value is None and normalized.isdigit():
@@ -205,7 +243,12 @@ def parse_team_split_args(raw_text: str) -> TeamSplitRequest:
     if team_count > len(members):
         raise CommandUsageError("팀 수는 참가자 수보다 많을 수 없어.")
 
-    return TeamSplitRequest(members=tuple(members), team_count=team_count, team_sizes=team_sizes)
+    return TeamSplitRequest(
+        members=tuple(members),
+        team_count=team_count,
+        team_sizes=team_sizes,
+        team_names=team_names,
+    )
 
 
 def split_members_into_teams(
@@ -238,7 +281,8 @@ def format_team_split_result(request: TeamSplitRequest, teams: list[list[str]]) 
         f"팀 나누기 결과: 총 {len(request.members)}명, {request.team_count}팀",
     ]
     for index, team in enumerate(teams, start=1):
-        lines.append(f"{index}팀: {', '.join(team)}")
+        team_label = request.team_names[index - 1] if request.team_names else f"{index}팀"
+        lines.append(f"{team_label}: {', '.join(team)}")
     return "\n".join(lines)
 
 

@@ -58,6 +58,18 @@ def test_parse_team_split_args_supports_explicit_team_sizes():
 
     assert request.team_count == 2
     assert request.team_sizes == (3, 6)
+    assert request.team_names is None
+    assert request.members == ("철수", "영희", "민수", "수진", "지훈", "하늘", "바다", "노을", "별")
+
+
+def test_parse_team_split_args_supports_named_explicit_team_sizes():
+    request = parse_team_split_args(
+        "팀별=술래:3명, 숨는 사람:6명 | 철수, 영희, 민수, 수진, 지훈, 하늘, 바다, 노을, 별"
+    )
+
+    assert request.team_count == 2
+    assert request.team_sizes == (3, 6)
+    assert request.team_names == ("술래", "숨는 사람")
     assert request.members == ("철수", "영희", "민수", "수진", "지훈", "하늘", "바다", "노을", "별")
 
 
@@ -79,9 +91,26 @@ def test_split_members_into_explicit_team_sizes():
     ]
 
 
+def test_format_team_split_result_uses_explicit_team_names():
+    request = parse_team_split_args(
+        "팀별=술래:3,숨는 사람:6 | 철수, 영희, 민수, 수진, 지훈, 하늘, 바다, 노을, 별"
+    )
+    teams = split_members_into_teams(request, rng=FixedRng())
+
+    result = format_team_split_result(request, teams)
+
+    assert "술래: 별, 노을, 바다" in result
+    assert "숨는 사람: 하늘, 지훈, 수진, 민수, 영희, 철수" in result
+
+
 def test_parse_team_split_args_rejects_explicit_sizes_that_do_not_match_members():
     with pytest.raises(CommandUsageError):
         parse_team_split_args("팀별=3,5 | 철수, 영희, 민수, 수진, 지훈, 하늘, 바다, 노을, 별")
+
+
+def test_parse_team_split_args_rejects_partially_named_explicit_sizes():
+    with pytest.raises(CommandUsageError):
+        parse_team_split_args("팀별=술래:3,6 | 철수, 영희, 민수, 수진, 지훈, 하늘, 바다, 노을, 별")
 
 
 def test_parse_command_adapter_args_supports_single_separator():
