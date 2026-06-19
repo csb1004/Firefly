@@ -223,27 +223,44 @@ async def dice_slash(interaction: discord.Interaction, start: int, end: int | No
     await _run_text_command_slash(interaction, user_text)
 
 
-@tree.command(name="팀나누기", description="참가자를 섞어서 균형 있게 팀으로 나눠요.")
-@app_commands.rename(members="참가자", team_count="팀수", members_per_team="팀당인원")
+@tree.command(name="팀나누기", description="참가자를 섞어서 팀으로 나눠요.")
+@app_commands.rename(
+    members="참가자",
+    team_count="팀수",
+    members_per_team="팀당인원",
+    team_sizes="팀별인원",
+)
 @app_commands.describe(
     members="쉼표 또는 | 로 구분해요. 예: 철수, 영희, 민수, 수진",
-    team_count="만들 팀 수. 팀당인원과 둘 중 하나만 입력해요.",
-    members_per_team="한 팀당 인원. 팀수와 둘 중 하나만 입력해요.",
+    team_count="만들 팀 수. 팀당인원/팀별인원과 하나만 입력해요.",
+    members_per_team="한 팀당 인원. 팀수/팀별인원과 하나만 입력해요.",
+    team_sizes="팀마다 인원 수. 예: 3,6 (1팀 3명, 2팀 6명)",
 )
 async def team_split_slash(
     interaction: discord.Interaction,
     members: str,
     team_count: int | None = None,
     members_per_team: int | None = None,
+    team_sizes: str | None = None,
 ):
-    if team_count is not None and members_per_team is not None:
-        await interaction.response.send_message("…팀수와 팀당인원은 둘 중 하나만 적어줘.", ephemeral=True)
+    provided_options = [
+        option
+        for option in (team_count, members_per_team, team_sizes)
+        if option is not None and option != ""
+    ]
+    if len(provided_options) > 1:
+        await interaction.response.send_message("…팀수, 팀당인원, 팀별인원은 하나만 적어줘.", ephemeral=True)
         return
-    if team_count is None and members_per_team is None:
-        await interaction.response.send_message("…팀수나 팀당인원 중 하나는 필요해.", ephemeral=True)
+    if not provided_options:
+        await interaction.response.send_message("…팀수, 팀당인원, 팀별인원 중 하나는 필요해.", ephemeral=True)
         return
 
-    option = f"팀수={team_count}" if team_count is not None else f"팀당={members_per_team}"
+    if team_count is not None:
+        option = f"팀수={team_count}"
+    elif members_per_team is not None:
+        option = f"팀당={members_per_team}"
+    else:
+        option = f"팀별={''.join(team_sizes.split())}"
     await _run_text_command_slash(interaction, f"/팀나누기 {option} | {members}")
 
 

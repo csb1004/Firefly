@@ -25,6 +25,7 @@ class DiceResult:
 class TeamSplitRequest:
     members: tuple[str, ...]
     team_count: int
+    team_sizes: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,15 @@ class CommandAdapterRequest:
 
 TEAM_COUNT_KEYS = {"팀수", "팀", "조", "조수", "teams", "team_count"}
 TEAM_SIZE_KEYS = {"팀당", "팀원", "인원", "size", "team_size", "members_per_team"}
+TEAM_EXPLICIT_SIZE_KEYS = {
+    "팀별",
+    "팀별인원",
+    "팀별인원수",
+    "팀구성",
+    "구성",
+    "sizes",
+    "team_sizes",
+}
 MAX_DICE_ABS_VALUE = 1_000_000_000
 MAX_TEAM_MEMBERS = 100
 MAX_ADAPTER_COMMANDS = 5
@@ -81,6 +91,29 @@ def _parse_positive_int(value: str, label: str) -> int:
     return parsed
 
 
+def _parse_team_sizes(value: str) -> tuple[int, ...]:
+    parts = [part for part in re.split(r"[,/+:;]+", value) if part.strip()]
+    if len(parts) < 2:
+        raise CommandUsageError("팀별 인원은 2개 이상 적어줘. 예: `팀별=3,6`")
+
+    team_sizes = tuple(
+        _parse_positive_int(part.strip().removesuffix("명"), "팀별 인원")
+        for part in parts
+    )
+    return team_sizes
+
+
+def _normalize_explicit_size_tokens(head: str) -> str:
+    explicit_size_keys = "|".join(re.escape(key) for key in TEAM_EXPLICIT_SIZE_KEYS)
+    return re.sub(
+        rf"(^|\s)({explicit_size_keys})\s*=\s*([0-9명\s,/:;+]+)",
+        lambda match: (
+            f"{match.group(1)}{match.group(2)}={''.join(match.group(3).split())}"
+        ),
+        head,
+    )
+
+
 def _split_member_segments(segments: list[str]) -> list[str]:
     members = []
     for segment in segments:
@@ -102,10 +135,11 @@ def parse_team_split_args(raw_text: str) -> TeamSplitRequest:
         )
 
     pipe_parts = [part.strip() for part in text.split("|") if part.strip()]
-    head = pipe_parts[0] if pipe_parts else ""
+    head = _normalize_explicit_size_tokens(pipe_parts[0]) if pipe_parts else ""
     member_segments = pipe_parts[1:]
     mode = None
     value = None
+    team_sizes = None
     residual_tokens = []
 
     for token in head.split():
@@ -119,14 +153,19 @@ def parse_team_split_args(raw_text: str) -> TeamSplitRequest:
             raw_value = raw_value.strip()
             if key in TEAM_COUNT_KEYS:
                 if mode is not None and mode != "teams":
-                    raise CommandUsageError("`팀수`와 `팀당`은 둘 중 하나만 써줘.")
+                    raise CommandUsageError("`팀수`, `팀당`, `팀별`은 하나만 써줘.")
                 mode = "teams"
                 value = _parse_positive_int(raw_value, "팀수")
             elif key in TEAM_SIZE_KEYS:
                 if mode is not None and mode != "size":
-                    raise CommandUsageError("`팀수`와 `팀당`은 둘 중 하나만 써줘.")
+                    raise CommandUsageError("`팀수`, `팀당`, `팀별`은 하나만 써줘.")
                 mode = "size"
                 value = _parse_positive_int(raw_value, "팀당 인원")
+            elif key in TEAM_EXPLICIT_SIZE_KEYS:
+                if mode is not None and mode != "explicit_sizes":
+                    raise CommandUsageError("`팀수`, `팀당`, `팀별`은 하나만 써줘.")
+                mode = "explicit_sizes"
+                team_sizes = _parse_team_sizes(raw_value)
             else:
                 residual_tokens.append(normalized)
         elif mode is None and value is None and normalized.isdigit():
@@ -143,12 +182,22 @@ def parse_team_split_args(raw_text: str) -> TeamSplitRequest:
         raise CommandUsageError("팀을 나누려면 참가자가 최소 2명 필요해.")
     if len(members) > MAX_TEAM_MEMBERS:
         raise CommandUsageError(f"참가자는 한 번에 최대 {MAX_TEAM_MEMBERS}명까지만 나눌 수 있어.")
-    if mode is None or value is None:
-        raise CommandUsageError("팀 수나 팀당 인원을 알려줘. 예: `팀수=2` 또는 `팀당=3`")
+    if mode is None:
+        raise CommandUsageError("팀 수나 팀당 인원을 알려줘. 예: `팀수=2`, `팀당=3`, `팀별=3,6`")
 
-    if mode == "size":
+    if mode == "explicit_sizes":
+        assert team_sizes is not None
+        team_count = len(team_sizes)
+        assigned_count = sum(team_sizes)
+        if assigned_count != len(members):
+            raise CommandUsageError(
+                f"팀별 인원 합계는 참가자 수와 같아야 해. 지금은 참가자 {len(members)}명 중 {assigned_count}명으로 적었어."
+            )
+    elif mode == "size":
+        assert value is not None
         team_count = math.ceil(len(members) / value)
     else:
+        assert value is not None
         team_count = value
 
     if team_count < 2:
@@ -156,7 +205,7 @@ def parse_team_split_args(raw_text: str) -> TeamSplitRequest:
     if team_count > len(members):
         raise CommandUsageError("팀 수는 참가자 수보다 많을 수 없어.")
 
-    return TeamSplitRequest(members=tuple(members), team_count=team_count)
+    return TeamSplitRequest(members=tuple(members), team_count=team_count, team_sizes=team_sizes)
 
 
 def split_members_into_teams(
@@ -166,6 +215,16 @@ def split_members_into_teams(
     rng = rng or random.SystemRandom()
     members = list(request.members)
     rng.shuffle(members)
+
+    if request.team_sizes is not None:
+        teams = []
+        start = 0
+        for team_size in request.team_sizes:
+            end = start + team_size
+            teams.append(members[start:end])
+            start = end
+        return teams
+
     teams = [[] for _ in range(request.team_count)]
 
     for index, member in enumerate(members):
