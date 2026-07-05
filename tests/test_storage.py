@@ -111,13 +111,15 @@ def test_get_user_data_creates_and_normalizes_defaults(memory_file):
     assert user_data["last_seen"] is None
     assert user_data["history"] == []
     assert user_data["brain_notes"] == []
+    assert user_data["brain_keywords"] == {}
     assert user_data["short_term_memory"] == []
     assert user_data["long_term_memory"] == []
-    assert user_data["memory_stats"]["schema_version"] == 1
+    assert user_data["memory_stats"]["schema_version"] == 2
 
     data = storage.load_memory()
     data["123"].pop("last_seen")
     data["123"].pop("history")
+    data["123"].pop("memory_stats")
     data["123"]["brain_notes"] = "한 줄 평가"
     storage.save_memory(data)
 
@@ -126,9 +128,9 @@ def test_get_user_data_creates_and_normalizes_defaults(memory_file):
     assert normalized["name"] == "Alice Updated"
     assert normalized["last_seen"] is None
     assert normalized["history"] == []
-    assert normalized["brain_notes"] == ["한 줄 평가"]
-    assert normalized["long_term_memory"][0]["content"] == "한 줄 평가"
-    assert normalized["long_term_memory"][0]["memory_type"] == "long_term"
+    assert normalized["brain_keywords"] == {"한 줄 평가": 3.0}
+    assert normalized["brain_notes"] == ["한 줄 평가: 3"]
+    assert normalized["long_term_memory"] == []
 
 
 def test_user_memory_schema_recovers_from_invalid_shapes(memory_file):
@@ -146,11 +148,10 @@ def test_user_memory_schema_recovers_from_invalid_shapes(memory_file):
     normalized = storage.get_user_data(123, "Alice")
 
     assert normalized["short_term_memory"] == []
-    assert len(normalized["long_term_memory"]) == 1
-    assert normalized["long_term_memory"][0]["content"] == "장기 선호"
-    assert normalized["long_term_memory"][0]["memory_type"] == "long_term"
-    assert normalized["brain_notes"] == ["장기 선호"]
-    assert normalized["memory_stats"]["schema_version"] == 1
+    assert normalized["long_term_memory"] == []
+    assert normalized["brain_keywords"] == {"장기 선호": 3.0}
+    assert normalized["brain_notes"] == ["장기 선호: 3"]
+    assert normalized["memory_stats"]["schema_version"] == 2
 
 
 def test_find_user_records_by_nickname_and_conflicts(memory_file):

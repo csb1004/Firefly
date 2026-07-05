@@ -18,6 +18,7 @@ from .ai import (
     summarize_voice_search,
 )
 from .brain import (
+    BRAIN_KEYWORDS_KEY,
     LONG_TERM_MEMORY_KEY,
     SHORT_TERM_MEMORY_KEY,
     add_brain_note,
@@ -301,12 +302,17 @@ class _TypingKeepalive:
         return self
 
     async def __aexit__(self, exc_type, exc, traceback):
-        if self._task is None:
-            return False
-        self._task.cancel()
-        with suppress(asyncio.CancelledError):
-            await self._task
+        await self.stop()
         return False
+
+    async def stop(self) -> None:
+        if self._task is None:
+            return
+        task = self._task
+        self._task = None
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
     async def _run(self, typing):
         while True:
@@ -318,6 +324,25 @@ class _TypingKeepalive:
             except Exception as exc:
                 print("Typing keepalive error:", exc)
                 return
+
+
+class _TypingStopChannel:
+    def __init__(self, channel, keepalive: _TypingKeepalive):
+        self._channel = channel
+        self._keepalive = keepalive
+
+    def typing(self):
+        typing = getattr(self._channel, "typing", None)
+        if typing is None:
+            return _NoopTyping()
+        return typing()
+
+    async def send(self, *args, **kwargs):
+        await self._keepalive.stop()
+        return await self._channel.send(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        return getattr(self._channel, name)
 
 
 def _adapter_command_allowed(command_text: str) -> bool:
@@ -658,7 +683,7 @@ async def _send_brain_notes(
         return
 
     await message.channel.send(
-        f"`{target.display_name}`에 대한 반디의 기억이야.\n"
+        f"`{target.display_name}`에 대한 반디의 키워드 점수야.\n"
         f"```text\n{format_brain_notes(target_data)}\n```"
     )
 
@@ -674,8 +699,8 @@ async def _add_brain_note(
         return
     if not note:
         await message.channel.send(
-            "…대상과 저장할 기억 후보를 같이 적어줘. "
-            "예: `/뇌추가 @유저 쉽게 불안해하지만 끝까지 확인하려고 한다`"
+            "…대상과 저장할 키워드 점수를 같이 적어줘. "
+            "예: `/뇌추가 @유저 애정표현: 3 | 기쁨: 2`"
         )
         return
 
@@ -685,21 +710,15 @@ async def _add_brain_note(
         await message.channel.send(f"…{exc}")
         return
     update_user_data(target.user_id, target_data)
-    if result.status == "ignored":
+    if result.status == "updated":
+        updated = result.entry.get("updated_scores", {})
+        updated_text = " | ".join(f"{keyword}: {score:g}" for keyword, score in updated.items())
         await message.channel.send(
-            f"…응. `{target.display_name}`에 대한 현재 관계 맥락으로 받아들였어."
-        )
-    elif result.status == "promoted":
-        await message.channel.send(
-            f"…응. `{target.display_name}`에 대한 기억 후보를 장기 기억 {result.index}번으로 승격했어."
-        )
-    elif result.status == "merged_long_term":
-        await message.channel.send(
-            f"…응. `{target.display_name}`에 대한 기존 장기 기억 {result.index}번의 반복성을 갱신했어."
+            f"…응. `{target.display_name}`에 대한 키워드 점수를 갱신했어. `{updated_text}`"
         )
     else:
         await message.channel.send(
-            f"…응. `{target.display_name}`에 대한 단기 기억 후보 S{result.index}번으로 보관했어."
+            f"…응. `{target.display_name}`에 대한 키워드 점수로 반영했어."
         )
 
 
@@ -714,14 +733,14 @@ async def _update_brain_note(
         return
     index, note = parse_brain_index_and_note(args)
     if index is None or not note:
-        await message.channel.send("…대상, 수정할 번호, 새 내용을 같이 적어줘. 예: `/뇌수정 @유저 1 신중하지만 결정을 미루지는 않는다`")
+        await message.channel.send("…대상, 수정할 번호, 새 키워드 점수를 같이 적어줘. 예: `/뇌수정 @유저 1 애정표현: 8`")
         return
     if not update_brain_note(target_data, index, note):
-        await message.channel.send("…그 번호의 평가를 찾지 못했어.")
+        await message.channel.send("…그 번호의 키워드를 찾지 못했어.")
         return
 
     update_user_data(target.user_id, target_data)
-    await message.channel.send(f"…응. `{target.display_name}`에 대한 {index}번 평가를 고쳤어.")
+    await message.channel.send(f"…응. `{target.display_name}`에 대한 {index}번 키워드 점수를 고쳤어.")
 
 
 async def _delete_brain_note(
@@ -735,22 +754,20 @@ async def _delete_brain_note(
         return
     delete_target = parse_brain_delete_target(args)
     if delete_target is None:
-        await message.channel.send("…대상과 삭제할 기억 번호를 적어줘. 예: `/뇌삭제 @유저 1`, `/뇌삭제 @유저 S1`")
+        await message.channel.send("…대상과 삭제할 키워드 번호나 이름을 적어줘. 예: `/뇌삭제 @유저 1`, `/뇌삭제 @유저 애정표현`")
         return
 
     result = delete_brain_memory(target_data, delete_target)
     if result is None:
-        await message.channel.send("…그 번호의 기억을 찾지 못했어.")
+        await message.channel.send("…그 키워드를 찾지 못했어.")
         return
 
     update_user_data(target.user_id, target_data)
-    if result.memory_type == SHORT_TERM_MEMORY_KEY and result.index is None:
-        await message.channel.send(
-            f"…응. `{target.display_name}`에 대한 단기 기억 후보 {len(result.contents)}개를 지웠어."
-        )
+    if result.memory_type == BRAIN_KEYWORDS_KEY:
+        await message.channel.send(f"…응. `{target.display_name}`에 대한 {result.index}번 키워드 점수를 지웠어.")
     elif result.memory_type == SHORT_TERM_MEMORY_KEY:
         await message.channel.send(
-            f"…응. `{target.display_name}`에 대한 단기 기억 후보 S{result.index}번을 지웠어."
+            f"…응. `{target.display_name}`에 대한 예전 기억 항목 {result.index}번을 지웠어."
         )
     elif result.memory_type == LONG_TERM_MEMORY_KEY:
         await message.channel.send(f"…응. `{target.display_name}`에 대한 {result.index}번 평가를 지웠어.")
@@ -1069,9 +1086,14 @@ async def handle_mentioned_message(
     keep_typing: bool = True,
 ) -> None:
     if keep_typing:
-        async with _TypingKeepalive(message.channel):
+        keepalive = _TypingKeepalive(message.channel)
+        typing_message = _CommandCaptureMessage(
+            message,
+            _TypingStopChannel(message.channel, keepalive),
+        )
+        async with keepalive:
             await handle_mentioned_message(
-                message=message,
+                message=typing_message,
                 user_text=user_text,
                 user_data=user_data,
                 room_key=room_key,

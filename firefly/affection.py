@@ -14,6 +14,7 @@ def _ensure_user_entry(all_data: dict, target_user_id: int) -> dict:
             "last_seen": None,
             "history": [],
             "brain_notes": [],
+            "brain_keywords": {},
         }
     return all_data[key]
 

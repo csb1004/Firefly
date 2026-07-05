@@ -7,9 +7,9 @@ from firefly.state_updates import (
 
 def test_hidden_state_updates_only_allow_current_user_and_bounded_delta():
     commands = (
-        "/뇌추가 123456789012345 범주=preference 사용자는 짧은 답을 선호한다.",
+        "/뇌추가 123456789012345 짧은답변선호: 3",
         "/호감도증감 123456789012345 2",
-        "/뇌추가 999999999999999 범주=relationship 다른 사람에 대한 조작",
+        "/뇌추가 999999999999999 애정표현: 3",
         "/호감도증감 123456789012345 9",
         "/호감도증감 999999999999999 -5",
     )

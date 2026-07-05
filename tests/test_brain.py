@@ -1,252 +1,106 @@
 from firefly import brain
 
 
-REQUIRED_MEMORY_FIELDS = {
-    "memory_id",
-    "memory_type",
-    "content",
-    "importance_score",
-    "frequency_score",
-    "created_at",
-    "updated_at",
-    "last_used_at",
-}
-
-
-def test_normalize_user_memory_migrates_legacy_brain_notes(monkeypatch):
+def test_normalize_user_memory_migrates_legacy_brain_notes_to_keyword_scores(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {"brain_notes": ["짧고 확실한 답을 선호한다.", ""]}
 
     brain.normalize_user_memory(user_data)
 
+    assert user_data["brain_keywords"] == {"짧은답변선호": 3.0}
+    assert user_data["brain_notes"] == ["짧은답변선호: 3"]
     assert user_data["short_term_memory"] == []
-    assert len(user_data["long_term_memory"]) == 1
-    memory = user_data["long_term_memory"][0]
-    assert REQUIRED_MEMORY_FIELDS <= memory.keys()
-    assert memory["memory_type"] == "long_term"
-    assert memory["content"] == "짧고 확실한 답을 선호한다."
-    assert memory["promotion_reason"] == "legacy brain_notes migration"
-    assert user_data["brain_notes"] == ["짧고 확실한 답을 선호한다."]
-
-
-def test_add_brain_note_stores_short_term_candidate(monkeypatch):
-    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
-    user_data = {}
-
-    result = brain.add_brain_note(user_data, "사용자는 긴 설명보다 실행 가능한 요약을 좋아한다.")
-
-    assert result.status == "short_term"
-    assert len(user_data["short_term_memory"]) == 1
-    memory = user_data["short_term_memory"][0]
-    assert REQUIRED_MEMORY_FIELDS <= memory.keys()
-    assert memory["memory_type"] == "short_term"
-    assert memory["frequency_score"] == 1
     assert user_data["long_term_memory"] == []
-    assert user_data["brain_notes"] == []
+    assert user_data["memory_stats"]["schema_version"] == brain.MEMORY_SCHEMA_VERSION
 
 
-def test_repeated_short_term_memory_promotes_to_long_term(monkeypatch):
+def test_add_brain_note_stores_keyword_score_dictionary(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {}
 
-    brain.add_brain_note(user_data, "사용자는 긴 설명보다 실행 가능한 요약을 좋아한다.")
-    brain.add_brain_note(user_data, "사용자는 긴 설명보다 실행 가능한 요약을 좋아한다.")
-    result = brain.add_brain_note(user_data, "사용자는 긴 설명보다 실행 가능한 요약을 좋아한다.")
+    result = brain.add_brain_note(user_data, "애정표현: 3 | 기쁨: 2")
 
-    assert result.status == "promoted"
-    assert user_data["short_term_memory"] == []
-    assert len(user_data["long_term_memory"]) == 1
-    memory = user_data["long_term_memory"][0]
-    assert memory["memory_type"] == "long_term"
-    assert memory["frequency_score"] == 3
-    assert "반복" in memory["promotion_reason"]
-    assert user_data["brain_notes"] == ["사용자는 긴 설명보다 실행 가능한 요약을 좋아한다."]
+    assert result.status == "updated"
+    assert user_data["brain_keywords"] == {"애정표현": 3.0, "기쁨": 2.0}
+    assert user_data["brain_notes"] == ["애정표현: 3", "기쁨: 2"]
+    assert result.entry["updated_scores"] == {"애정표현": 3.0, "기쁨": 2.0}
 
 
-def test_similar_short_term_memory_merges_raw_samples_and_frequency(monkeypatch):
+def test_add_brain_note_applies_discount_before_accumulating(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {}
 
-    first = brain.add_brain_note(user_data, "범주=preference 사용자는 긴 설명보다 실행 가능한 요약을 좋아한다.")
-    second = brain.add_brain_note(user_data, "범주=preference 사용자는 실행 가능한 요약 답변을 선호한다.")
+    brain.add_brain_note(user_data, "애정표현: 5")
+    result = brain.add_brain_note(user_data, "애정표현: 5 | 서운함: 2")
 
-    assert first.status == "short_term"
-    assert second.status == "short_term"
-    assert len(user_data["short_term_memory"]) == 1
-    memory = user_data["short_term_memory"][0]
-    assert memory["frequency_score"] == 2
-    assert memory["memory_category"] == "preference"
-    assert "실행" in memory["content"]
-    assert "요약" in memory["content"]
-    assert len(memory["raw_samples"]) == 2
-    assert memory["raw_samples"][0]["content"] == "사용자는 긴 설명보다 실행 가능한 요약을 좋아한다."
-    assert memory["raw_samples"][1]["content"] == "사용자는 실행 가능한 요약 답변을 선호한다."
+    assert result.status == "updated"
+    assert user_data["brain_keywords"]["애정표현"] == 9.5
+    assert user_data["brain_keywords"]["서운함"] == 2.0
+    assert "할인률" in result.reason
 
 
-def test_similar_short_term_memory_promotes_abstract_long_term_and_clears_short_term(monkeypatch):
+def test_keyword_input_score_is_clamped_to_one_to_five(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {}
 
-    brain.add_brain_note(user_data, "범주=preference 사용자는 긴 설명보다 실행 가능한 요약을 좋아한다.")
-    brain.add_brain_note(user_data, "범주=preference 사용자는 실행 가능한 요약 답변을 선호한다.")
-    result = brain.add_brain_note(user_data, "범주=preference 사용자는 실행 가능한 요약 중심 답변을 자주 원한다.")
+    brain.add_brain_note(user_data, "기쁨: 10 | 서운함: -2")
 
-    assert result.status == "promoted"
-    assert user_data["short_term_memory"] == []
-    assert len(user_data["long_term_memory"]) == 1
-    memory = user_data["long_term_memory"][0]
-    assert memory["memory_type"] == "long_term"
-    assert memory["frequency_score"] == brain.PROMOTION_FREQUENCY_THRESHOLD
-    assert "실행" in memory["content"]
-    assert "요약" in memory["content"]
-    assert len(memory["raw_samples"]) == 3
-    assert user_data["brain_notes"] == [memory["content"]]
+    assert user_data["brain_keywords"] == {"기쁨": 5.0, "서운함": 1.0}
 
 
-def test_high_importance_candidate_promotes_immediately(monkeypatch):
+def test_similar_keyword_aliases_merge_to_canonical_keyword(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {}
 
-    result = brain.add_brain_note(user_data, "중요도=높음 사용자는 확인 질문을 길게 이어가는 것을 매우 싫어한다.")
+    brain.add_brain_note(user_data, "사랑: 4")
+    brain.add_brain_note(user_data, "호감: 3")
 
-    assert result.status == "promoted"
-    assert user_data["short_term_memory"] == []
-    memory = user_data["long_term_memory"][0]
-    assert memory["importance_score"] >= brain.PROMOTION_IMPORTANCE_THRESHOLD
-    assert "중요도" in memory["promotion_reason"]
-    assert memory["content"] == "사용자는 확인 질문을 길게 이어가는 것을 매우 싫어한다."
+    assert user_data["brain_keywords"] == {"애정표현": 6.6}
 
 
-def test_update_and_delete_brain_note_operate_on_long_term_memory(monkeypatch):
+def test_natural_text_fallback_derives_known_keyword(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {}
-    brain.add_brain_note(user_data, "중요도=높음 사용자는 짧고 확실한 답을 선호한다.")
 
-    assert brain.update_brain_note(user_data, 1, "사용자는 짧고 실행 가능한 답을 선호한다.")
+    result = brain.add_brain_note(user_data, "사용자는 반디에게 고마워라고 말했다.")
+
+    assert result.status == "updated"
+    assert user_data["brain_keywords"] == {"감사": 2.0}
+
+
+def test_update_and_delete_brain_keyword_by_number(monkeypatch):
+    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
+    user_data = {}
+    brain.add_brain_note(user_data, "애정표현: 3 | 기쁨: 2")
+
+    assert brain.update_brain_note(user_data, 1, "애정표현: 8")
     deleted = brain.delete_brain_note(user_data, 1)
 
-    assert deleted == "사용자는 짧고 실행 가능한 답을 선호한다."
-    assert user_data["long_term_memory"] == []
-    assert user_data["brain_notes"] == []
+    assert deleted == "애정표현: 8"
+    assert user_data["brain_keywords"] == {"기쁨": 2.0}
+    assert user_data["brain_notes"] == ["기쁨: 2"]
 
 
-def test_delete_brain_memory_accepts_short_term_references(monkeypatch):
+def test_delete_brain_memory_accepts_keyword_name(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {}
-    brain.add_brain_note(user_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
+    brain.add_brain_note(user_data, "애정표현: 3 | 서운함: 2")
 
-    result = brain.delete_brain_memory(user_data, brain.parse_brain_delete_target("S1"))
+    result = brain.delete_brain_memory(user_data, brain.parse_brain_delete_target("애정표현"))
 
     assert result is not None
-    assert result.memory_type == brain.SHORT_TERM_MEMORY_KEY
-    assert result.index == 1
-    assert result.contents == ["사용자는 반디에게 좋아해라고 애정을 표현했다."]
-    assert user_data["short_term_memory"] == []
+    assert result.memory_type == brain.BRAIN_KEYWORDS_KEY
+    assert result.contents == ["애정표현: 3"]
+    assert user_data["brain_keywords"] == {"서운함": 2.0}
 
 
-def test_delete_brain_memory_numeric_reference_falls_back_to_short_term(monkeypatch):
+def test_format_brain_notes_shows_keyword_dictionary(monkeypatch):
     monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
     user_data = {}
-    brain.add_brain_note(user_data, "사용자는 최근 반디에게 고마움을 자주 표현한다.")
-
-    result = brain.delete_brain_memory(user_data, brain.parse_brain_delete_target("1"))
-
-    assert result is not None
-    assert result.memory_type == brain.SHORT_TERM_MEMORY_KEY
-    assert result.index == 1
-    assert user_data["short_term_memory"] == []
-
-
-def test_delete_brain_memory_can_clear_short_term_candidates(monkeypatch):
-    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
-    user_data = {}
-    brain.add_brain_note(user_data, "사용자는 최근 문서화를 신경 쓴다.")
-    brain.add_brain_note(user_data, "사용자는 답변이 너무 길면 답답해한다.")
-
-    result = brain.delete_brain_memory(user_data, brain.parse_brain_delete_target("단기"))
-
-    assert result is not None
-    assert result.memory_type == brain.SHORT_TERM_MEMORY_KEY
-    assert result.index is None
-    assert len(result.contents) == 2
-    assert user_data["short_term_memory"] == []
-
-
-def test_format_brain_notes_shows_short_and_long_term_sections(monkeypatch):
-    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
-    user_data = {}
-    brain.add_brain_note(user_data, "중요도=높음 사용자는 결론을 먼저 듣는 것을 선호한다.")
-    brain.add_brain_note(user_data, "요즘 프로젝트 문서화를 자주 언급한다.")
+    brain.add_brain_note(user_data, "애정표현: 5 | 기쁨: 3 | 서운함: 2")
 
     formatted = brain.format_brain_notes(user_data)
 
-    assert "[장기 기억]" in formatted
-    assert "[단기 기억 후보]" in formatted
-    assert "결론을 먼저 듣는 것을 선호한다" in formatted
-    assert "프로젝트 문서화" in formatted
-
-
-def test_sparse_profiles_store_routine_affection_as_new_relationship_signal(monkeypatch):
-    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
-    user_data = {}
-
-    result = brain.add_brain_note(user_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
-
-    assert result.status == "short_term"
-    assert user_data["long_term_memory"] == []
-    memory = user_data["short_term_memory"][0]
-    assert memory["memory_category"] == "relationship"
-    assert memory["affective_score"] > 0
-    assert memory["distance_score"] < 0.5
-
-
-def test_repeated_relationship_affection_promotes_with_default_threshold(monkeypatch):
-    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
-    user_data = {}
-
-    for _ in range(brain.PROMOTION_FREQUENCY_THRESHOLD):
-        result = brain.add_brain_note(user_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
-
-    assert result.status == "promoted"
-    assert user_data["short_term_memory"] == []
-    memory = user_data["long_term_memory"][0]
-    assert memory["memory_category"] == "relationship"
-    assert memory["frequency_score"] == brain.PROMOTION_FREQUENCY_THRESHOLD
-    assert "반복 등장" in memory["promotion_reason"]
-
-
-def test_established_profiles_do_not_store_routine_affection_as_new_memory(monkeypatch):
-    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
-    user_data = {"long_term_memory": [
-        {"content": f"사용자와 반디 사이의 안정적인 관계 기억 {index}"}
-        for index in range(8)
-    ]}
-    brain.normalize_user_memory(user_data)
-
-    result = brain.add_brain_note(user_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
-
-    assert result.status == "ignored"
-    assert user_data["short_term_memory"] == []
-    assert len(user_data["long_term_memory"]) == 1
-    assert user_data["long_term_memory"][0]["frequency_score"] == 8
-
-
-def test_abrupt_relationship_change_promotes_even_for_dense_profiles(monkeypatch):
-    monkeypatch.setattr(brain, "get_current_time_text", lambda: "2026-06-14 10:00:00")
-    user_data = {"long_term_memory": [
-        {"content": f"기존 장기 기억 {index}"}
-        for index in range(8)
-    ]}
-    brain.normalize_user_memory(user_data)
-
-    result = brain.add_brain_note(
-        user_data,
-        "감정=경계 거리감=거리둠 사용자가 갑자기 반디에게 공격적이고 불신을 주는 태도를 보였다.",
-    )
-
-    assert result.status == "promoted"
-    memory = user_data["long_term_memory"][-1]
-    assert memory["memory_category"] == "relationship"
-    assert memory["affective_score"] < 0
-    assert memory["distance_score"] > 0.7
-    assert "급격한 관계 변화" in memory["promotion_reason"]
+    assert "[키워드 점수 딕셔너리]" in formatted
+    assert "애정표현: 5 | 기쁨: 3 | 서운함: 2" in formatted
+    assert "할인률 0.90" in formatted

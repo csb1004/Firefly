@@ -30,8 +30,8 @@ def test_new_reasoning_and_brain_commands_are_special_only():
         "/메모리 파일",
         "/memoryfile",
         "/뇌 123456789012345",
-        "/뇌추가 123456789012345 평가",
-        "/뇌수정 123456789012345 1 평가",
+        "/뇌추가 123456789012345 애정표현: 3",
+        "/뇌수정 123456789012345 1 애정표현: 8",
         "/뇌삭제 123456789012345 1",
     ):
         assert commands_parser.is_special_only_command(command)

@@ -72,7 +72,7 @@ def test_build_system_prompt_uses_base_prompt_user_state_and_time(monkeypatch):
             "nickname": "Al",
             "affection": 50,
             "last_seen": "yesterday",
-            "brain_notes": ["짧고 확실한 답을 선호한다."],
+            "brain_keywords": {"짧은답변선호": 4},
         },
     )
 
@@ -83,8 +83,8 @@ def test_build_system_prompt_uses_base_prompt_user_state_and_time(monkeypatch):
     assert "Al" in prompt
     assert "50" in prompt
     assert "반디의 뇌" in prompt
-    assert "짧고 확실한 답을 선호한다." in prompt
-    assert "기본 페르소나, 호감도 단계, 최근 대화보다 우선" in prompt
+    assert "짧은답변선호: 4" in prompt
+    assert "키워드 점수는 기본 페르소나, 호감도 단계, 최근 대화보다 우선" in prompt
     assert "2026-05-16 12:00:00" in prompt
     assert "yesterday" in prompt
     assert "general command guide" in prompt
@@ -214,35 +214,31 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "/검색실행 {명령어들} || {프롬프트}" in guide
     assert "/인터넷모드 {상태}" in guide
     assert "/추론 {추론단계}" in guide
-    assert "/뇌추가 {유저ID} {기억후보}" in guide
-    assert "/뇌수정 {유저ID} {번호} {평가}" in guide
+    assert "/뇌추가 {유저ID} {키워드점수목록}" in guide
+    assert "/뇌수정 {유저ID} {번호} {키워드점수}" in guide
     assert "/뇌삭제 {유저ID} {번호}" in guide
-    assert "/뇌삭제 {유저ID} S{번호}" in guide
-    assert "/뇌삭제 {유저ID} 단기" in guide
+    assert "/뇌삭제 {유저ID} {키워드}" in guide
     assert "/호칭 {유저멘션또는ID또는기존호칭} {호칭}" in guide
     assert "/호감도설정 {유저멘션} {숫자}" in guide
     assert "/최신소식 시간 {시간}" in guide
     assert "/주제 설정 {주제목록}" in guide
     assert "{상태}는 `on` 또는 `off`만 사용한다." in guide
     assert "{추론단계}" in guide
-    assert "{기억후보}" in guide
-    assert "{평가}" in guide
+    assert "{키워드점수목록}" in guide
+    assert "{키워드점수}" in guide
     assert "{유저ID}" in guide
     assert "현재 메시지를 보낸 사용자를 대상으로 삼아야 하면" in guide
     assert "다른 사람의 호칭 변경 요청을 `/호칭 {호칭}`처럼 한 인자만 있는 자기 호칭 변경 명령으로 바꾸지 않는다." in guide
     assert "최종 답변 한 번에만 인터넷 검색을 사용하고 방 설정은 바꾸지 않는다." in guide
     assert "반디의 뇌를 보자고 하면 대상 사용자를 명시" in guide
     assert "그것만으로 저장하지 않는다" in guide
-    assert "단기 기억 후보에 넣는다" in guide
-    assert "장기 기억으로 승격한다" in guide
-    assert "중요도=높음" in guide
-    assert "감정=경계" in guide
-    assert "거리감=거리둠" in guide
+    assert "할인률을 적용한 뒤 이번 관찰 점수" in guide
+    assert "애정표현: 2" in guide
+    assert "확인질문싫음: 4" in guide
     assert "정서 방향, 신뢰/경계, 거리감" in guide
-    assert "단기 기억 후보가 10개 미만이면 거의 매 대화" in guide
     assert "좋아해`, `고마워`, `보고 싶어" in guide
-    assert "기존 후보와 대조" in guide
-    assert "/뇌삭제 {유저ID} S{번호}" in guide
+    assert "기존 키워드 목록" in guide
+    assert "/뇌삭제 {유저ID} {키워드}" in guide
     assert "저장하지 않기로 판단했다면 별도의 안내" in guide
     assert "사소한 취향, 일회성 일정" in guide
     assert "호감도 증감은 사용자가 반복적으로 배려" in guide

@@ -6,7 +6,9 @@ import discord
 
 from .brain import (
     BRAIN_NOTES_KEY,
+    BRAIN_KEYWORDS_KEY,
     LONG_TERM_MEMORY_KEY,
+    MEMORY_SCHEMA_VERSION,
     MEMORY_STATS_KEY,
     SHORT_TERM_MEMORY_KEY,
     normalize_user_memory,
@@ -264,9 +266,10 @@ def _new_user_data(user_id: int, display_name: str) -> dict:
         "last_seen": None,
         "history": [],
         BRAIN_NOTES_KEY: [],
+        BRAIN_KEYWORDS_KEY: {},
         SHORT_TERM_MEMORY_KEY: [],
         LONG_TERM_MEMORY_KEY: [],
-        MEMORY_STATS_KEY: {"schema_version": 1},
+        MEMORY_STATS_KEY: {"schema_version": MEMORY_SCHEMA_VERSION},
     }
 
 
