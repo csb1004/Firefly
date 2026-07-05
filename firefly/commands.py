@@ -2,6 +2,8 @@ import asyncio
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
+import re
+import time
 from types import SimpleNamespace
 
 import discord
@@ -14,8 +16,6 @@ from .ai import (
     plan_state_updates,
     plan_tool_use,
     summarize_conversation,
-    summarize_voice_recording,
-    summarize_voice_search,
 )
 from .brain import (
     BRAIN_KEYWORDS_KEY,
@@ -28,15 +28,13 @@ from .brain import (
     parse_brain_index_and_note,
     update_brain_note,
 )
-from .command_registry import ADMIN_STATUS_COMMAND, ROLE_COMMAND, VOICE_SEARCH_COMMAND, matched_alias
+from .command_registry import ADMIN_STATUS_COMMAND, ROLE_COMMAND, matched_alias
 from .commands_parser import (
     SPECIAL_ONLY_COMMAND_PREFIXES,
-    SUMMARY_SCOPE_TOKENS,
     command_arg,
     is_special_only_command,
     matches_command,
     parse_summary_args,
-    summary_recording_filename,
 )
 from .config import BOT_DISPLAY_NAME, DEFAULT_AFFECTION, SPECIAL_USER_ID, SPECIAL_USER_NAME, SUMMARY_DEFAULT_LIMIT
 from .embeds import (
@@ -87,16 +85,6 @@ from .utility_commands import (
     split_members_into_teams,
 )
 from .nickname_commands import handle_nickname_command
-from .voice_search import load_voice_search_selection, parse_voice_search_args
-from .voice import start_voice_recording, stop_voice_recording
-from .voice_records import (
-    VoiceRecordNotFound,
-    format_recording_list,
-    get_recording_path,
-    list_recordings,
-    read_transcript_entries,
-    resolve_recording_reference,
-)
 
 
 def is_special_user(user_id: int) -> bool:
@@ -142,16 +130,12 @@ def _command_arg(user_text: str, command: str) -> str:
     return command_arg(user_text, command)
 
 
-def _summary_recording_filename(user_text: str) -> str | None:
-    return summary_recording_filename(user_text)
-
-
-LATEST_RECORDING_TOKENS = {"최근", "마지막", "latest", "last"}
 ADAPTER_COMMAND_OUTPUT_LIMIT = 1200
 ADAPTER_CONTEXT_LIMIT = 3500
 AUTO_COMMAND_HISTORY_OUTPUT_LIMIT = 1200
 MAX_MEMORY_FILE_SEND_BYTES = 24 * 1024 * 1024
 TYPING_KEEPALIVE_SECONDS = 7.0
+PENDING_MEMORY_RESET_TTL_SECONDS = 5 * 60
 PERMISSION_DENIED_MESSAGE = "…그 명령어를 사용할 권한이 없어."
 MEMORY_FILE_COMMAND_ALIASES = (
     "/메모리파일",
@@ -181,19 +165,23 @@ ADAPTER_BLOCKED_COMMAND_PREFIXES = (
 )
 PLANNER_COMMAND_ADAPTER_ALIASES = ("/실행", "/명령답변")
 SILENT_GROUP_MEMORY_COMMAND_PREFIXES = ("/뇌추가", "/뇌삭제", "/호감도증감")
+MEMORY_RESET_CANCEL_WORDS = {"취소", "아니", "아니요", "ㄴ", "no", "n", "cancel"}
+MEMORY_RESET_CONFIRM_WORDS = {"확인", "ㅇㅇ", "응", "네", "예", "yes", "y", "진행", "진행해", "초기화"}
+MEMORY_RESET_SECTION_KEYWORDS = {
+    "conversation": ("대화", "개인", "유저", "사용자", "conversation", "conversation_memory"),
+    "rooms": ("방 메모리", "방메모리", "방 기억", "방기억", "room", "rooms", "room_memory"),
+    "polls": ("투표", "poll", "polls", "poll_memory"),
+    "news": ("뉴스", "최신소식", "최신 소식", "소식", "news", "daily_news", "news_memory"),
+}
 
 
-def _resolve_recording_summary_filename(filename: str) -> str | None:
-    if filename.strip().lower() not in LATEST_RECORDING_TOKENS:
-        try:
-            return resolve_recording_reference(filename, records=list_recordings())
-        except VoiceRecordNotFound:
-            return filename
+@dataclass(frozen=True)
+class _PendingMemoryReset:
+    section: str | None
+    expires_at: float
 
-    records = list_recordings()
-    if not records:
-        return None
-    return str(records[0].get("filename") or "") or None
+
+_pending_memory_resets: dict[tuple[int, str], _PendingMemoryReset] = {}
 
 
 class _NoopTyping:
@@ -420,11 +408,152 @@ def _format_adapter_context(command_summaries: list[str]) -> str | None:
     return "\n\n".join(command_summaries)[:ADAPTER_CONTEXT_LIMIT]
 
 
+def _pending_memory_reset_key(author_id: int, room_key: str) -> tuple[int, str]:
+    return author_id, room_key
+
+
+def _normalize_memory_reset_reply(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().casefold())
+
+
+def _is_memory_reset_confirm(text: str) -> bool:
+    normalized = _normalize_memory_reset_reply(text)
+    return normalized in MEMORY_RESET_CONFIRM_WORDS or normalized.startswith("확인 ")
+
+
+def _is_memory_reset_cancel(text: str) -> bool:
+    normalized = _normalize_memory_reset_reply(text)
+    return normalized in MEMORY_RESET_CANCEL_WORDS
+
+
+def _extract_memory_reset_section(raw_text: str) -> str | None:
+    text = _normalize_memory_reset_reply(raw_text)
+    section = resolve_memory_section(text)
+    if section:
+        return section
+
+    for section, keywords in MEMORY_RESET_SECTION_KEYWORDS.items():
+        if any(keyword in text for keyword in keywords):
+            return section
+    return None
+
+
 def _parse_memory_reset_args(raw_text: str) -> tuple[str | None, str]:
-    target_text, separator, confirm_text = raw_text.rpartition(" ")
-    if not separator:
-        return None, confirm_text.strip()
-    return resolve_memory_section(target_text), confirm_text.strip()
+    text = raw_text.strip()
+    if not text:
+        return None, ""
+
+    normalized = _normalize_memory_reset_reply(text)
+    if normalized == "확인":
+        return None, "확인"
+
+    confirm_text = ""
+    target_text = text
+    if normalized.endswith(" 확인"):
+        confirm_text = "확인"
+        target_text = text.rsplit(" ", 1)[0].strip()
+
+    return _extract_memory_reset_section(target_text), confirm_text
+
+
+def _set_pending_memory_reset(author_id: int, room_key: str, section: str | None) -> None:
+    _pending_memory_resets[_pending_memory_reset_key(author_id, room_key)] = _PendingMemoryReset(
+        section=section,
+        expires_at=time.monotonic() + PENDING_MEMORY_RESET_TTL_SECONDS,
+    )
+
+
+def _pop_pending_memory_reset(author_id: int, room_key: str) -> _PendingMemoryReset | None:
+    return _pending_memory_resets.pop(_pending_memory_reset_key(author_id, room_key), None)
+
+
+def _get_pending_memory_reset(author_id: int, room_key: str) -> _PendingMemoryReset | None:
+    pending = _pending_memory_resets.get(_pending_memory_reset_key(author_id, room_key))
+    if pending and pending.expires_at <= time.monotonic():
+        _pop_pending_memory_reset(author_id, room_key)
+        return None
+    return pending
+
+
+async def _execute_memory_reset(message: discord.Message, section: str) -> None:
+    reset_memory_section(section)
+    if section == "polls":
+        cancel_poll_tasks()
+    label = MEMORY_SECTION_LABELS[section]
+    path = get_memory_section_file(section)
+    await message.channel.send(f"…응. {label} 메모리 파일 `{path.name}`을 비웠어.")
+
+
+async def _ask_memory_reset_target(message: discord.Message, author_id: int, room_key: str) -> None:
+    _set_pending_memory_reset(author_id, room_key, None)
+    await message.channel.send(
+        "어떤 메모리 파일을 초기화할까? `대화`, `방`, `투표`, `뉴스` 중에서 골라줘.\n"
+        f"{format_memory_section_list()}\n"
+        "`취소`라고 답하면 중단할게."
+    )
+
+
+async def _ask_memory_reset_confirm(
+    message: discord.Message,
+    author_id: int,
+    room_key: str,
+    section: str,
+) -> None:
+    _set_pending_memory_reset(author_id, room_key, section)
+    label = MEMORY_SECTION_LABELS[section]
+    path = get_memory_section_file(section)
+    await message.channel.send(
+        f"{label} 메모리 파일 `{path.name}`을 초기화할까요? "
+        "진행하려면 `확인`, 중단하려면 `취소`라고 답해주세요."
+    )
+
+
+async def _handle_pending_memory_reset(
+    *,
+    message: discord.Message,
+    user_text: str,
+    author_id: int,
+    room_key: str,
+    special_user: bool,
+) -> bool:
+    pending = _get_pending_memory_reset(author_id, room_key)
+    if pending is None:
+        return False
+
+    if not special_user:
+        _pop_pending_memory_reset(author_id, room_key)
+        await message.channel.send(PERMISSION_DENIED_MESSAGE)
+        return True
+
+    if _is_memory_reset_cancel(user_text):
+        _pop_pending_memory_reset(author_id, room_key)
+        await message.channel.send("…응. 메모리 초기화를 취소했어.")
+        return True
+
+    section = pending.section or _extract_memory_reset_section(user_text)
+    if section is None:
+        await _ask_memory_reset_target(message, author_id, room_key)
+        return True
+
+    if pending.section is None:
+        await _ask_memory_reset_confirm(message, author_id, room_key, section)
+        return True
+
+    if _is_memory_reset_confirm(user_text):
+        _pop_pending_memory_reset(author_id, room_key)
+        await _execute_memory_reset(message, section)
+        return True
+
+    replacement_section = _extract_memory_reset_section(user_text)
+    if replacement_section and replacement_section != section:
+        await _ask_memory_reset_confirm(message, author_id, room_key, replacement_section)
+        return True
+
+    label = MEMORY_SECTION_LABELS[section]
+    await message.channel.send(
+        f"{label} 메모리 초기화를 진행하려면 `확인`, 중단하려면 `취소`라고 답해주세요."
+    )
+    return True
 
 
 def _extract_auto_command(reply: str) -> str | None:
@@ -611,55 +740,11 @@ async def handle_silent_group_memory_update(
     )
 
 
-async def _send_recording_list(message: discord.Message) -> None:
-    records = list_recordings()
-    await message.channel.send(format_recording_list(records))
-
-
-async def _send_recording_summary(message: discord.Message, filename: str) -> None:
-    try:
-        entries = read_transcript_entries(filename)
-    except VoiceRecordNotFound:
-        await message.channel.send("…그 이름의 통화 기록 파일을 찾지 못했어. `/대화목록`으로 파일명을 확인해줘.")
-        return
-
-    async with message.channel.typing():
-        summary, used_count = await summarize_voice_recording(entries, filename)
-        await message.channel.send(
-            embed=create_summary_embed(f"통화 기록 요약: {filename}", summary, used_count)
-        )
-
-async def _send_voice_search(message: discord.Message, raw_text: str) -> None:
-    request = parse_voice_search_args(raw_text)
-    if not request.query:
-        await message.channel.send("사용법: `/기록검색 [파일명] 찾고 싶은 말이나 질문`")
-        return
-
-    try:
-        selection = load_voice_search_selection(request)
-    except VoiceRecordNotFound:
-        await message.channel.send("검색할 수 있는 통화 기록을 찾지 못했어. 통화 기록 목록에서 파일명을 먼저 확인해줘.")
-        return
-
-    async with message.channel.typing():
-        summary, used_count = await summarize_voice_search(
-            selection.entries,
-            selection.filename,
-            request.query,
-            matched_count=selection.matched_count,
-        )
-        await message.channel.send(
-            embed=create_summary_embed(f"통화 기록 검색: {selection.filename}", summary, used_count)
-        )
-
-
 async def _send_admin_status(message: discord.Message, room_key: str, room_data: dict) -> None:
-    guild_id = message.guild.id if message.guild else None
     status_text = build_admin_status_text(
         load_memory(),
         current_room_key=room_key,
         current_room_data=room_data,
-        guild_id=guild_id,
     )
     await message.channel.send(f"```text\n{status_text}\n```")
 
@@ -845,7 +930,7 @@ def _matched_memory_file_alias(user_text: str) -> str | None:
     return None
 
 
-async def _send_memory_or_recording_file(message: discord.Message, filename: str | None = None) -> None:
+async def _send_memory_file(message: discord.Message, filename: str | None = None) -> None:
     if not filename:
         path = ensure_memory_section_file("conversation")
         await _send_file_path(message, path, missing_message="…대화 메모리 파일을 찾지 못했어.")
@@ -861,14 +946,10 @@ async def _send_memory_or_recording_file(message: discord.Message, filename: str
         )
         return
 
-    try:
-        resolved_filename = resolve_recording_reference(filename, allow_plain_index=True)
-        path = get_recording_path(resolved_filename)
-    except VoiceRecordNotFound:
-        await message.channel.send("…그 이름의 통화 기록 파일을 찾지 못했어. `/대화목록`으로 파일명을 확인해줘.")
-        return
-
-    await _send_file_path(message, path, missing_message="…그 통화 기록 파일을 찾지 못했어.")
+    await message.channel.send(
+        "…그 이름의 메모리 파일을 찾지 못했어. "
+        "`대화`, `방`, `투표`, `뉴스` 중 하나를 골라줘."
+    )
 
 
 async def _generate_adapter_reply(
@@ -1109,6 +1190,15 @@ async def handle_mentioned_message(
     planner_chat_only = False
     state_affection_updated = False
 
+    if await _handle_pending_memory_reset(
+        message=message,
+        user_text=user_text,
+        author_id=author_id,
+        room_key=room_key,
+        special_user=special_user,
+    ):
+        return
+
     if not attachment_context and not user_text.strip().startswith("/"):
         display_name = getattr(message.author, "display_name", message.author.name)
         tool_plan = await plan_tool_use(
@@ -1131,14 +1221,6 @@ async def handle_mentioned_message(
                 client=client,
             ):
                 return
-
-    voice_search_alias = matched_alias(user_text, VOICE_SEARCH_COMMAND.aliases)
-    if voice_search_alias:
-        if not special_user:
-            await message.channel.send("…그 명령어를 사용할 권한이 없어.")
-            return
-        await _send_voice_search(message, _command_arg(user_text, voice_search_alias))
-        return
 
     admin_status_alias = matched_alias(user_text, ADMIN_STATUS_COMMAND.aliases)
     if admin_status_alias:
@@ -1259,46 +1341,13 @@ async def handle_mentioned_message(
             await message.channel.send(format_team_split_result(request, teams))
             return
 
-    if matches_command(user_text, "/기록"):
-        if not special_user:
-            await message.channel.send("…통화 기록 권한이 없어.")
-            return
-
-        _, response_text, _ = await start_voice_recording(
-            client,
-            user=message.author,
-            text_channel=message.channel,
-        )
-        await message.channel.send(response_text)
-        return
-
-    if matches_command(user_text, "/기록중지"):
-        if not special_user:
-            await message.channel.send("…통화 기록 권한이 없어.")
-            return
-
-        if message.guild is None:
-            await message.channel.send("…서버 안에서만 기록을 멈출 수 있어.")
-            return
-
-        _, response_text, _ = await stop_voice_recording(message.guild.id)
-        await message.channel.send(response_text)
-        return
-
-    if matches_command(user_text, "/대화목록"):
-        if not special_user:
-            await message.channel.send("…통화 기록 목록을 볼 권한이 없어.")
-            return
-        await _send_recording_list(message)
-        return
-
     memory_file_alias = _matched_memory_file_alias(user_text)
     if memory_file_alias:
         if not special_user:
             await message.channel.send("…메모리 파일을 받을 권한이 없어.")
             return
         filename = _command_arg(user_text, memory_file_alias) or None
-        await _send_memory_or_recording_file(message, filename)
+        await _send_memory_file(message, filename)
         return
 
     memory_reset_command = next(
@@ -1316,20 +1365,16 @@ async def handle_mentioned_message(
 
         raw_args = user_text.replace(memory_reset_command, "", 1).strip()
         section, confirm_text = _parse_memory_reset_args(raw_args)
-        if section is None or confirm_text != "확인":
-            await message.channel.send(
-                "…초기화할 메모리 파일 이름과 `확인`을 같이 적어줘.\n"
-                f"{format_memory_section_list()}\n"
-                "예: `/메모리초기화 대화 확인`, `/메모리초기화 news_memory.json 확인`"
-            )
+        if section is None:
+            await _ask_memory_reset_target(message, author_id, room_key)
             return
 
-        reset_memory_section(section)
-        if section == "polls":
-            cancel_poll_tasks()
-        label = MEMORY_SECTION_LABELS[section]
-        path = get_memory_section_file(section)
-        await message.channel.send(f"…응. {label} 메모리 파일 `{path.name}`을 비웠어.")
+        if confirm_text == "확인":
+            _pop_pending_memory_reset(author_id, room_key)
+            await _execute_memory_reset(message, section)
+            return
+
+        await _ask_memory_reset_confirm(message, author_id, room_key, section)
         return
 
     if special_user and user_text.startswith("/유저정보"):
@@ -1437,18 +1482,6 @@ async def handle_mentioned_message(
         return
 
     if user_text == "/요약" or user_text.startswith("/요약 "):
-        recording_filename = _summary_recording_filename(user_text)
-        if recording_filename:
-            if not special_user:
-                await message.channel.send("…통화 기록 요약 권한이 없어.")
-                return
-            resolved_filename = _resolve_recording_summary_filename(recording_filename)
-            if not resolved_filename:
-                await message.channel.send("…요약할 통화 기록이 없어. 먼저 `/대화목록`으로 확인해줘.")
-                return
-            await _send_recording_summary(message, resolved_filename)
-            return
-
         await _send_summary(message, user_text, user_data, room_data)
         return
 

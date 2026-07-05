@@ -1,5 +1,4 @@
 import asyncio
-import logging
 
 import discord
 from discord import app_commands
@@ -17,26 +16,16 @@ from firefly.storage import (
     record_room_user_message,
 )
 from firefly.text_utils import clean_discord_content, is_command_text
-from firefly.voice import handle_bot_voice_disconnect, start_voice_recording, stop_voice_recording
-from firefly.voice_records import (
-    format_recording_list,
-    list_recordings,
-    purge_expired_recordings,
-)
-
-logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.WARNING)
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True
-intents.voice_states = True
 
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 news_group = app_commands.Group(name="최신소식", description="기술 소식 구독과 설정을 관리해요.")
 topic_group = app_commands.Group(name="주제", description="최신 소식 주제를 확인하거나 관리해요.")
 _slash_commands_synced = False
-_voice_cleanup_task_started = False
 
 
 async def _run_silent_group_memory_update(
@@ -172,12 +161,6 @@ async def _require_special_interaction(interaction: discord.Interaction) -> bool
     else:
         await interaction.response.send_message(text, ephemeral=True)
     return False
-
-
-async def _voice_record_cleanup_loop() -> None:
-    while True:
-        purge_expired_recordings()
-        await asyncio.sleep(6 * 60 * 60)
 
 
 @tree.command(name="도움말", description="사용 가능한 명령어 목록을 보여줘요.")
@@ -390,75 +373,20 @@ async def role_slash(interaction: discord.Interaction, command_text: str):
     await _run_text_command_slash(interaction, f"/역할 {command_text}", ephemeral=True)
 
 
-@tree.command(name="기록", description="현재 들어가 있는 통화방의 대화를 전사해서 저장해요.")
-async def record_slash(interaction: discord.Interaction):
-    if not await _require_special_interaction(interaction):
-        return
-
-    if interaction.channel is None:
-        await interaction.response.send_message("…서버 채널 안에서만 기록을 시작할 수 있어.", ephemeral=True)
-        return
-
-    await interaction.response.defer(thinking=True)
-    _, response_text, _ = await start_voice_recording(
-        client,
-        user=interaction.user,
-        text_channel=interaction.channel,
-    )
-    await interaction.followup.send(response_text)
-
-
-@tree.command(name="기록중지", description="진행 중인 통화 기록을 마쳐요.")
-async def stop_record_slash(interaction: discord.Interaction):
-    if not await _require_special_interaction(interaction):
-        return
-
-    if interaction.guild is None:
-        await interaction.response.send_message("…서버 안에서만 기록을 멈출 수 있어.", ephemeral=True)
-        return
-
-    await interaction.response.defer(thinking=True)
-    _, response_text, _ = await stop_voice_recording(interaction.guild.id)
-    await interaction.followup.send(response_text)
-
-
-@tree.command(name="대화목록", description="최근 7일 동안 저장된 통화 기록 파일 목록을 보여줘요.")
-async def recording_list_slash(interaction: discord.Interaction):
-    if not await _require_special_interaction(interaction):
-        return
-
-    records = list_recordings()
-    await interaction.response.send_message(format_recording_list(records), ephemeral=True)
-
-
-@tree.command(name="기록검색", description="저장된 통화 기록에서 질문이나 키워드로 필요한 내용을 찾아요.")
-@app_commands.rename(query="질문")
-@app_commands.describe(query="예: 누가 뭘 먹기로 했는지 알려줘")
-async def recording_search_slash(interaction: discord.Interaction, query: str):
-    await _run_text_command_slash(interaction, f"/기록검색 {query}", ephemeral=True)
-
-
-@tree.command(name="녹음검색", description="저장된 통화 기록에서 질문이나 키워드로 필요한 내용을 찾아요.")
-@app_commands.rename(query="질문")
-@app_commands.describe(query="예: 어떤 사람이 한 말 찾아줘")
-async def voice_search_slash(interaction: discord.Interaction, query: str):
-    await _run_text_command_slash(interaction, f"/녹음검색 {query}", ephemeral=True)
-
-
-@tree.command(name="봇상태", description="메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 권한 필요.")
+@tree.command(name="봇상태", description="메모리, 뉴스, 투표 상태를 확인해요. 권한 필요.")
 async def bot_status_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/봇상태", ephemeral=True)
 
 
-@tree.command(name="관리상태", description="메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 권한 필요.")
+@tree.command(name="관리상태", description="메모리, 뉴스, 투표 상태를 확인해요. 권한 필요.")
 async def admin_status_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/관리상태", ephemeral=True)
 
 
-@tree.command(name="요약", description="최근 개인/방 대화 또는 통화 기록 파일을 요약해요.")
+@tree.command(name="요약", description="최근 개인/방 대화를 요약해요.")
 @app_commands.rename(target="대상", limit="개수")
 @app_commands.describe(
-    target="개인, 방, 또는 대화목록에 표시된 통화 기록 파일명",
+    target="개인 또는 방",
     limit="최근 몇 개 메시지를 요약할지",
 )
 async def summary_slash(
@@ -474,9 +402,9 @@ async def summary_slash(
     await _run_text_command_slash(interaction, " ".join(parts), ephemeral=True)
 
 
-@tree.command(name="메모리파일", description="대화/방/투표/뉴스 메모리 파일 또는 통화 기록 원본 파일을 받아와요.")
+@tree.command(name="메모리파일", description="대화/방/투표/뉴스 메모리 파일을 받아와요.")
 @app_commands.rename(filename="파일이름")
-@app_commands.describe(filename="대화, 방, 투표, 뉴스, 메모리 파일명, 또는 통화 기록 파일명")
+@app_commands.describe(filename="대화, 방, 투표, 뉴스, 또는 메모리 파일명")
 async def memory_file_slash(interaction: discord.Interaction, filename: str | None = None):
     user_text = f"/메모리파일 {filename or ''}".strip()
     await _run_text_command_slash(interaction, user_text, ephemeral=True)
@@ -484,7 +412,7 @@ async def memory_file_slash(interaction: discord.Interaction, filename: str | No
 
 @tree.command(name="memoryfile", description="메모리 JSON 파일을 받아와요. 권한 필요.")
 @app_commands.rename(filename="파일이름")
-@app_commands.describe(filename="대화, 방, 투표, 뉴스, 메모리 파일명, 또는 통화 기록 파일명")
+@app_commands.describe(filename="대화, 방, 투표, 뉴스, 또는 메모리 파일명")
 async def memory_file_english_slash(interaction: discord.Interaction, filename: str | None = None):
     user_text = f"/memoryfile {filename or ''}".strip()
     await _run_text_command_slash(interaction, user_text, ephemeral=True)
@@ -721,12 +649,8 @@ tree.add_command(topic_group)
 
 @client.event
 async def on_ready():
-    global _slash_commands_synced, _voice_cleanup_task_started
+    global _slash_commands_synced
     print(f"로그인됨: {client.user}")
-    purge_expired_recordings()
-    if not _voice_cleanup_task_started:
-        asyncio.create_task(_voice_record_cleanup_loop())
-        _voice_cleanup_task_started = True
     await restore_poll_tasks(client)
     start_daily_news_task(client)
     if not _slash_commands_synced:
@@ -745,16 +669,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 @client.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     await refresh_poll_vote_count(client, payload)
-
-
-@client.event
-async def on_voice_state_update(
-    member: discord.Member,
-    before: discord.VoiceState,
-    after: discord.VoiceState,
-):
-    if client.user and member.id == client.user.id:
-        await handle_bot_voice_disconnect(member, after)
 
 
 @client.event

@@ -1,6 +1,6 @@
 # MyWife Firefly Bot
 
-Python Discord bot for character chat, local memory, room context, polls, daily news delivery, and voice recording summaries.
+Python Discord bot for character chat, local memory, room context, polls, and daily news delivery.
 
 The most important runtime assets are the prompt files and memory files. Treat them as behavior-defining data, not disposable cache.
 
@@ -38,35 +38,20 @@ Optional:
 - `STATE_UPDATER_PROMPT_FILE`: Internal memory/affection update prompt path. Defaults to `prompt_state_updater.txt`.
 - `TOOL_PLANNER_MODEL`: Model used for command/tool planning. Defaults to `DEFAULT_MODEL`.
 - `STATE_UPDATER_MODEL`: Model used for hidden brain/affection updates before persona replies. Defaults to `DEFAULT_MODEL`.
-- `VOICE_TRANSCRIPTION_MODEL`
-- `VOICE_FALLBACK_TRANSCRIPTION_MODEL`
-- `VOICE_REALTIME_TRANSCRIPTION_URL`
-- `VOICE_SUMMARY_MODEL`
-- `VOICE_SUMMARY_FALLBACK_MODEL`
-- `VOICE_TRANSCRIPT_LANGUAGE`
-- `VOICE_RECORDING_RETENTION_DAYS`
-- `VOICE_SUMMARY_CHUNK_CHARS`
-- `VOICE_TRANSCRIBER_QUEUE_SIZE`
-- `VOICE_TRANSCRIPTION_COMMIT_SECONDS`
-- `VOICE_TRANSCRIPTION_IDLE_COMMIT_SECONDS`
-- `VOICE_TRANSCRIPTION_MIN_COMMIT_MS`
-- `VOICE_FALLBACK_SESSION_MAX_SECONDS`
 
 ## Data And Prompts
 
 - `prompt.txt`, `prompt_special.txt`, and `prompt_news.txt` define bot behavior and should be reviewed carefully before changing.
 - `prompt_tool_planner.txt` is intentionally not a persona prompt. It only decides whether to return `chat`, `command`, `command_then_reply`, `clarify`, or `reject`.
 - `prompt_state_updater.txt` is a separate internal state prompt. For non-command chat it may choose hidden `/뇌추가` and `/호감도증감` updates before the normal Bandi persona replies.
-- Short-term memory stores an abstract repeatable memory plus hidden raw samples. Similar short-term signals merge into one candidate by category/token overlap, increase `frequency_score`, and promote to long-term memory when the promotion threshold is reached; promoted entries are removed from short-term memory.
+- Brain memory is stored as a keyword score dictionary under `brain_keywords`. Similar keywords are merged, existing scores receive a discount before updates, and legacy brain/short-term/long-term memory fields are migrated into keyword scores on load.
 - Runtime memory is split by concern and stored next to `MEMORY_FILE`: `conversation_memory.json`, `room_memory.json`, `poll_memory.json`, and `news_memory.json`. Existing legacy `memory.json` data is still read as a fallback until split files exist.
 - `memory.json`, split memory files, and `data/` are local runtime state and are ignored by git.
-- Voice recordings are stored under `data/voice_records/` by default.
-- The `/메모리파일 [대화/방/투표/뉴스]` command can send one split memory file or a saved voice transcript file to the special user.
+- The `/메모리파일 [대화/방/투표/뉴스]` command can send one split memory file to the special user.
 
 ## Added Commands
 
-- `/기록검색 [파일명] 질문`: special-user-only search over saved voice transcripts. If the filename is omitted, the bot searches recent recordings.
-- `/봇상태`: special-user-only runtime status for memory, rooms, polls, news, and voice recordings.
+- `/봇상태`: special-user-only runtime status for memory, rooms, polls, and news.
 - `/프로필 [@유저]`: show a user's profile avatar, name, nickname, affection, and last-seen time.
 - `/주사위 [시작] [끝]`: roll one number inside the inclusive range, e.g. `/주사위 1 6`.
 - `/팀나누기 팀수=2 | Alice, Bob, Carol, Dana`: shuffle members into teams. Use `팀당=3` to split by team size, `팀별=3,6` to set each team's size explicitly, or `팀별=tagger:3,hiders:6` to name those teams.
@@ -76,7 +61,7 @@ Optional:
 - `/역할 ...`: special-user-only Discord role management for assigning/removing roles, changing role colors/names, and adding/removing selected role permissions.
 - `/호칭 @유저 새호칭` or `/호칭 기존호칭 새호칭`: special users can change another user's nickname by mention, Discord ID, or a unique stored nickname.
 - `/메모리초기화 [대화/방/투표/뉴스] 확인`: special-user-only targeted reset for one split memory file.
-- Voice recording commands accept list indexes such as `1번`, `#1`, or `index:1` wherever a recording filename is accepted.
+- `/메모리초기화 [대화/방/투표/뉴스]`: asks for a short follow-up confirmation. Reply `확인` to execute or `취소` to abort.
 - Natural messages are first checked by the tool planner instead of local keyword routing. If it selects `command`, commands run directly; if it selects `command_then_reply`, command results are fed into Bandi's reply; if it selects `chat`, hidden brain/affection updates run first and then the normal Bandi persona answers with command output disabled for that turn. Hidden state updates are only accepted for the current speaker and are validated before any special-user command path runs.
 
 ## Deployment

@@ -177,8 +177,6 @@ def _infer_dependencies(name: str, description: str) -> list[str]:
         "뉴스": "firefly.news",
         "주제": "firefly.news",
         "역할": "firefly.role_commands",
-        "녹음": "firefly.voice_search",
-        "기록": "firefly.voice",
         "요약": "firefly.ai",
         "검색": "firefly.ai",
     }
@@ -246,7 +244,7 @@ def write_report(schema: dict[str, Any], path: Path = REPORT_PATH) -> None:
         "- Slash command registration: decorators on `tree`, `news_group`, and `topic_group` in `Firefly.py`",
         "- Text command router: `firefly.commands.handle_mentioned_message`",
         "- Command guide prompts: `prompt_commands_general.txt` and `prompt_commands_special.txt`",
-        "- Service modules: `firefly.polls`, `firefly.brain`, `firefly.news`, `firefly.role_commands`, `firefly.voice`, `firefly.voice_search`, `firefly.storage`",
+        "- Service modules: `firefly.polls`, `firefly.brain`, `firefly.news`, `firefly.role_commands`, `firefly.storage`",
         "",
         "## Discovery Method",
         "- Parsed `Firefly.py` decorators for real slash commands.",

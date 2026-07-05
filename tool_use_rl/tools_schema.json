@@ -14,7 +14,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:470",
+      "source_file": "Firefly.py:416",
       "confidence": 1.0,
       "dependencies": [
         "firefly.storage"
@@ -49,14 +49,12 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:271",
+      "source_file": "Firefly.py:272",
       "confidence": 1.0,
       "dependencies": [
         "firefly.ai"
       ],
       "related_tools": [
-        "기록검색",
-        "녹음검색",
         "요약",
         "인터넷모드"
       ]
@@ -67,139 +65,24 @@
         "/관리상태"
       ],
       "type": "slash_command",
-      "description": "메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 권한 필요.",
+      "description": "메모리, 뉴스, 투표 상태를 확인해요. 권한 필요.",
       "arguments": [],
-      "source_file": "Firefly.py:436",
+      "source_file": "Firefly.py:382",
       "confidence": 1.0,
       "dependencies": [
         "firefly.polls",
         "firefly.storage",
-        "firefly.news",
-        "firefly.voice"
+        "firefly.news"
       ],
       "related_tools": [
         "memoryfile",
-        "기록",
-        "기록검색",
-        "기록중지",
-        "녹음검색",
         "뇌",
         "뇌삭제",
-        "뇌수정"
-      ]
-    },
-    {
-      "name": "기록",
-      "aliases": [
-        "/기록"
-      ],
-      "type": "slash_command",
-      "description": "현재 들어가 있는 통화방의 대화를 전사해서 저장해요.",
-      "arguments": [],
-      "source_file": "Firefly.py:376",
-      "confidence": 1.0,
-      "dependencies": [
-        "firefly.voice"
-      ],
-      "related_tools": [
-        "관리상태",
-        "기록검색",
-        "기록중지",
-        "녹음검색",
-        "대화목록",
-        "메모리파일",
-        "봇상태",
-        "요약"
-      ]
-    },
-    {
-      "name": "기록검색",
-      "aliases": [
-        "/record-search",
-        "/기록검색",
-        "/녹음검색"
-      ],
-      "type": "slash_command",
-      "description": "저장된 통화 기록에서 질문이나 키워드로 필요한 내용을 찾아요.",
-      "arguments": [
-        {
-          "name": "query",
-          "required": true,
-          "description": ""
-        }
-      ],
-      "source_file": "Firefly.py:419",
-      "confidence": 1.0,
-      "dependencies": [
-        "firefly.ai",
-        "firefly.commands",
-        "firefly.voice"
-      ],
-      "related_tools": [
-        "검색실행",
-        "관리상태",
-        "기록",
-        "기록중지",
-        "녹음검색",
-        "대화목록",
-        "메모리파일",
-        "봇상태"
-      ]
-    },
-    {
-      "name": "기록중지",
-      "aliases": [
-        "/기록중지"
-      ],
-      "type": "slash_command",
-      "description": "진행 중인 통화 기록을 마쳐요.",
-      "arguments": [],
-      "source_file": "Firefly.py:394",
-      "confidence": 1.0,
-      "dependencies": [
-        "firefly.voice"
-      ],
-      "related_tools": [
-        "관리상태",
-        "기록",
-        "기록검색",
-        "녹음검색",
-        "대화목록",
-        "메모리파일",
-        "봇상태",
-        "요약"
-      ]
-    },
-    {
-      "name": "녹음검색",
-      "aliases": [
-        "/녹음검색"
-      ],
-      "type": "slash_command",
-      "description": "저장된 통화 기록에서 질문이나 키워드로 필요한 내용을 찾아요.",
-      "arguments": [
-        {
-          "name": "query",
-          "required": true,
-          "description": ""
-        }
-      ],
-      "source_file": "Firefly.py:426",
-      "confidence": 1.0,
-      "dependencies": [
-        "firefly.voice_search",
-        "firefly.voice",
-        "firefly.ai"
-      ],
-      "related_tools": [
-        "검색실행",
-        "관리상태",
-        "기록",
-        "기록검색",
-        "기록중지",
-        "대화목록",
-        "메모리파일",
-        "봇상태"
+        "뇌수정",
+        "뇌추가",
+        "단체모드",
+        "메모리초기화",
+        "메모리파일"
       ]
     },
     {
@@ -216,7 +99,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:306",
+      "source_file": "Firefly.py:307",
       "confidence": 1.0,
       "dependencies": [
         "firefly.brain",
@@ -252,7 +135,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:354",
+      "source_file": "Firefly.py:355",
       "confidence": 1.0,
       "dependencies": [
         "firefly.brain",
@@ -293,7 +176,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:336",
+      "source_file": "Firefly.py:337",
       "confidence": 1.0,
       "dependencies": [
         "firefly.brain",
@@ -329,7 +212,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:319",
+      "source_file": "Firefly.py:320",
       "confidence": 1.0,
       "dependencies": [
         "firefly.brain",
@@ -360,7 +243,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:576",
+      "source_file": "Firefly.py:522",
       "confidence": 1.0,
       "dependencies": [
         "firefly.storage"
@@ -377,30 +260,6 @@
       ]
     },
     {
-      "name": "대화목록",
-      "aliases": [
-        "/대화목록"
-      ],
-      "type": "slash_command",
-      "description": "최근 7일 동안 저장된 통화 기록 파일 목록을 보여줘요.",
-      "arguments": [],
-      "source_file": "Firefly.py:408",
-      "confidence": 1.0,
-      "dependencies": [
-        "firefly.voice"
-      ],
-      "related_tools": [
-        "관리상태",
-        "기록",
-        "기록검색",
-        "기록중지",
-        "녹음검색",
-        "메모리파일",
-        "봇상태",
-        "요약"
-      ]
-    },
-    {
       "name": "도움말",
       "aliases": [
         "/도움말"
@@ -408,7 +267,7 @@
       "type": "slash_command",
       "description": "사용 가능한 명령어 목록을 보여줘요.",
       "arguments": [],
-      "source_file": "Firefly.py:184",
+      "source_file": "Firefly.py:167",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []
@@ -432,7 +291,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:481",
+      "source_file": "Firefly.py:427",
       "confidence": 1.0,
       "dependencies": [
         "firefly.polls",
@@ -456,7 +315,7 @@
         "/메모리파일"
       ],
       "type": "slash_command",
-      "description": "대화/방/투표/뉴스 메모리 파일 또는 통화 기록 원본 파일을 받아와요.",
+      "description": "대화/방/투표/뉴스 메모리 파일을 받아와요.",
       "arguments": [
         {
           "name": "filename",
@@ -464,23 +323,22 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:462",
+      "source_file": "Firefly.py:408",
       "confidence": 1.0,
       "dependencies": [
         "firefly.polls",
         "firefly.storage",
-        "firefly.news",
-        "firefly.voice"
+        "firefly.news"
       ],
       "related_tools": [
         "memoryfile",
         "관리상태",
-        "기록",
-        "기록검색",
-        "기록중지",
-        "녹음검색",
         "뇌",
-        "뇌삭제"
+        "뇌삭제",
+        "뇌수정",
+        "뇌추가",
+        "단체모드",
+        "메모리초기화"
       ]
     },
     {
@@ -502,7 +360,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:495",
+      "source_file": "Firefly.py:441",
       "confidence": 1.0,
       "dependencies": [
         "firefly.polls",
@@ -528,7 +386,7 @@
       "type": "slash_command",
       "description": "현재 방의 단체 모드 기억을 보여줘요. 권한 필요.",
       "arguments": [],
-      "source_file": "Firefly.py:581",
+      "source_file": "Firefly.py:527",
       "confidence": 1.0,
       "dependencies": [
         "firefly.storage"
@@ -552,7 +410,7 @@
       "type": "slash_command",
       "description": "현재 방의 인터넷/단체 모드 상태를 보여줘요. 권한 필요.",
       "arguments": [],
-      "source_file": "Firefly.py:591",
+      "source_file": "Firefly.py:537",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []
@@ -565,7 +423,7 @@
       "type": "slash_command",
       "description": "현재 방의 단체 기억을 비워요. 권한 필요.",
       "arguments": [],
-      "source_file": "Firefly.py:586",
+      "source_file": "Firefly.py:532",
       "confidence": 1.0,
       "dependencies": [
         "firefly.storage"
@@ -589,26 +447,25 @@
         "/봇상태"
       ],
       "type": "slash_command",
-      "description": "메모리, 뉴스, 투표, 통화 기록 상태를 확인해요. 권한 필요.",
+      "description": "메모리, 뉴스, 투표 상태를 확인해요. 권한 필요.",
       "arguments": [],
-      "source_file": "Firefly.py:431",
+      "source_file": "Firefly.py:377",
       "confidence": 1.0,
       "dependencies": [
         "firefly.commands",
         "firefly.news",
         "firefly.polls",
-        "firefly.storage",
-        "firefly.voice"
+        "firefly.storage"
       ],
       "related_tools": [
         "memoryfile",
         "관리상태",
-        "기록",
-        "기록검색",
-        "기록중지",
-        "녹음검색",
         "뇌",
-        "뇌삭제"
+        "뇌삭제",
+        "뇌수정",
+        "뇌추가",
+        "단체모드",
+        "메모리초기화"
       ]
     },
     {
@@ -630,7 +487,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:256",
+      "source_file": "Firefly.py:257",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []
@@ -650,14 +507,13 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:371",
+      "source_file": "Firefly.py:372",
       "confidence": 1.0,
       "dependencies": [
         "firefly.commands",
         "firefly.role_commands"
       ],
       "related_tools": [
-        "기록검색",
         "봇상태"
       ]
     },
@@ -667,7 +523,7 @@
         "/요약"
       ],
       "type": "slash_command",
-      "description": "최근 개인/방 대화 또는 통화 기록 파일을 요약해요.",
+      "description": "최근 개인/방 대화를 요약해요.",
       "arguments": [
         {
           "name": "target",
@@ -680,21 +536,14 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:446",
+      "source_file": "Firefly.py:392",
       "confidence": 1.0,
       "dependencies": [
-        "firefly.voice",
         "firefly.ai"
       ],
       "related_tools": [
         "검색실행",
-        "관리상태",
-        "기록",
-        "기록검색",
-        "기록중지",
-        "녹음검색",
-        "대화목록",
-        "메모리파일"
+        "인터넷모드"
       ]
     },
     {
@@ -711,7 +560,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:506",
+      "source_file": "Firefly.py:452",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []
@@ -730,15 +579,13 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:563",
+      "source_file": "Firefly.py:509",
       "confidence": 1.0,
       "dependencies": [
         "firefly.ai"
       ],
       "related_tools": [
         "검색실행",
-        "기록검색",
-        "녹음검색",
         "요약"
       ]
     },
@@ -761,7 +608,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:221",
+      "source_file": "Firefly.py:204",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []
@@ -774,7 +621,7 @@
       "type": "slash_command",
       "description": "최신 소식 주제를 보여줘요.",
       "arguments": [],
-      "source_file": "Firefly.py:668",
+      "source_file": "Firefly.py:614",
       "confidence": 1.0,
       "dependencies": [
         "firefly.news"
@@ -804,7 +651,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:696",
+      "source_file": "Firefly.py:642",
       "confidence": 1.0,
       "dependencies": [
         "firefly.news"
@@ -834,7 +681,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:689",
+      "source_file": "Firefly.py:635",
       "confidence": 1.0,
       "dependencies": [
         "firefly.news"
@@ -864,7 +711,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:682",
+      "source_file": "Firefly.py:628",
       "confidence": 1.0,
       "dependencies": [
         "firefly.news"
@@ -894,7 +741,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:675",
+      "source_file": "Firefly.py:621",
       "confidence": 1.0,
       "dependencies": [
         "firefly.news"
@@ -918,7 +765,7 @@
       "type": "slash_command",
       "description": "최근 개인 대화 기억을 비워요.",
       "arguments": [],
-      "source_file": "Firefly.py:194",
+      "source_file": "Firefly.py:177",
       "confidence": 1.0,
       "dependencies": [
         "firefly.storage"
@@ -948,7 +795,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:611",
+      "source_file": "Firefly.py:557",
       "confidence": 1.0,
       "dependencies": [
         "firefly.news"
@@ -978,21 +825,20 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:656",
+      "source_file": "Firefly.py:602",
       "confidence": 1.0,
       "dependencies": [
-        "firefly.news",
-        "firefly.voice"
+        "firefly.news"
       ],
       "related_tools": [
         "관리상태",
-        "기록",
-        "기록검색",
-        "기록중지",
-        "녹음검색",
-        "대화목록",
         "메모리초기화",
-        "메모리파일"
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 설정"
       ]
     },
     {
@@ -1003,7 +849,7 @@
       "type": "slash_command",
       "description": "최신 소식 구독자 목록과 설정을 보여줘요.",
       "arguments": [],
-      "source_file": "Firefly.py:627",
+      "source_file": "Firefly.py:573",
       "confidence": 1.0,
       "dependencies": [
         "firefly.news"
@@ -1033,7 +879,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:598",
+      "source_file": "Firefly.py:544",
       "confidence": 1.0,
       "dependencies": [
         "firefly.news"
@@ -1057,7 +903,7 @@
       "type": "slash_command",
       "description": "최신 소식 구독과 발송 설정을 보여줘요.",
       "arguments": [],
-      "source_file": "Firefly.py:622",
+      "source_file": "Firefly.py:568",
       "confidence": 1.0,
       "dependencies": [
         "firefly.news"
@@ -1087,7 +933,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:634",
+      "source_file": "Firefly.py:580",
       "confidence": 1.0,
       "dependencies": [
         "firefly.news"
@@ -1117,21 +963,20 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:663",
+      "source_file": "Firefly.py:609",
       "confidence": 1.0,
       "dependencies": [
-        "firefly.news",
-        "firefly.voice"
+        "firefly.news"
       ],
       "related_tools": [
         "관리상태",
-        "기록",
-        "기록검색",
-        "기록중지",
-        "녹음검색",
-        "대화목록",
         "메모리초기화",
-        "메모리파일"
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 설정"
       ]
     },
     {
@@ -1148,21 +993,20 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:649",
+      "source_file": "Firefly.py:595",
       "confidence": 1.0,
       "dependencies": [
-        "firefly.news",
-        "firefly.voice"
+        "firefly.news"
       ],
       "related_tools": [
         "관리상태",
-        "기록",
-        "기록검색",
-        "기록중지",
-        "녹음검색",
-        "대화목록",
         "메모리초기화",
-        "메모리파일"
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 설정"
       ]
     },
     {
@@ -1179,21 +1023,20 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:642",
+      "source_file": "Firefly.py:588",
       "confidence": 1.0,
       "dependencies": [
-        "firefly.news",
-        "firefly.voice"
+        "firefly.news"
       ],
       "related_tools": [
         "관리상태",
-        "기록",
-        "기록검색",
-        "기록중지",
-        "녹음검색",
-        "대화목록",
         "메모리초기화",
-        "메모리파일"
+        "메모리파일",
+        "메모리파일초기화",
+        "봇상태",
+        "주제 목록",
+        "주제 변경",
+        "주제 설정"
       ]
     },
     {
@@ -1210,7 +1053,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:295",
+      "source_file": "Firefly.py:296",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []
@@ -1229,7 +1072,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:542",
+      "source_file": "Firefly.py:488",
       "confidence": 1.0,
       "dependencies": [
         "firefly.polls"
@@ -1257,7 +1100,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:549",
+      "source_file": "Firefly.py:495",
       "confidence": 1.0,
       "dependencies": [
         "firefly.polls"
@@ -1277,7 +1120,7 @@
         "/팀나누기"
       ],
       "type": "slash_command",
-      "description": "참가자를 섞어서 균형 있게 팀으로 나눠요.",
+      "description": "참가자를 섞어서 팀으로 나눠요.",
       "arguments": [
         {
           "name": "members",
@@ -1293,9 +1136,14 @@
           "name": "members_per_team",
           "required": true,
           "description": ""
+        },
+        {
+          "name": "team_sizes",
+          "required": true,
+          "description": ""
         }
       ],
-      "source_file": "Firefly.py:233",
+      "source_file": "Firefly.py:222",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []
@@ -1314,7 +1162,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:208",
+      "source_file": "Firefly.py:191",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []
@@ -1327,7 +1175,7 @@
       "type": "slash_command",
       "description": "현재 너에 대한 반디의 호감도를 확인해요.",
       "arguments": [],
-      "source_file": "Firefly.py:189",
+      "source_file": "Firefly.py:172",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []
@@ -1351,7 +1199,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:518",
+      "source_file": "Firefly.py:464",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []
@@ -1375,7 +1223,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:530",
+      "source_file": "Firefly.py:476",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []
@@ -1394,7 +1242,7 @@
           "description": ""
         }
       ],
-      "source_file": "Firefly.py:201",
+      "source_file": "Firefly.py:184",
       "confidence": 1.0,
       "dependencies": [],
       "related_tools": []

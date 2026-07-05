@@ -15,40 +15,6 @@ def _get_required_env(name: str) -> str:
     return value
 
 
-def _get_int_env(name: str, default: int, *, minimum: int | None = None, maximum: int | None = None) -> int:
-    raw_value = os.getenv(name, "").strip()
-    if raw_value:
-        try:
-            value = int(raw_value)
-        except ValueError as exc:
-            raise ValueError(f"{name} must be an integer.") from exc
-    else:
-        value = default
-
-    if minimum is not None and value < minimum:
-        raise ValueError(f"{name} must be at least {minimum}.")
-    if maximum is not None and value > maximum:
-        raise ValueError(f"{name} must be at most {maximum}.")
-    return value
-
-
-def _get_float_env(name: str, default: float, *, minimum: float | None = None, maximum: float | None = None) -> float:
-    raw_value = os.getenv(name, "").strip()
-    if raw_value:
-        try:
-            value = float(raw_value)
-        except ValueError as exc:
-            raise ValueError(f"{name} must be a number.") from exc
-    else:
-        value = default
-
-    if minimum is not None and value < minimum:
-        raise ValueError(f"{name} must be at least {minimum}.")
-    if maximum is not None and value > maximum:
-        raise ValueError(f"{name} must be at most {maximum}.")
-    return value
-
-
 def _resolve_project_path(value: str | Path) -> Path:
     path = Path(value)
     if path.is_absolute():
@@ -120,28 +86,3 @@ DEFAULT_MODEL = "gpt-5.3-codex"
 TOOL_PLANNER_MODEL = os.getenv("TOOL_PLANNER_MODEL", DEFAULT_MODEL)
 STATE_UPDATER_MODEL = os.getenv("STATE_UPDATER_MODEL", DEFAULT_MODEL)
 WEB_SEARCH_MODEL = "gpt-5.4"
-VOICE_TRANSCRIPTION_MODEL = os.getenv("VOICE_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
-VOICE_FALLBACK_TRANSCRIPTION_MODEL = os.getenv(
-    "VOICE_FALLBACK_TRANSCRIPTION_MODEL",
-    "gpt-4o-mini-transcribe",
-)
-VOICE_REALTIME_TRANSCRIPTION_URL = os.getenv(
-    "VOICE_REALTIME_TRANSCRIPTION_URL",
-    "wss://api.openai.com/v1/realtime?intent=transcription",
-)
-VOICE_SUMMARY_MODEL = os.getenv("VOICE_SUMMARY_MODEL", "gpt-4.1-mini")
-VOICE_SUMMARY_FALLBACK_MODEL = os.getenv("VOICE_SUMMARY_FALLBACK_MODEL", "gpt-4.1-mini")
-VOICE_TRANSCRIPT_LANGUAGE = os.getenv("VOICE_TRANSCRIPT_LANGUAGE", "ko")
-VOICE_RECORDINGS_DIR = DATA_DIR / "voice_records"
-VOICE_RECORDING_RETENTION_DAYS = _get_int_env("VOICE_RECORDING_RETENTION_DAYS", 7, minimum=1, maximum=365)
-VOICE_SUMMARY_CHUNK_CHARS = _get_int_env("VOICE_SUMMARY_CHUNK_CHARS", 50000, minimum=8000, maximum=200000)
-VOICE_TRANSCRIBER_QUEUE_SIZE = _get_int_env("VOICE_TRANSCRIBER_QUEUE_SIZE", 250, minimum=1, maximum=5000)
-VOICE_TRANSCRIPTION_COMMIT_SECONDS = _get_float_env("VOICE_TRANSCRIPTION_COMMIT_SECONDS", 6.0, minimum=0.5, maximum=60.0)
-VOICE_TRANSCRIPTION_IDLE_COMMIT_SECONDS = _get_float_env(
-    "VOICE_TRANSCRIPTION_IDLE_COMMIT_SECONDS",
-    2.0,
-    minimum=0.5,
-    maximum=60.0,
-)
-VOICE_TRANSCRIPTION_MIN_COMMIT_MS = _get_int_env("VOICE_TRANSCRIPTION_MIN_COMMIT_MS", 300, minimum=100, maximum=60000)
-VOICE_FALLBACK_SESSION_MAX_SECONDS = _get_float_env("VOICE_FALLBACK_SESSION_MAX_SECONDS", 120, minimum=1.0, maximum=1800.0)

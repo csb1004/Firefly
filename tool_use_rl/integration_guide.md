@@ -70,7 +70,7 @@ python -m tool_use_rl.train_rl_tool_selector --tasks tool_use_rl/env_tasks.jsonl
 
 ## Why The Router Is Not Replaced
 
-The existing command handlers own Discord permissions, message formatting, persistence, poll tasks, voice tasks, and role operations. The new selector layer only chooses tools; execution remains inside the existing router and service modules.
+The existing command handlers own Discord permissions, message formatting, persistence, poll tasks, and role operations. The new selector layer only chooses tools; execution remains inside the existing router and service modules.
 
 ## Future Runtime Option
 

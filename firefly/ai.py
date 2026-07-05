@@ -19,9 +19,6 @@ from .config import (
     SUMMARY_DEFAULT_LIMIT,
     TOOL_PLANNER_MODEL,
     TOOL_PLANNER_PROMPT_FILE,
-    VOICE_SUMMARY_CHUNK_CHARS,
-    VOICE_SUMMARY_FALLBACK_MODEL,
-    VOICE_SUMMARY_MODEL,
     WEB_SEARCH_MODEL,
 )
 from .content import LONG_SAM_LINE
@@ -44,7 +41,6 @@ from .storage import (
 from .state_updates import filter_hidden_state_update_commands
 from .text_utils import get_current_time_text, is_command_text, load_text_file
 from .tool_planner import PLAN_CHAT, ToolPlan, parse_tool_plan
-from .voice_search import format_voice_search_context
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 STATE_UPDATE_CONTEXT_HISTORY_LIMIT = 6
@@ -322,11 +318,6 @@ NEWS_TOPIC_SOURCE_HINTS = (
         ),
     ),
 )
-
-
-def _is_model_not_found_error(error: APIError) -> bool:
-    text = str(error).lower()
-    return "model_not_found" in text or ("model, '" in text and "was not found" in text)
 
 
 def _normalize_news_digest_format(text: str) -> str:
@@ -694,199 +685,6 @@ async def summarize_conversation(
     except Exception as e:
         print("Summary error:", e)
         return "…미안. 지금은 요약을 만들 수 없어.", len(lines)
-
-
-def _format_voice_summary_lines(entries: list[dict]) -> list[str]:
-    lines = []
-    for entry in entries:
-        speaker = str(entry.get("speaker_name") or "알 수 없음").strip()
-        text = str(entry.get("text") or "").strip()
-        created_at = str(entry.get("created_at") or "").strip()
-        if not text:
-            continue
-        prefix = f"[{created_at}] " if created_at else ""
-        lines.append(f"{prefix}{speaker}: {text}")
-    return lines
-
-
-def _chunk_lines(lines: list[str], max_chars: int) -> list[str]:
-    chunks = []
-    current = []
-    current_size = 0
-
-    for line in lines:
-        line_size = len(line) + 1
-        if current and current_size + line_size > max_chars:
-            chunks.append("\n".join(current))
-            current = []
-            current_size = 0
-
-        current.append(line)
-        current_size += line_size
-
-    if current:
-        chunks.append("\n".join(current))
-
-    return chunks
-
-
-async def _request_voice_summary(
-    transcript_text: str,
-    scope_name: str,
-    part_label: str | None = None,
-) -> str:
-    system_prompt = (
-        "너는 디스코드 통화 전사본을 수업 노트나 회의록처럼 정리하는 한국어 요약 도우미야. "
-        "전사 오류가 있을 수 있으니 불확실한 내용은 단정하지 말고, 실제 발화에 근거한 내용만 정리해. "
-        "중요 개념, 결정 사항, 해야 할 일, 남은 질문을 분리해서 짧고 실용적으로 작성해."
-    )
-    label = f"\n[부분]\n{part_label}" if part_label else ""
-    user_prompt = f"""
-[요약 대상]
-{scope_name}{label}
-
-[전사본]
-{transcript_text}
-
-[출력 형식]
-- 핵심 요약: 3~7문장
-- 주요 내용: 항목별 정리
-- 결정/할 일: 있으면 정리, 없으면 생략
-- 헷갈리거나 확인할 점: 있으면 정리, 없으면 생략
-""".strip()
-
-    input_messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
-    try:
-        response = await asyncio.to_thread(
-            client_openai.responses.create,
-            model=VOICE_SUMMARY_MODEL,
-            input=input_messages,
-        )
-    except APIError as e:
-        fallback_model = VOICE_SUMMARY_FALLBACK_MODEL
-        if (
-            _is_model_not_found_error(e)
-            and fallback_model
-            and fallback_model != VOICE_SUMMARY_MODEL
-        ):
-            print(
-                "Voice summary model unavailable; "
-                f"falling back from {VOICE_SUMMARY_MODEL} to {fallback_model}: {e}"
-            )
-            response = await asyncio.to_thread(
-                client_openai.responses.create,
-                model=fallback_model,
-                input=input_messages,
-            )
-        else:
-            raise
-    return response.output_text.strip()
-
-
-async def summarize_voice_recording(
-    entries: list[dict],
-    recording_name: str,
-) -> tuple[str, int]:
-    lines = _format_voice_summary_lines(entries)
-    if not lines:
-        return "이 파일에는 아직 요약할 전사 내용이 없어.", 0
-
-    chunks = _chunk_lines(lines, max(8000, VOICE_SUMMARY_CHUNK_CHARS))
-    scope_name = f"통화 기록 파일 `{recording_name}`"
-
-    try:
-        if len(chunks) == 1:
-            return await _request_voice_summary(chunks[0], scope_name), len(lines)
-
-        partial_summaries = []
-        for index, chunk in enumerate(chunks, start=1):
-            partial = await _request_voice_summary(
-                chunk,
-                scope_name,
-                part_label=f"{index}/{len(chunks)}",
-            )
-            partial_summaries.append(f"[부분 {index}]\n{partial}")
-
-        final_prompt = "\n\n".join(partial_summaries)
-        final_summary = await _request_voice_summary(
-            final_prompt,
-            scope_name,
-            part_label="부분 요약 통합본",
-        )
-        return final_summary, len(lines)
-    except RateLimitError as e:
-        error_text = str(e)
-        if "insufficient_quota" in error_text:
-            return "…OpenAI API 사용 한도가 부족해서 통화 요약을 만들 수 없어.", len(lines)
-        return "…요약 요청이 잠시 몰린 것 같아. 조금 뒤에 다시 시도해줘.", len(lines)
-    except APIError as e:
-        print("Voice summary APIError:", e)
-        return "…통화 요약 중 OpenAI 연결이 불안정했어.", len(lines)
-    except Exception as e:
-        print("Voice summary error:", e)
-        return "…미안. 지금은 통화 요약을 만들 수 없어.", len(lines)
-
-
-async def summarize_voice_search(
-    entries: list[dict],
-    recording_name: str,
-    query: str,
-    *,
-    matched_count: int = 0,
-) -> tuple[str, int]:
-    context = format_voice_search_context(entries)
-    if not context:
-        return "해당 통화 기록에서 살펴볼 전사 내용이 아직 없어.", 0
-
-    system_prompt = (
-        "너는 디스코드 통화 전사에서 사용자의 질문과 관련된 발언만 찾아 답하는 한국어 기록 검색 도우미야. "
-        "전사에 근거가 있는 내용만 말하고, 누가 말했는지와 맥락을 짧게 정리해. "
-        "근거가 약하면 추측하지 말고 기록상으로는 확실하지 않다고 말해."
-    )
-    user_prompt = f"""
-[통화 기록 파일]
-{recording_name}
-
-[검색 질문]
-{query}
-
-[직접 키워드 매칭 수]
-{matched_count}
-
-[관련 전사 발췌]
-{context}
-
-[출력 형식]
-- 답: 질문에 대한 결론을 1~3문장으로
-- 근거: 누가 어떤 취지로 말했는지 bullet로
-- 확인 필요: 기록만으로 부족한 부분이 있으면 짧게
-""".strip()
-
-    try:
-        response = await asyncio.to_thread(
-            client_openai.responses.create,
-            model=VOICE_SUMMARY_MODEL,
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        return response.output_text.strip(), len(entries)
-    except RateLimitError as e:
-        error_text = str(e)
-        if "insufficient_quota" in error_text:
-            return "OpenAI API 사용 한도가 부족해서 통화 검색 요약을 만들 수 없어.", len(entries)
-        return "요청이 잠시 몰린 것 같아. 조금 뒤에 다시 시도해줘.", len(entries)
-    except APIError as e:
-        print("Voice search APIError:", e)
-        return "통화 검색 요약 중 OpenAI 연결이 불안정했어.", len(entries)
-    except Exception as e:
-        print("Voice search error:", e)
-        return "지금은 통화 검색 요약을 만들 수 없어.", len(entries)
 
 
 async def generate_daily_news_digest(

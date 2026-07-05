@@ -31,14 +31,6 @@ def test_parse_summary_args_supports_english_scope_and_clamps_limit():
     assert commands._parse_summary_args("/요약 room 999", {"group_mode": False}) == ("room", 80)
 
 
-def test_summary_recording_filename_ignores_summary_scope_and_limits():
-    assert commands._summary_recording_filename("/요약") is None
-    assert commands._summary_recording_filename("/요약 room 10") is None
-    assert commands._summary_recording_filename("/요약 10") is None
-    assert commands._summary_recording_filename("/요약 1번") == "1번"
-    assert commands._summary_recording_filename("/요약 voice-20260516.jsonl") == "voice-20260516.jsonl"
-
-
 def test_extract_auto_command_requires_first_response_line_to_be_command():
     assert commands._extract_auto_command("/요약") == "/요약"
     assert commands._extract_auto_command("  /투표 저녁 | 항목수=2 | 치킨 | 피자  ") == (
@@ -47,25 +39,6 @@ def test_extract_auto_command_requires_first_response_line_to_be_command():
     assert commands._extract_auto_command("/투표 저녁 | 항목수=2 | 치킨 | 피자\n잠깐만.") is None
     assert commands._extract_auto_command("좋아. /요약") is None
     assert commands._extract_auto_command("/") is None
-
-
-def test_resolve_recording_summary_filename_supports_latest_aliases(monkeypatch):
-    monkeypatch.setattr(
-        commands,
-        "list_recordings",
-        lambda: [{"filename": "voice-20260520-120000.jsonl"}],
-    )
-
-    assert commands._resolve_recording_summary_filename("최근") == "voice-20260520-120000.jsonl"
-    assert commands._resolve_recording_summary_filename("latest") == "voice-20260520-120000.jsonl"
-    assert commands._resolve_recording_summary_filename("1번") == "voice-20260520-120000.jsonl"
-    assert commands._resolve_recording_summary_filename("voice-old.jsonl") == "voice-old.jsonl"
-
-
-def test_resolve_recording_summary_filename_returns_none_without_recordings(monkeypatch):
-    monkeypatch.setattr(commands, "list_recordings", lambda: [])
-
-    assert commands._resolve_recording_summary_filename("최근") is None
 
 
 def test_auto_command_runs_with_original_message_author(monkeypatch, tmp_path):
@@ -2159,6 +2132,96 @@ def test_memory_reset_targets_one_split_file_and_preserves_news(monkeypatch, tmp
     assert "123" not in data
     assert data[POLLS_KEY]["poll-1"]["question"] == "Dinner?"
     assert data[DAILY_NEWS_KEY]["subscribers"]["1"]["name"] == "Owner"
+
+
+def test_memory_reset_can_be_confirmed_in_followup(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    commands._pending_memory_resets.clear()
+    storage.save_memory({
+        "123": {"name": "Alice", "history": [{"role": "user", "content": "hello"}]},
+        DAILY_NEWS_KEY: {"topics": ["AI"]},
+    })
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    for user_text in ("/메모리초기화 대화", "확인"):
+        asyncio.run(
+            commands.handle_mentioned_message(
+                message=message,
+                user_text=user_text,
+                user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+                room_key="room-1",
+                room_data={},
+                client=client,
+            )
+        )
+
+    data = storage.load_memory()
+    assert sent_messages == [
+        "대화 메모리 파일 `conversation_memory.json`을 초기화할까요? 진행하려면 `확인`, 중단하려면 `취소`라고 답해주세요.",
+        "…응. 대화 메모리 파일 `conversation_memory.json`을 비웠어.",
+    ]
+    assert "123" not in data
+    assert data[DAILY_NEWS_KEY]["topics"] == ["AI"]
+
+
+def test_memory_reset_followup_accepts_target_then_confirmation(monkeypatch, tmp_path):
+    sent_messages = []
+    monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
+    commands._pending_memory_resets.clear()
+    storage.save_memory({"123": {"name": "Alice", "history": [{"role": "user", "content": "hello"}]}})
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    for user_text in ("/메모리초기화", "대화 파일 초기화해줘", "확인"):
+        asyncio.run(
+            commands.handle_mentioned_message(
+                message=message,
+                user_text=user_text,
+                user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+                room_key="room-2",
+                room_data={},
+                client=client,
+            )
+        )
+
+    data = storage.load_memory()
+    assert "어떤 메모리 파일을 초기화할까?" in sent_messages[0]
+    assert sent_messages[1] == (
+        "대화 메모리 파일 `conversation_memory.json`을 초기화할까요? "
+        "진행하려면 `확인`, 중단하려면 `취소`라고 답해주세요."
+    )
+    assert sent_messages[2] == "…응. 대화 메모리 파일 `conversation_memory.json`을 비웠어."
+    assert "123" not in data
 
 
 def test_memory_file_alias_sends_default_conversation_memory(monkeypatch, tmp_path):

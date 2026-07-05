@@ -7,9 +7,6 @@ def matches_command(user_text: str, command: str) -> bool:
 
 
 SPECIAL_ONLY_COMMAND_PREFIXES = (
-    "/기록",
-    "/기록중지",
-    "/대화목록",
     "/메모리파일",
     "/메모리 파일",
     "/memoryfile",
@@ -76,14 +73,3 @@ def parse_summary_args(user_text: str, room_data: dict) -> tuple[str, int]:
 
 def command_arg(user_text: str, command: str) -> str:
     return user_text.replace(command, "", 1).strip()
-
-
-def summary_recording_filename(user_text: str) -> str | None:
-    arg = command_arg(user_text, "/요약")
-    if not arg:
-        return None
-
-    first = arg.split()[0]
-    if first.lower() in SUMMARY_SCOPE_TOKENS or first.isdigit():
-        return None
-    return first

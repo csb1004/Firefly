@@ -8,16 +8,10 @@ class TextCommandSpec:
     summary: str = ""
 
 
-VOICE_SEARCH_COMMAND = TextCommandSpec(
-    aliases=("/기록검색", "/녹음검색", "/record-search"),
-    special_only=True,
-    summary="Search saved voice transcripts with a natural-language question.",
-)
-
 ADMIN_STATUS_COMMAND = TextCommandSpec(
     aliases=("/봇상태", "/관리상태", "/bot-status"),
     special_only=True,
-    summary="Show runtime memory, room, news, poll, and recording status.",
+    summary="Show runtime memory, room, news, and poll status.",
 )
 
 ROLE_COMMAND = TextCommandSpec(
@@ -28,7 +22,6 @@ ROLE_COMMAND = TextCommandSpec(
 
 
 REGISTERED_TEXT_COMMANDS = (
-    VOICE_SEARCH_COMMAND,
     ADMIN_STATUS_COMMAND,
     ROLE_COMMAND,
 )
