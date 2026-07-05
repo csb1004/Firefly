@@ -151,7 +151,7 @@ def test_generate_silent_auto_command_does_not_persist_hidden_reply(monkeypatch,
     def fake_create(**kwargs):
         captured.update(kwargs)
         return SimpleNamespace(
-            output_text=f"/뇌추가 {SPECIAL_USER_ID} 사용자는 반디에게 좋아해라고 애정을 표현했다."
+            output_text=f"/뇌추가 {SPECIAL_USER_ID} 애정표현: 2"
         )
 
     monkeypatch.setattr(ai.client_openai.responses, "create", fake_create)
@@ -167,7 +167,7 @@ def test_generate_silent_auto_command_does_not_persist_hidden_reply(monkeypatch,
     )
 
     data = storage.load_memory()
-    assert reply == f"/뇌추가 {SPECIAL_USER_ID} 사용자는 반디에게 좋아해라고 애정을 표현했다."
+    assert reply == f"/뇌추가 {SPECIAL_USER_ID} 애정표현: 2"
     assert "조용한 단체 대화 업데이트 점검" in captured["input"][0]["content"]
     assert data[str(SPECIAL_USER_ID)]["history"] == []
     assert [item["content"] for item in data[ROOMS_KEY]["room-1"]["history"]] == [
@@ -245,9 +245,9 @@ def test_plan_state_updates_returns_allowed_hidden_commands(monkeypatch, tmp_pat
         return SimpleNamespace(
             output_text=(
                 '{"mode":"command","commands":['
-                '"/뇌추가 123456789012345 범주=preference 중요도=중간 사용자는 짧은 답을 선호한다.",'
+                '"/뇌추가 123456789012345 짧은답변선호: 3",'
                 '"/호감도증감 123456789012345 2",'
-                '"/뇌추가 123456789012345 범주=project 중요도=낮음 사용자는 테스트를 좋아한다.",'
+                '"/뇌추가 123456789012345 작업방식: 2",'
                 '"/호감도증감 999999999999999 -5",'
                 '"/호감도증감 123456789012345 9",'
                 '"/주사위 1 6"],"response":"","confidence":0.88}'
@@ -266,8 +266,74 @@ def test_plan_state_updates_returns_allowed_hidden_commands(monkeypatch, tmp_pat
     )
 
     assert planned == (
-        "/뇌추가 123456789012345 범주=preference 중요도=중간 사용자는 짧은 답을 선호한다.",
+        "/뇌추가 123456789012345 짧은답변선호: 3",
         "/호감도증감 123456789012345 2",
     )
     assert "대화 상태 업데이트 전용 규칙" in captured["input"][0]["content"]
     assert "현재 호감도: 48" in captured["input"][1]["content"]
+    assert "반디가 이미 가진 키워드 점수 딕셔너리" in captured["input"][1]["content"]
+    assert "비슷한 의미는 새 키워드로 만들지 말고" in captured["input"][1]["content"]
+
+
+def test_plan_state_updates_accepts_more_frequent_low_confidence_commands(monkeypatch, tmp_path):
+    _use_temp_memory(monkeypatch, tmp_path)
+    target_id = 123456789012345
+    storage.save_memory({
+        str(target_id): {"name": "Alice", "nickname": "개척자", "affection": 48, "history": []},
+    })
+
+    monkeypatch.setattr(
+        ai.client_openai.responses,
+        "create",
+        lambda **kwargs: SimpleNamespace(
+            output_text=(
+                '{"mode":"command","commands":['
+                '"/뇌추가 123456789012345 애정표현: 2"'
+                '],"response":"","confidence":0.12}'
+            )
+        ),
+    )
+
+    planned = asyncio.run(
+        ai.plan_state_updates(
+            "반디 사랑해.",
+            user_id=target_id,
+            display_name="Alice",
+            room_key="room-1",
+        )
+    )
+
+    assert planned == (
+        "/뇌추가 123456789012345 애정표현: 2",
+    )
+
+
+def test_plan_state_updates_still_ignores_very_low_confidence_commands(monkeypatch, tmp_path):
+    _use_temp_memory(monkeypatch, tmp_path)
+    target_id = 123456789012345
+    storage.save_memory({
+        str(target_id): {"name": "Alice", "nickname": "개척자", "affection": 48, "history": []},
+    })
+
+    monkeypatch.setattr(
+        ai.client_openai.responses,
+        "create",
+        lambda **kwargs: SimpleNamespace(
+            output_text=(
+                '{"mode":"command","commands":['
+                '"/뇌추가 123456789012345 애정표현: 2"'
+                '],"response":"","confidence":0.05}'
+            )
+        ),
+    )
+
+    planned = asyncio.run(
+        ai.plan_state_updates(
+            "반디 사랑해.",
+            user_id=target_id,
+            display_name="Alice",
+            room_key="room-1",
+        )
+    )
+
+    assert planned == ()

@@ -129,7 +129,7 @@ def test_silent_group_memory_update_runs_brain_command_without_channel_output(mo
             sent_messages.append(content or "<embed>")
 
     async def fake_generate_silent_auto_command(**kwargs):
-        return f"/뇌추가 {SPECIAL_USER_ID} 사용자는 반디에게 좋아해라고 애정을 표현했다."
+        return f"/뇌추가 {SPECIAL_USER_ID} 애정표현: 2"
 
     special_user = SimpleNamespace(
         id=SPECIAL_USER_ID,
@@ -164,11 +164,9 @@ def test_silent_group_memory_update_runs_brain_command_without_channel_output(mo
     )
 
     data = storage.load_memory()
-    memories = data[str(SPECIAL_USER_ID)]["short_term_memory"]
     assert result is True
     assert sent_messages == []
-    assert len(memories) == 1
-    assert memories[0]["memory_category"] == "relationship"
+    assert data[str(SPECIAL_USER_ID)]["brain_keywords"] == {"애정표현": 2.0}
 
 
 def test_silent_group_memory_update_can_delete_short_term_candidate(monkeypatch, tmp_path):
@@ -181,7 +179,7 @@ def test_silent_group_memory_update_can_delete_short_term_candidate(monkeypatch,
         mention=f"<@{SPECIAL_USER_ID}>",
     )
     target_data = storage.get_user_data(SPECIAL_USER_ID, "상범")
-    brain.add_brain_note(target_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
+    brain.add_brain_note(target_data, "애정표현: 2")
     storage.update_user_data(SPECIAL_USER_ID, target_data)
 
     class FakeChannel:
@@ -190,7 +188,7 @@ def test_silent_group_memory_update_can_delete_short_term_candidate(monkeypatch,
 
     async def fake_generate_silent_auto_command(**kwargs):
         assert "/뇌삭제" in kwargs["allowed_command_prefixes"]
-        return f"/뇌삭제 {SPECIAL_USER_ID} S1"
+        return f"/뇌삭제 {SPECIAL_USER_ID} 애정표현"
 
     message = SimpleNamespace(
         author=special_user,
@@ -210,7 +208,7 @@ def test_silent_group_memory_update_can_delete_short_term_candidate(monkeypatch,
     result = asyncio.run(
         commands.handle_silent_group_memory_update(
             message=message,
-            user_text="단기 후보가 충분해서 하나 정리해도 되겠어.",
+            user_text="애정표현 키워드는 이제 정리해도 되겠어.",
             user_data=user_data,
             room_key="room-1",
             room_data=room_data,
@@ -221,7 +219,7 @@ def test_silent_group_memory_update_can_delete_short_term_candidate(monkeypatch,
     data = storage.load_memory()
     assert result is True
     assert sent_messages == []
-    assert data[str(SPECIAL_USER_ID)]["short_term_memory"] == []
+    assert data[str(SPECIAL_USER_ID)]["brain_keywords"] == {}
 
 
 def test_tool_planner_nickname_command_runs_without_persona(monkeypatch):
@@ -773,7 +771,7 @@ def test_tool_planner_mixed_state_and_visible_commands_ignores_state_commands(mo
         return commands.ToolPlan(
             mode=commands.PLAN_COMMAND,
             commands=(
-                f"/뇌추가 {commands.SPECIAL_USER_ID} 범주=preference tool planner가 저장하면 안 되는 기억.",
+                f"/뇌추가 {commands.SPECIAL_USER_ID} 작업방식: 3",
                 f"/호감도증감 {commands.SPECIAL_USER_ID} 2",
                 "/투표 새 숙소 | 항목수=2 | 더 화이트 | 힐스토리 | 1주일",
             ),
@@ -819,7 +817,7 @@ def test_tool_planner_mixed_state_and_visible_commands_ignores_state_commands(mo
     assert poll_commands == ["/투표 새 숙소 | 항목수=2 | 더 화이트 | 힐스토리 | 1주일"]
     assert sent_messages == ["투표 생성됨: 새 숙소"]
     assert data["affection"] == 1004
-    assert data.get("short_term_memory", []) == []
+    assert data.get("brain_keywords", {}) == {}
 
 
 def test_tool_planner_chat_uses_persona_without_command_output(monkeypatch):
@@ -932,6 +930,63 @@ def test_handle_mentioned_message_starts_typing_before_tool_planner(monkeypatch)
     assert events[-1] == "typing_exit"
 
 
+def test_handle_mentioned_message_stops_keepalive_before_command_output(monkeypatch):
+    events = []
+    sent_messages = []
+
+    class FakeTyping:
+        async def __aenter__(self):
+            events.append("typing_enter")
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            events.append("typing_exit")
+            return False
+
+    class FakeChannel:
+        def typing(self):
+            return FakeTyping()
+
+        async def send(self, content=None, **kwargs):
+            events.append("send")
+            sent_messages.append(content or "<embed>")
+
+    async def fake_plan_tool_use(**kwargs):
+        return commands.ToolPlan(
+            mode=commands.PLAN_COMMAND,
+            commands=("/투표 내일 점심 | 항목수=2 | 김밥 | 라멘 | 10분",),
+            confidence=0.95,
+        )
+
+    async def fake_create_poll_from_command(message, user_text, client):
+        await message.channel.send("투표 생성됨: 내일 점심")
+
+    monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
+    monkeypatch.setattr(commands, "create_poll_from_command", fake_create_poll_from_command)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=commands.SPECIAL_USER_ID, name="Owner", display_name="Owner"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="내일 점심 투표 만들어줘",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == ["투표 생성됨: 내일 점심"]
+    assert events.index("typing_exit") < events.index("send")
+
+
 def test_tool_planner_chat_runs_state_updates_before_persona(monkeypatch, tmp_path):
     sent_messages = []
     target_id = 123456789012345
@@ -959,7 +1014,7 @@ def test_tool_planner_chat_runs_state_updates_before_persona(monkeypatch, tmp_pa
 
     async def fake_plan_state_updates(**kwargs):
         return (
-            "/뇌추가 123456789012345 범주=preference 중요도=중간 사용자는 짧은 답을 선호한다.",
+            "/뇌추가 123456789012345 짧은답변선호: 3",
             "/호감도증감 123456789012345 2",
         )
 
@@ -967,7 +1022,7 @@ def test_tool_planner_chat_runs_state_updates_before_persona(monkeypatch, tmp_pa
         assert kwargs["apply_affection_adjustment"] is False
         data = storage.load_memory()[str(target_id)]
         assert data["affection"] == 52
-        assert data["short_term_memory"][0]["content"] == "사용자는 짧은 답을 선호한다."
+        assert data["brain_keywords"] == {"짧은답변선호": 3.0}
         return "짧게 답할게."
 
     monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
@@ -1025,7 +1080,7 @@ def test_hidden_state_updates_cannot_target_other_users(monkeypatch, tmp_path):
 
     async def fake_plan_state_updates(**kwargs):
         return (
-            "/뇌추가 999999999999999 범주=relationship Bob에게 저장되면 안 되는 기억.",
+            "/뇌추가 999999999999999 애정표현: 3",
             "/호감도증감 999999999999999 -5",
         )
 
@@ -1033,7 +1088,7 @@ def test_hidden_state_updates_cannot_target_other_users(monkeypatch, tmp_path):
         data = storage.load_memory()
         assert data[str(author_id)]["affection"] == 50
         assert data[str(victim_id)]["affection"] == 50
-        assert data[str(victim_id)].get("short_term_memory", []) == []
+        assert data[str(victim_id)].get("brain_keywords", {}) == {}
         return "확인했어."
 
     monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
@@ -1087,19 +1142,18 @@ def test_tool_planner_state_only_command_is_ignored_then_state_updater_runs(monk
     async def fake_plan_tool_use(**kwargs):
         return commands.ToolPlan(
             mode=commands.PLAN_COMMAND,
-            commands=("/뇌추가 123456789012345 범주=preference 저장되면 안 되는 tool planner 상태 명령.",),
+            commands=("/뇌추가 123456789012345 작업방식: 3",),
             confidence=0.9,
         )
 
     async def fake_plan_state_updates(**kwargs):
         return (
-            "/뇌추가 123456789012345 범주=preference 중요도=중간 사용자는 짧은 답을 선호한다.",
+            "/뇌추가 123456789012345 짧은답변선호: 3",
         )
 
     async def fake_generate_reply(**kwargs):
         data = storage.load_memory()[str(target_id)]
-        assert len(data["short_term_memory"]) == 1
-        assert data["short_term_memory"][0]["content"] == "사용자는 짧은 답을 선호한다."
+        assert data["brain_keywords"] == {"짧은답변선호": 3.0}
         return "기억해둘게."
 
     monkeypatch.setattr(commands, "plan_tool_use", fake_plan_tool_use)
@@ -1710,8 +1764,8 @@ def test_brain_commands_add_update_and_delete_notes(monkeypatch, tmp_path):
     client = SimpleNamespace(user=SimpleNamespace(id=999))
 
     for command_text in (
-        f"/뇌추가 {commands.SPECIAL_USER_ID} 중요도=높음 급할수록 짧고 확실한 답을 선호한다.",
-        f"/뇌수정 {commands.SPECIAL_USER_ID} 1 급할수록 짧고 실행 가능한 답을 선호한다.",
+        f"/뇌추가 {commands.SPECIAL_USER_ID} 짧은답변선호: 4",
+        f"/뇌수정 {commands.SPECIAL_USER_ID} 1 짧은답변선호: 8",
         f"/뇌삭제 {commands.SPECIAL_USER_ID} 1",
     ):
         asyncio.run(
@@ -1727,9 +1781,10 @@ def test_brain_commands_add_update_and_delete_notes(monkeypatch, tmp_path):
 
     user_memory = storage.load_memory()[str(commands.SPECIAL_USER_ID)]
     assert user_memory["brain_notes"] == []
-    assert "장기 기억" in sent_messages[0]
-    assert "1번 평가를 고쳤어" in sent_messages[1]
-    assert "1번 평가를 지웠어" in sent_messages[2]
+    assert user_memory["brain_keywords"] == {}
+    assert "키워드 점수를 갱신했어" in sent_messages[0]
+    assert "1번 키워드 점수를 고쳤어" in sent_messages[1]
+    assert "1번 키워드 점수를 지웠어" in sent_messages[2]
 
 
 def test_brain_command_requires_explicit_target(monkeypatch, tmp_path):
@@ -1767,7 +1822,7 @@ def test_brain_command_requires_explicit_target(monkeypatch, tmp_path):
     assert "brain_notes" not in storage.load_memory().get(str(commands.SPECIAL_USER_ID), {})
 
 
-def test_brain_command_stores_short_term_candidate_after_explicit_target(monkeypatch, tmp_path):
+def test_brain_command_stores_keyword_score_after_explicit_target(monkeypatch, tmp_path):
     sent_messages = []
     monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
     storage.get_user_data(commands.SPECIAL_USER_ID, "Owner")
@@ -1791,7 +1846,7 @@ def test_brain_command_stores_short_term_candidate_after_explicit_target(monkeyp
     asyncio.run(
         commands.handle_mentioned_message(
             message=message,
-            user_text=f"/뇌추가 {commands.SPECIAL_USER_ID} 오늘만 피곤해서 답이 느림",
+            user_text=f"/뇌추가 {commands.SPECIAL_USER_ID} 기쁨: 1",
             user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
             room_key="room-1",
             room_data={},
@@ -1799,13 +1854,13 @@ def test_brain_command_stores_short_term_candidate_after_explicit_target(monkeyp
         )
     )
 
-    assert "단기 기억 후보" in sent_messages[0]
+    assert "키워드 점수를 갱신했어" in sent_messages[0]
     user_memory = storage.load_memory()[str(commands.SPECIAL_USER_ID)]
-    assert user_memory["brain_notes"] == []
-    assert user_memory["short_term_memory"][0]["content"] == "오늘만 피곤해서 답이 느림"
+    assert user_memory["brain_keywords"] == {"기쁨": 1.0}
+    assert user_memory["brain_notes"] == ["기쁨: 1"]
 
 
-def test_brain_delete_command_accepts_short_term_s_index_with_target_name(monkeypatch, tmp_path):
+def test_brain_delete_command_accepts_keyword_with_target_name(monkeypatch, tmp_path):
     sent_messages = []
     monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
 
@@ -1817,7 +1872,7 @@ def test_brain_delete_command_accepts_short_term_s_index_with_target_name(monkey
         mention=f"<@{target_id}>",
     )
     target_data = storage.get_user_data(target_id, "추상범")
-    brain.add_brain_note(target_data, "사용자는 반디에게 좋아해라고 애정을 표현했다.")
+    brain.add_brain_note(target_data, "애정표현: 3")
     storage.update_user_data(target_id, target_data)
 
     class FakeChannel:
@@ -1840,7 +1895,7 @@ def test_brain_delete_command_accepts_short_term_s_index_with_target_name(monkey
     asyncio.run(
         commands.handle_mentioned_message(
             message=message,
-            user_text="/뇌삭제 @추상범 S1",
+            user_text="/뇌삭제 @추상범 애정표현",
             user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
             room_key="room-1",
             room_data={},
@@ -1849,16 +1904,16 @@ def test_brain_delete_command_accepts_short_term_s_index_with_target_name(monkey
     )
 
     user_memory = storage.load_memory()[str(target_id)]
-    assert user_memory["short_term_memory"] == []
-    assert "단기 기억 후보 S1번을 지웠어" in sent_messages[0]
+    assert user_memory["brain_keywords"] == {}
+    assert "키워드 점수를 지웠어" in sent_messages[0]
 
 
-def test_brain_delete_command_numeric_index_falls_back_to_short_term(monkeypatch, tmp_path):
+def test_brain_delete_command_numeric_index_deletes_keyword(monkeypatch, tmp_path):
     sent_messages = []
     monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
     storage.get_user_data(commands.SPECIAL_USER_ID, "Owner")
     target_data = storage.get_user_data(commands.SPECIAL_USER_ID, "Owner")
-    brain.add_brain_note(target_data, "사용자는 최근 반디에게 고마움을 자주 표현한다.")
+    brain.add_brain_note(target_data, "감사: 3")
     storage.update_user_data(commands.SPECIAL_USER_ID, target_data)
 
     class FakeChannel:
@@ -1889,16 +1944,15 @@ def test_brain_delete_command_numeric_index_falls_back_to_short_term(monkeypatch
     )
 
     user_memory = storage.load_memory()[str(commands.SPECIAL_USER_ID)]
-    assert user_memory["short_term_memory"] == []
-    assert "단기 기억 후보 S1번을 지웠어" in sent_messages[0]
+    assert user_memory["brain_keywords"] == {}
+    assert "1번 키워드 점수를 지웠어" in sent_messages[0]
 
 
-def test_brain_delete_command_can_clear_short_term_candidates(monkeypatch, tmp_path):
+def test_brain_delete_command_can_delete_keyword_by_name(monkeypatch, tmp_path):
     sent_messages = []
     monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
     target_data = storage.get_user_data(commands.SPECIAL_USER_ID, "Owner")
-    brain.add_brain_note(target_data, "사용자는 최근 프로젝트 문서화를 신경 쓴다.")
-    brain.add_brain_note(target_data, "사용자는 답변이 길어지면 답답해한다.")
+    brain.add_brain_note(target_data, "프로젝트관심: 2 | 짧은답변선호: 3")
     storage.update_user_data(commands.SPECIAL_USER_ID, target_data)
 
     class FakeChannel:
@@ -1920,7 +1974,7 @@ def test_brain_delete_command_can_clear_short_term_candidates(monkeypatch, tmp_p
     asyncio.run(
         commands.handle_mentioned_message(
             message=message,
-            user_text=f"/뇌삭제 {commands.SPECIAL_USER_ID} 단기",
+            user_text=f"/뇌삭제 {commands.SPECIAL_USER_ID} 프로젝트관심",
             user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
             room_key="room-1",
             room_data={},
@@ -1929,8 +1983,8 @@ def test_brain_delete_command_can_clear_short_term_candidates(monkeypatch, tmp_p
     )
 
     user_memory = storage.load_memory()[str(commands.SPECIAL_USER_ID)]
-    assert user_memory["short_term_memory"] == []
-    assert "단기 기억 후보 2개를 지웠어" in sent_messages[0]
+    assert user_memory["brain_keywords"] == {"짧은답변선호": 3.0}
+    assert "키워드 점수를 지웠어" in sent_messages[0]
 
 
 def test_affection_change_accepts_explicit_user_id(monkeypatch, tmp_path):

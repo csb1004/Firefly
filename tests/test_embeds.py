@@ -61,8 +61,7 @@ def test_special_help_lists_reasoning_and_brain_commands():
     text = _field_text(create_special_help_embed())
 
     assert "/추론 [없음/낮음/보통/높음]" in text
-    assert "/뇌추가 @유저 [평가]" in text
-    assert "/뇌수정 @유저 [번호] [평가]" in text
+    assert "/뇌추가 @유저 [키워드:점수]" in text
+    assert "/뇌수정 @유저 [번호] [키워드:점수]" in text
     assert "/뇌삭제 @유저 [번호]" in text
-    assert "/뇌삭제 @유저 S[번호]" in text
-    assert "/뇌삭제 @유저 단기" in text
+    assert "/뇌삭제 @유저 [키워드]" in text

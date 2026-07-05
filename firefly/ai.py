@@ -48,6 +48,7 @@ from .voice_search import format_voice_search_context
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 STATE_UPDATE_CONTEXT_HISTORY_LIMIT = 6
+STATE_UPDATE_CONFIDENCE_THRESHOLD = 0.1
 
 
 def _is_auto_command_reply(reply: str) -> bool:
@@ -240,8 +241,14 @@ async def plan_state_updates(
 - 현재 호감도: {user_data.get('affection', DEFAULT_AFFECTION)}
 - 특별 사용자 여부: {'yes' if user_id == SPECIAL_USER_ID else 'no'}
 
-[반디가 저장 중인 기억]
+[반디가 이미 가진 키워드 점수 딕셔너리]
 {brain_context}
+
+[키워드 평가 지침]
+- 이번 입력을 평가하기 전에 위 키워드 목록을 먼저 본다.
+- 비슷한 의미는 새 키워드로 만들지 말고 가능한 한 기존 키워드 이름으로 병합한다.
+- 새로 저장할 때는 `/뇌추가 {user_id} 키워드: 점수` 형식을 쓰고, 점수는 이번 입력에서 관찰된 강도 1~5만 쓴다.
+- 여러 신호가 있으면 한 명령 안에서 `키워드: 점수 | 키워드: 점수`처럼 묶는다.
 
 [최근 개인 대화]
 {_format_state_history(user_data.get('history', []))}
@@ -268,7 +275,7 @@ async def plan_state_updates(
         return ()
 
     plan = parse_tool_plan(response.output_text.strip())
-    if plan is None or plan.mode != "command" or plan.confidence < 0.2:
+    if plan is None or plan.mode != "command" or plan.confidence < STATE_UPDATE_CONFIDENCE_THRESHOLD:
         return ()
 
     return filter_hidden_state_update_commands(plan.commands, user_id=user_id)
@@ -282,10 +289,10 @@ NEWS_SELECTION_PRIORITIES = (
     "2순위: 대규모 모델/제품 출시, 인수합병, 규제/정책 변화, 반도체/클라우드/보안 사고, 널리 쓰이는 런타임/프레임워크의 주요 버전 발표를 고른다.",
     "3순위: 대형 뉴스가 3개 미만일 때만 논문, 보안 권고, 주요 패키지 릴리스, 기술 동향 글로 보강한다.",
 )
-NEWS_LOW_PRIORITY_SIGNALS = (
-    "GitHub 저장소의 개별 PR/이슈, 트렌딩 저장소, 작은 changelog 한 줄은 기본 후보가 아니라 보강 후보로만 쓴다.",
-    "GitHub Copilot, IDE, 개발자 도구의 사소한 기능 추가나 UI 변경은 여러 매체가 의미 있게 다룬 경우가 아니면 후순위로 둔다.",
-    "한 회사의 작은 릴리스 노트보다 업계 영향이 큰 뉴스, 공식 발표, 보안/정책/연구 성과를 먼저 찾는다.",
+NEWS_EXCLUDED_SIGNALS = (
+    "GitHub 저장소의 개별 PR/이슈, 트렌딩 저장소, 작은 changelog 한 줄 같은 단순 업데이트는 전하지 않는다.",
+    "GitHub Copilot, IDE, 개발자 도구의 사소한 기능 추가나 UI 변경은 여러 매체가 의미 있게 다룬 큰 변화가 아니면 전하지 않는다.",
+    "한 회사의 작은 릴리스 노트는 업계 영향이 큰 뉴스, 공식 발표, 보안/정책/연구 성과가 아닐 때 제외한다.",
 )
 NEWS_SOURCE_CATEGORIES = (
     "주요 뉴스와 공식 발표: 주요 기술 매체, 회사/연구소/정부/표준기구의 보도자료와 공식 블로그",
@@ -381,11 +388,11 @@ def _format_news_source_guidance(topics: list[str], *, broaden_search: bool) -> 
         "[선정 우선순위]",
         *NEWS_SELECTION_PRIORITIES,
         "",
-        "[후순위 신호]",
-        *NEWS_LOW_PRIORITY_SIGNALS,
+        "[제외 신호]",
+        *NEWS_EXCLUDED_SIGNALS,
         "",
         "[검색 범위]",
-        "먼저 주요 뉴스와 공식 발표에서 큰 사건을 찾고, 부족할 때만 GitHub와 패키지 생태계까지 차례로 넓혀 확인해.",
+        "먼저 주요 뉴스와 공식 발표에서 큰 사건을 찾고, 부족할 때도 GitHub 단순 업데이트는 제외한 채 패키지 생태계의 주요 릴리스와 보안 권고만 확인해.",
     ]
     lines.extend(f"- {category}" for category in NEWS_SOURCE_CATEGORIES)
 
