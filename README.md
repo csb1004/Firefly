@@ -38,6 +38,10 @@ Optional:
 - `STATE_UPDATER_PROMPT_FILE`: Internal memory/affection update prompt path. Defaults to `prompt_state_updater.txt`.
 - `TOOL_PLANNER_MODEL`: Model used for command/tool planning. Defaults to `DEFAULT_MODEL`.
 - `STATE_UPDATER_MODEL`: Model used for hidden brain/affection updates before persona replies. Defaults to `DEFAULT_MODEL`.
+- `BANDI_TTS_URL`: Direct Bandi TTS worker URL. The bot posts `{"input": {"text": "..."}}` and expects `audio_base64` in the response or `response.output`.
+- `BANDI_TTS_API_KEY`: Optional bearer token for `BANDI_TTS_URL`.
+- `RUNPOD_ENDPOINT_ID` / `RUNPOD_API_KEY`: Alternative to `BANDI_TTS_URL`; calls RunPod `runsync`.
+- `BANDI_TTS_TIMEOUT_SECONDS`, `BANDI_TTS_MAX_CHARS`, `BANDI_TTS_MIN_DURATION_SECONDS`, `BANDI_TTS_RETRY_ATTEMPTS`.
 
 ## Data And Prompts
 
@@ -52,6 +56,7 @@ Optional:
 ## Added Commands
 
 - `/봇상태`: special-user-only runtime status for memory, rooms, polls, and news.
+- `/음성생성 [할 말]`: special-user-only Bandi voice generation. Sends the generated WAV back to Discord.
 - `/프로필 [@유저]`: show a user's profile avatar, name, nickname, affection, and last-seen time.
 - `/주사위 [시작] [끝]`: roll one number inside the inclusive range, e.g. `/주사위 1 6`.
 - `/팀나누기 팀수=2 | Alice, Bob, Carol, Dana`: shuffle members into teams. Use `팀당=3` to split by team size, `팀별=3,6` to set each team's size explicitly, or `팀별=tagger:3,hiders:6` to name those teams.

@@ -1,4 +1,5 @@
 import asyncio
+import io
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ import discord
 
 from .affection import change_user_affection, set_user_affection
 from .admin_status import build_admin_status_text
+from .bandi_tts import BandiVoiceError, generate_bandi_voice
 from .ai import (
     generate_reply,
     generate_silent_auto_command,
@@ -28,7 +30,7 @@ from .brain import (
     parse_brain_index_and_note,
     update_brain_note,
 )
-from .command_registry import ADMIN_STATUS_COMMAND, ROLE_COMMAND, matched_alias
+from .command_registry import ADMIN_STATUS_COMMAND, BANDI_VOICE_COMMAND, ROLE_COMMAND, matched_alias
 from .commands_parser import (
     SPECIAL_ONLY_COMMAND_PREFIXES,
     command_arg,
@@ -36,7 +38,7 @@ from .commands_parser import (
     matches_command,
     parse_summary_args,
 )
-from .config import BOT_DISPLAY_NAME, DEFAULT_AFFECTION, SPECIAL_USER_ID, SPECIAL_USER_NAME, SUMMARY_DEFAULT_LIMIT
+from .config import BANDI_TTS_MAX_CHARS, BOT_DISPLAY_NAME, DEFAULT_AFFECTION, SPECIAL_USER_ID, SPECIAL_USER_NAME, SUMMARY_DEFAULT_LIMIT
 from .embeds import (
     create_help_embed,
     create_profile_embed,
@@ -740,6 +742,26 @@ async def handle_silent_group_memory_update(
     )
 
 
+async def _send_bandi_voice(message: discord.Message, raw_text: str) -> None:
+    text = raw_text.strip()
+    if not text:
+        await message.channel.send("…음성으로 만들 말을 같이 적어줘. 예: `/음성생성 안녕? 나는 반디야.`")
+        return
+    if len(text) > BANDI_TTS_MAX_CHARS:
+        await message.channel.send(f"…한 번에 {BANDI_TTS_MAX_CHARS}자까지만 음성으로 만들 수 있어.")
+        return
+
+    try:
+        result = await generate_bandi_voice(text)
+    except BandiVoiceError as exc:
+        await message.channel.send(f"…음성 생성에 실패했어. {exc}")
+        return
+
+    audio_file = discord.File(io.BytesIO(result.audio_bytes), filename=result.filename)
+    duration_text = f" ({result.duration_seconds:.1f}초)" if result.duration_seconds is not None else ""
+    await message.channel.send(f"…반디 목소리로 만들어왔어{duration_text}.", file=audio_file)
+
+
 async def _send_admin_status(message: discord.Message, room_key: str, room_data: dict) -> None:
     status_text = build_admin_status_text(
         load_memory(),
@@ -1236,6 +1258,14 @@ async def handle_mentioned_message(
             await message.channel.send("…그 명령어를 사용할 권한이 없어.")
             return
         await handle_role_command(message, _command_arg(user_text, role_alias))
+        return
+
+    bandi_voice_alias = matched_alias(user_text, BANDI_VOICE_COMMAND.aliases)
+    if bandi_voice_alias:
+        if not special_user:
+            await message.channel.send("…그 명령어를 사용할 권한이 없어.")
+            return
+        await _send_bandi_voice(message, _command_arg(user_text, bandi_voice_alias))
         return
 
     for reasoning_alias in ("/추론", "/추론설정"):

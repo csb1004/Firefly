@@ -373,6 +373,16 @@ async def role_slash(interaction: discord.Interaction, command_text: str):
     await _run_text_command_slash(interaction, f"/역할 {command_text}", ephemeral=True)
 
 
+@tree.command(name="음성생성", description="반디 목소리 WAV 파일을 생성해요. 권한 필요.")
+@app_commands.rename(text="내용")
+@app_commands.describe(text="음성으로 만들 말")
+async def bandi_voice_slash(interaction: discord.Interaction, text: str):
+    if not await _require_special_interaction(interaction):
+        return
+
+    await _run_text_command_slash(interaction, f"/음성생성 {text}")
+
+
 @tree.command(name="봇상태", description="메모리, 뉴스, 투표 상태를 확인해요. 권한 필요.")
 async def bot_status_slash(interaction: discord.Interaction):
     await _run_text_command_slash(interaction, "/봇상태", ephemeral=True)

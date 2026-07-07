@@ -20,10 +20,17 @@ ROLE_COMMAND = TextCommandSpec(
     summary="Manage Discord roles, colors, names, assignments, and permissions.",
 )
 
+BANDI_VOICE_COMMAND = TextCommandSpec(
+    aliases=("/음성생성", "/목소리", "/voice"),
+    special_only=True,
+    summary="Generate a Bandi voice WAV file from text.",
+)
+
 
 REGISTERED_TEXT_COMMANDS = (
     ADMIN_STATUS_COMMAND,
     ROLE_COMMAND,
+    BANDI_VOICE_COMMAND,
 )
 
 

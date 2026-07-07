@@ -15,6 +15,40 @@ def _get_required_env(name: str) -> str:
     return value
 
 
+def _get_int_env(name: str, default: int, *, minimum: int | None = None, maximum: int | None = None) -> int:
+    raw_value = os.getenv(name, "").strip()
+    if raw_value:
+        try:
+            value = int(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer.") from exc
+    else:
+        value = default
+
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{name} must be at most {maximum}.")
+    return value
+
+
+def _get_float_env(name: str, default: float, *, minimum: float | None = None, maximum: float | None = None) -> float:
+    raw_value = os.getenv(name, "").strip()
+    if raw_value:
+        try:
+            value = float(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be a number.") from exc
+    else:
+        value = default
+
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{name} must be at most {maximum}.")
+    return value
+
+
 def _resolve_project_path(value: str | Path) -> Path:
     path = Path(value)
     if path.is_absolute():
@@ -86,3 +120,12 @@ DEFAULT_MODEL = "gpt-5.3-codex"
 TOOL_PLANNER_MODEL = os.getenv("TOOL_PLANNER_MODEL", DEFAULT_MODEL)
 STATE_UPDATER_MODEL = os.getenv("STATE_UPDATER_MODEL", DEFAULT_MODEL)
 WEB_SEARCH_MODEL = "gpt-5.4"
+
+BANDI_TTS_URL = os.getenv("BANDI_TTS_URL", "").strip()
+BANDI_TTS_API_KEY = os.getenv("BANDI_TTS_API_KEY", "").strip()
+BANDI_TTS_TIMEOUT_SECONDS = _get_float_env("BANDI_TTS_TIMEOUT_SECONDS", 300.0, minimum=1.0, maximum=900.0)
+BANDI_TTS_MAX_CHARS = _get_int_env("BANDI_TTS_MAX_CHARS", 500, minimum=1, maximum=2000)
+BANDI_TTS_MIN_DURATION_SECONDS = _get_float_env("BANDI_TTS_MIN_DURATION_SECONDS", 0.0, minimum=0.0, maximum=60.0)
+BANDI_TTS_RETRY_ATTEMPTS = _get_int_env("BANDI_TTS_RETRY_ATTEMPTS", 1, minimum=1, maximum=10)
+RUNPOD_ENDPOINT_ID = os.getenv("RUNPOD_ENDPOINT_ID", "").strip()
+RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY", "").strip()

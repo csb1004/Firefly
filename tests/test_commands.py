@@ -2265,3 +2265,90 @@ def test_memory_file_alias_sends_default_conversation_memory(monkeypatch, tmp_pa
 
     assert sent_payloads[0][1]["file"].filename == "conversation_memory.json"
 
+
+def test_bandi_voice_command_sends_generated_wav(monkeypatch):
+    sent_payloads = []
+
+    class FakeFile:
+        def __init__(self, fp, filename=None):
+            self.fp = fp
+            self.filename = filename
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_payloads.append((content, kwargs))
+
+    async def fake_generate_bandi_voice(text):
+        assert text == "안녕? 나는 반디야."
+        return SimpleNamespace(
+            audio_bytes=b"RIFF....WAVE",
+            filename="bandi-test.wav",
+            duration_seconds=1.25,
+        )
+
+    monkeypatch.setattr(commands.discord, "File", FakeFile)
+    monkeypatch.setattr(commands, "generate_bandi_voice", fake_generate_bandi_voice)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/음성생성 안녕? 나는 반디야.",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    content, kwargs = sent_payloads[0]
+    assert "반디 목소리" in content
+    assert "1.2초" in content
+    assert kwargs["file"].filename == "bandi-test.wav"
+    assert kwargs["file"].fp.getvalue() == b"RIFF....WAVE"
+
+
+def test_bandi_voice_command_rejects_non_special_user(monkeypatch):
+    sent_messages = []
+
+    async def fail_generate_bandi_voice(text):
+        raise AssertionError("non-special user should not call TTS")
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content)
+
+    monkeypatch.setattr(commands, "generate_bandi_voice", fail_generate_bandi_voice)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=123, name="Alice", display_name="Alice"),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/음성생성 안녕",
+            user_data={"name": "Alice", "nickname": "Alice", "affection": 50},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert sent_messages == ["…그 명령어를 사용할 권한이 없어."]
+
