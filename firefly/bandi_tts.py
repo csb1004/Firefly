@@ -17,6 +17,9 @@ class BandiVoiceError(RuntimeError):
     pass
 
 
+PENDING_RUNPOD_STATUSES = {"IN_QUEUE", "IN_PROGRESS", "IN_RETRY"}
+
+
 @dataclass(frozen=True)
 class BandiVoiceResult:
     audio_bytes: bytes
@@ -50,6 +53,18 @@ def _build_request_payload(text: str, request_id: str) -> dict[str, Any]:
             "retry_attempts": config.BANDI_TTS_RETRY_ATTEMPTS,
         }
     }
+
+
+def _runpod_status_url(job_id: str) -> str:
+    return f"https://api.runpod.ai/v2/{config.RUNPOD_ENDPOINT_ID}/status/{job_id}"
+
+
+def _runpod_status(payload: dict[str, Any]) -> str:
+    return str(payload.get("status") or "").strip().upper()
+
+
+def _runpod_job_id(payload: dict[str, Any]) -> str:
+    return str(payload.get("id") or "").strip()
 
 
 def _safe_filename(request_id: str) -> str:
@@ -108,16 +123,37 @@ def decode_bandi_voice_response(payload: dict[str, Any]) -> BandiVoiceResult:
     )
 
 
-def _post_tts_request_sync(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+def _request_headers() -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
     token = _authorization_token()
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    elif config.RUNPOD_ENDPOINT_ID:
+    elif config.RUNPOD_ENDPOINT_ID and not config.BANDI_TTS_URL:
         raise BandiVoiceError("RUNPOD_API_KEY가 설정되지 않았어.")
+    return headers
 
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+
+def _read_json_response(response_body: bytes) -> dict[str, Any]:
+    try:
+        decoded = json.loads(response_body.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BandiVoiceError("TTS 서버 응답이 JSON 형식이 아니야.") from exc
+    if not isinstance(decoded, dict):
+        raise BandiVoiceError("TTS 서버 응답이 JSON 객체가 아니야.")
+    return decoded
+
+
+def _request_json_sync(
+    url: str,
+    *,
+    method: str,
+    payload: dict[str, Any] | None = None,
+    timeout: float,
+) -> dict[str, Any]:
+    body = None
+    if payload is not None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(url, data=body, headers=_request_headers(), method=method)
 
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -131,13 +167,46 @@ def _post_tts_request_sync(url: str, payload: dict[str, Any], timeout: float) ->
     except TimeoutError as exc:
         raise BandiVoiceError("TTS 서버 응답 시간이 초과됐어.") from exc
 
-    try:
-        decoded = json.loads(response_body.decode("utf-8-sig"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise BandiVoiceError("TTS 서버 응답이 JSON 형식이 아니야.") from exc
-    if not isinstance(decoded, dict):
-        raise BandiVoiceError("TTS 서버 응답이 JSON 객체가 아니야.")
-    return decoded
+    return _read_json_response(response_body)
+
+
+def _post_tts_request_sync(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    return _request_json_sync(url, method="POST", payload=payload, timeout=timeout)
+
+
+def _get_tts_request_sync(url: str, timeout: float) -> dict[str, Any]:
+    return _request_json_sync(url, method="GET", timeout=timeout)
+
+
+async def _wait_for_runpod_completion(
+    payload: dict[str, Any],
+    *,
+    deadline: float,
+) -> dict[str, Any]:
+    status = _runpod_status(payload)
+    if status not in PENDING_RUNPOD_STATUSES:
+        return payload
+
+    job_id = _runpod_job_id(payload)
+    if not job_id or not config.RUNPOD_ENDPOINT_ID or config.BANDI_TTS_URL:
+        return payload
+
+    status_url = _runpod_status_url(job_id)
+    last_payload = payload
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise BandiVoiceError(f"TTS 작업이 제한 시간 안에 완료되지 않았어. status={status}")
+
+        await asyncio.sleep(min(2.0, remaining))
+        last_payload = await asyncio.to_thread(
+            _get_tts_request_sync,
+            status_url,
+            min(30.0, max(1.0, remaining)),
+        )
+        status = _runpod_status(last_payload)
+        if status not in PENDING_RUNPOD_STATUSES:
+            return last_payload
 
 
 async def generate_bandi_voice(text: str) -> BandiVoiceResult:
@@ -153,10 +222,12 @@ async def generate_bandi_voice(text: str) -> BandiVoiceResult:
 
     request_id = f"bandi-{uuid.uuid4().hex[:12]}"
     payload = _build_request_payload(clean_text, request_id)
+    deadline = asyncio.get_running_loop().time() + config.BANDI_TTS_TIMEOUT_SECONDS
     response_payload = await asyncio.to_thread(
         _post_tts_request_sync,
         url,
         payload,
         config.BANDI_TTS_TIMEOUT_SECONDS,
     )
+    response_payload = await _wait_for_runpod_completion(response_payload, deadline=deadline)
     return decode_bandi_voice_response(response_payload)

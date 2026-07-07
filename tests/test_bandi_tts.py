@@ -1,9 +1,10 @@
 import base64
+import asyncio
 
 import pytest
 
 from firefly import bandi_tts
-from firefly.bandi_tts import BandiVoiceError, decode_bandi_voice_response
+from firefly.bandi_tts import BandiVoiceError, decode_bandi_voice_response, generate_bandi_voice
 
 
 def test_decode_bandi_voice_response_accepts_runpod_output():
@@ -52,3 +53,44 @@ def test_direct_tts_url_does_not_reuse_runpod_api_key(monkeypatch):
     monkeypatch.setattr(bandi_tts.config, "RUNPOD_API_KEY", "runpod-secret")
 
     assert bandi_tts._authorization_token() == ""
+
+
+def test_generate_bandi_voice_polls_runpod_status_until_completed(monkeypatch):
+    audio = b"RIFF....WAVE"
+    calls = []
+
+    def fake_post(url, payload, timeout):
+        calls.append(("post", url, payload["input"]["text"]))
+        return {"id": "job-123", "status": "IN_PROGRESS"}
+
+    def fake_get(url, timeout):
+        calls.append(("get", url, timeout))
+        return {
+            "id": "job-123",
+            "status": "COMPLETED",
+            "output": {
+                "request_id": "voice-123",
+                "audio_base64": base64.b64encode(audio).decode("ascii"),
+                "content_type": "audio/wav",
+            },
+        }
+
+    async def fake_sleep(seconds):
+        calls.append(("sleep", seconds))
+
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_URL", "")
+    monkeypatch.setattr(bandi_tts.config, "RUNPOD_ENDPOINT_ID", "endpoint-123")
+    monkeypatch.setattr(bandi_tts.config, "RUNPOD_API_KEY", "runpod-secret")
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_TIMEOUT_SECONDS", 300.0)
+    monkeypatch.setattr(bandi_tts, "_post_tts_request_sync", fake_post)
+    monkeypatch.setattr(bandi_tts, "_get_tts_request_sync", fake_get)
+    monkeypatch.setattr(bandi_tts.asyncio, "sleep", fake_sleep)
+
+    result = asyncio.run(generate_bandi_voice("안녕"))
+
+    assert result.audio_bytes == audio
+    assert result.filename == "bandi-voice-123.wav"
+    assert calls[0] == ("post", "https://api.runpod.ai/v2/endpoint-123/runsync", "안녕")
+    assert calls[1][0] == "sleep"
+    assert calls[2][0] == "get"
+    assert calls[2][1] == "https://api.runpod.ai/v2/endpoint-123/status/job-123"
