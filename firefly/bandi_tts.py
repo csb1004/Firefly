@@ -232,7 +232,7 @@ async def generate_bandi_voice(text: str | BandiVoiceCommandRequest) -> BandiVoi
         raise BandiVoiceError("BANDI_TTS_URL 또는 RUNPOD_ENDPOINT_ID가 설정되지 않았어.")
 
     request_id = f"bandi-{uuid.uuid4().hex[:12]}"
-    payload = _build_request_payload(clean_text, request_id)
+    payload = _build_request_payload(text if isinstance(text, BandiVoiceCommandRequest) else clean_text, request_id)
     deadline = asyncio.get_running_loop().time() + config.BANDI_TTS_TIMEOUT_SECONDS
     response_payload = await asyncio.to_thread(
         _post_tts_request_sync,

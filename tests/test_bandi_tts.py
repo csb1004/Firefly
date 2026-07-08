@@ -110,3 +110,27 @@ def test_build_request_payload_accepts_emotion_voice_request(monkeypatch):
     assert payload["input"]["emotion"] == {"joy": 7.0, "calm": 3.0}
     assert payload["input"]["emotion_strength"] == 0.7
     assert payload["input"]["aux_references"] == ["joy/012.wav", "calm/168.wav"]
+
+
+def test_generate_bandi_voice_sends_emotion_request_payload(monkeypatch):
+    audio = base64.b64encode(b"RIFF....WAVE").decode("ascii")
+    captured_payload = {}
+
+    def fake_post(url, payload, timeout):
+        captured_payload.update(payload)
+        return {"output": {"request_id": "voice-123", "audio_base64": audio}}
+
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_URL", "https://tts.example.test")
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_API_KEY", "")
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_MIN_DURATION_SECONDS", 1.0)
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_RETRY_ATTEMPTS", 3)
+    monkeypatch.setattr(bandi_tts, "_post_tts_request_sync", fake_post)
+
+    request = parse_bandi_voice_command("emotion=joy:7,calm:3 strength=0.7 | good work")
+    result = asyncio.run(generate_bandi_voice(request))
+
+    assert result.audio_bytes == b"RIFF....WAVE"
+    assert captured_payload["input"]["display_text"] == "good work"
+    assert captured_payload["input"]["text"] == "good work!"
+    assert captured_payload["input"]["emotion"] == {"joy": 7.0, "calm": 3.0}
+    assert captured_payload["input"]["emotion_strength"] == 0.7
