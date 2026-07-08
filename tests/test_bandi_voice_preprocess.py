@@ -58,3 +58,54 @@ def test_request_from_llm_payload_uses_single_segment_as_emotion_plan():
     assert planned.emotion == {"joy": 7.0}
     assert planned.emotion_strength == 0.65
     assert planned.tts_text == "good work"
+
+
+def test_request_from_llm_payload_calibrates_embarrassed_scolding():
+    request = parse_bandi_voice_command("정말! 부끄럽게 꼭 말해야 아는거야? ..사랑해 상범아.")
+
+    planned = _request_from_llm_payload(
+        request,
+        {
+            "segments": [
+                {
+                    "text": "정말! 부끄럽게 꼭 말해야 아는거야?",
+                    "emotion": {"excited": 7, "joy": 5},
+                    "emotion_strength": 0.7,
+                },
+                {
+                    "text": "..사랑해 상범아.",
+                    "emotion": {"joy": 7},
+                    "emotion_strength": 0.65,
+                },
+            ]
+        },
+    )
+
+    first_emotion = planned.segments[0].emotion
+    second_emotion = planned.segments[1].emotion
+    assert first_emotion["anger"] == 6.0
+    assert first_emotion["shy"] == 5.0
+    assert first_emotion["excited"] == 1.0
+    assert first_emotion["joy"] == 1.0
+    assert second_emotion["shy"] == 6.0
+    assert second_emotion["joy"] == 7.0
+    assert second_emotion.get("excited", 0.0) <= 1.0
+
+
+def test_request_from_llm_payload_respects_explicit_emotion_request():
+    request = parse_bandi_voice_command("emotion=joy:8 | 정말! 부끄럽게 꼭 말해야 아는거야?")
+
+    planned = _request_from_llm_payload(
+        request,
+        {
+            "segments": [
+                {
+                    "text": "정말! 부끄럽게 꼭 말해야 아는거야?",
+                    "emotion": {"joy": 8},
+                    "emotion_strength": 0.7,
+                }
+            ]
+        },
+    )
+
+    assert planned.emotion == {"joy": 8.0}
