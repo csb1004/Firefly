@@ -68,6 +68,10 @@ DEFAULT_REFERENCE_CANDIDATES = {
 }
 
 DEFAULT_PRIMARY_REFERENCE = "neutral/168.wav"
+DEFAULT_SEGMENT_PAUSE_SECONDS = 0.26
+MIN_SEGMENT_PAUSE_SECONDS = 0.16
+MAX_SEGMENT_PAUSE_SECONDS = 0.75
+MAX_VOICE_SEGMENTS = 5
 
 LOWPASS_BY_EMOTION = {
     "joy": 10600,
@@ -93,16 +97,31 @@ OPTION_KEYS = {
 
 
 @dataclass(frozen=True)
+class BandiVoiceSegment:
+    display_text: str
+    emotion: dict[str, float]
+    emotion_strength: float
+    tts_text: str | None = None
+    pause_after_seconds: float = DEFAULT_SEGMENT_PAUSE_SECONDS
+    aux_limit: int = 3
+
+
+@dataclass(frozen=True)
 class BandiVoiceCommandRequest:
     display_text: str
     emotion: dict[str, float]
     emotion_strength: float
     tts_text: str | None = None
     aux_limit: int = 3
+    segments: tuple[BandiVoiceSegment, ...] = ()
 
     @property
     def has_emotion_plan(self) -> bool:
-        return bool(self.emotion)
+        return bool(self.emotion or self.segments)
+
+    @property
+    def has_segments(self) -> bool:
+        return bool(self.segments)
 
 
 def clamp_float(value: float, low: float, high: float) -> float:
@@ -114,6 +133,21 @@ def normalize_emotion_name(value: str) -> str | None:
     if key in SUPPORTED_EMOTIONS:
         return key
     return EMOTION_ALIASES.get(key)
+
+
+def normalize_emotion_scores(raw_emotion: dict[str, float]) -> dict[str, float]:
+    scores = {}
+    for name, value in raw_emotion.items():
+        normalized_name = normalize_emotion_name(str(name))
+        if normalized_name is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            scores[normalized_name] = scores.get(normalized_name, 0.0) + clamp_float(number, 0.0, 10.0)
+    return scores
 
 
 def normalize_emotion_weights(raw_emotion: dict[str, float]) -> dict[str, float]:
@@ -294,6 +328,66 @@ def _derive_strength(emotion: dict[str, float]) -> float:
     return round(clamp_float(0.42 + (max_score / 10.0) * 0.4, 0.45, 0.82), 3)
 
 
+def normalize_segment_pause(value: float | int | str | None) -> float:
+    if value is None:
+        return DEFAULT_SEGMENT_PAUSE_SECONDS
+    try:
+        pause = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_SEGMENT_PAUSE_SECONDS
+    return round(clamp_float(pause, MIN_SEGMENT_PAUSE_SECONDS, MAX_SEGMENT_PAUSE_SECONDS), 3)
+
+
+def make_bandi_voice_segment(
+    display_text: str,
+    emotion: dict[str, float] | None = None,
+    *,
+    emotion_strength: float | None = None,
+    tts_text: str | None = None,
+    pause_after_seconds: float | int | str | None = None,
+    aux_limit: int = 3,
+) -> BandiVoiceSegment:
+    clean_display_text = clean_punctuation(display_text)
+    normalized_emotion = normalize_emotion_scores(emotion or {})
+    try:
+        strength = (
+            clamp_float(float(emotion_strength), 0.0, 1.0)
+            if emotion_strength is not None
+            else _derive_strength(normalized_emotion)
+        )
+    except (TypeError, ValueError):
+        strength = _derive_strength(normalized_emotion)
+    return BandiVoiceSegment(
+        display_text=clean_display_text,
+        emotion=normalized_emotion,
+        emotion_strength=round(strength, 3),
+        tts_text=clean_punctuation(tts_text) if tts_text else None,
+        pause_after_seconds=normalize_segment_pause(pause_after_seconds),
+        aux_limit=max(1, min(int(aux_limit), 5)),
+    )
+
+
+def with_segments(
+    request: BandiVoiceCommandRequest,
+    segments: list[BandiVoiceSegment] | tuple[BandiVoiceSegment, ...],
+) -> BandiVoiceCommandRequest:
+    clean_segments = tuple(
+        segment
+        for segment in segments[:MAX_VOICE_SEGMENTS]
+        if segment.display_text.strip() or (segment.tts_text or "").strip()
+    )
+    if not clean_segments:
+        return request
+    return BandiVoiceCommandRequest(
+        display_text=request.display_text,
+        emotion=request.emotion,
+        emotion_strength=request.emotion_strength,
+        tts_text=request.tts_text,
+        aux_limit=request.aux_limit,
+        segments=clean_segments,
+    )
+
+
 def _parse_options(option_text: str) -> tuple[dict[str, float], float | None, str | None]:
     emotion: dict[str, float] = {}
     strength: float | None = None
@@ -361,6 +455,40 @@ def build_runpod_input(
     min_duration_seconds: float,
     retry_attempts: int,
 ) -> dict[str, Any]:
+    if request.has_segments:
+        segments = []
+        for index, segment in enumerate(request.segments):
+            segment_emotion = segment.emotion or request.emotion
+            segment_strength = (
+                segment.emotion_strength
+                if segment.emotion
+                else request.emotion_strength
+            )
+            tts_text = prepare_tts_text(segment.display_text, segment_emotion, segment.tts_text)
+            segments.append(
+                {
+                    "display_text": segment.display_text,
+                    "text": tts_text,
+                    "emotion": segment_emotion,
+                    "emotion_strength": segment_strength,
+                    "primary_reference": DEFAULT_PRIMARY_REFERENCE,
+                    "aux_references": choose_aux_references(segment_emotion, max_refs=segment.aux_limit),
+                    "post_filter": choose_post_filter(segment_emotion),
+                    "pause_after_seconds": 0.0
+                    if index == len(request.segments) - 1
+                    else normalize_segment_pause(segment.pause_after_seconds),
+                }
+            )
+        return {
+            "request_id": request_id,
+            "display_text": request.display_text,
+            "text": " ".join(segment["text"] for segment in segments),
+            "segments": segments,
+            "min_duration_seconds": min_duration_seconds,
+            "retry_attempts": retry_attempts,
+            "segment_gap_seconds": DEFAULT_SEGMENT_PAUSE_SECONDS,
+        }
+
     if not request.has_emotion_plan:
         return {
             "text": clean_punctuation(request.tts_text or request.display_text),
@@ -386,6 +514,14 @@ def build_runpod_input(
 
 
 def format_emotion_summary(request: BandiVoiceCommandRequest) -> str:
+    if request.has_segments:
+        segment_count = len(request.segments)
+        leading = request.segments[0].emotion if request.segments else {}
+        items = ", ".join(
+            f"{name}:{score:g}" for name, score in sorted(leading.items(), key=lambda item: item[1], reverse=True)
+        )
+        suffix = f", 첫 감정={items}" if items else ""
+        return f" 구간={segment_count}개{suffix}"
     if not request.has_emotion_plan:
         return ""
     items = ", ".join(

@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from firefly import brain, commands, nickname_commands, storage
+from firefly.bandi_voice_plan import make_bandi_voice_segment, with_segments
 from firefly.config import DAILY_NEWS_KEY, POLLS_KEY, SPECIAL_USER_ID
 
 
@@ -2287,8 +2288,12 @@ def test_bandi_voice_command_sends_generated_wav(monkeypatch):
             duration_seconds=1.25,
         )
 
+    async def fake_plan_bandi_voice_request(request):
+        return request
+
     monkeypatch.setattr(commands.discord, "File", FakeFile)
     monkeypatch.setattr(commands, "generate_bandi_voice", fake_generate_bandi_voice)
+    monkeypatch.setattr(commands, "plan_bandi_voice_request", fake_plan_bandi_voice_request)
 
     message = SimpleNamespace(
         author=SimpleNamespace(
@@ -2342,8 +2347,12 @@ def test_bandi_voice_command_passes_emotion_plan(monkeypatch):
             duration_seconds=1.5,
         )
 
+    async def fake_plan_bandi_voice_request(request):
+        return request
+
     monkeypatch.setattr(commands.discord, "File", FakeFile)
     monkeypatch.setattr(commands, "generate_bandi_voice", fake_generate_bandi_voice)
+    monkeypatch.setattr(commands, "plan_bandi_voice_request", fake_plan_bandi_voice_request)
 
     message = SimpleNamespace(
         author=SimpleNamespace(
@@ -2372,6 +2381,82 @@ def test_bandi_voice_command_passes_emotion_plan(monkeypatch):
     assert captured_request.emotion == {"joy": 7.0, "calm": 3.0}
     assert captured_request.emotion_strength == 0.7
     assert "감정=joy:7, calm:3" in sent_payloads[0][0]
+
+
+def test_bandi_voice_command_passes_preprocessed_segments(monkeypatch):
+    sent_payloads = []
+    captured_request = None
+
+    class FakeFile:
+        def __init__(self, fp, filename=None):
+            self.fp = fp
+            self.filename = filename
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_payloads.append((content, kwargs))
+
+    async def fake_plan_bandi_voice_request(request):
+        return with_segments(
+            request,
+            [
+                make_bandi_voice_segment(
+                    "I am happy.",
+                    {"joy": 8},
+                    emotion_strength=0.72,
+                    pause_after_seconds=0.42,
+                ),
+                make_bandi_voice_segment(
+                    "But I am a little sad.",
+                    {"sad": 7, "calm": 3},
+                    emotion_strength=0.64,
+                ),
+            ],
+        )
+
+    async def fake_generate_bandi_voice(request):
+        nonlocal captured_request
+        captured_request = request
+        return SimpleNamespace(
+            audio_bytes=b"RIFF....WAVE",
+            filename="bandi-segments.wav",
+            duration_seconds=2.4,
+        )
+
+    monkeypatch.setattr(commands.discord, "File", FakeFile)
+    monkeypatch.setattr(commands, "plan_bandi_voice_request", fake_plan_bandi_voice_request)
+    monkeypatch.setattr(commands, "generate_bandi_voice", fake_generate_bandi_voice)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/voice I am happy, but I am a little sad.",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert captured_request.has_segments
+    assert [segment.display_text for segment in captured_request.segments] == [
+        "I am happy.",
+        "But I am a little sad.",
+    ]
+    assert captured_request.segments[0].pause_after_seconds == 0.42
+    assert "구간=2개" in sent_payloads[0][0]
 
 
 def test_bandi_voice_command_rejects_non_special_user(monkeypatch):

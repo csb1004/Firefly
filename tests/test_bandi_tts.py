@@ -5,7 +5,7 @@ import pytest
 
 from firefly import bandi_tts
 from firefly.bandi_tts import BandiVoiceError, decode_bandi_voice_response, generate_bandi_voice
-from firefly.bandi_voice_plan import parse_bandi_voice_command
+from firefly.bandi_voice_plan import make_bandi_voice_segment, parse_bandi_voice_command, with_segments
 
 
 def test_decode_bandi_voice_response_accepts_runpod_output():
@@ -134,3 +134,30 @@ def test_generate_bandi_voice_sends_emotion_request_payload(monkeypatch):
     assert captured_payload["input"]["text"] == "good work!"
     assert captured_payload["input"]["emotion"] == {"joy": 7.0, "calm": 3.0}
     assert captured_payload["input"]["emotion_strength"] == 0.7
+
+
+def test_generate_bandi_voice_sends_segment_request_payload(monkeypatch):
+    audio = base64.b64encode(b"RIFF....WAVE").decode("ascii")
+    captured_payload = {}
+
+    def fake_post(url, payload, timeout):
+        captured_payload.update(payload)
+        return {"output": {"request_id": "voice-123", "audio_base64": audio}}
+
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_URL", "https://tts.example.test")
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_API_KEY", "")
+    monkeypatch.setattr(bandi_tts, "_post_tts_request_sync", fake_post)
+
+    request = with_segments(
+        parse_bandi_voice_command("first happy then sad"),
+        [
+            make_bandi_voice_segment("first happy", {"joy": 8}, emotion_strength=0.7, pause_after_seconds=0.4),
+            make_bandi_voice_segment("then sad", {"sad": 8}, emotion_strength=0.66),
+        ],
+    )
+    result = asyncio.run(generate_bandi_voice(request))
+
+    assert result.audio_bytes == b"RIFF....WAVE"
+    assert captured_payload["input"]["segments"][0]["text"] == "first happy!"
+    assert captured_payload["input"]["segments"][0]["pause_after_seconds"] == 0.4
+    assert captured_payload["input"]["segments"][1]["text"] == "then sad."

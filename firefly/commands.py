@@ -13,6 +13,7 @@ from .affection import change_user_affection, set_user_affection
 from .admin_status import build_admin_status_text
 from .bandi_tts import BandiVoiceError, generate_bandi_voice
 from .bandi_voice_plan import BandiVoicePlanError, format_emotion_summary, parse_bandi_voice_command
+from .bandi_voice_preprocess import plan_bandi_voice_request
 from .ai import (
     generate_reply,
     generate_silent_auto_command,
@@ -757,6 +758,8 @@ async def _send_bandi_voice(message: discord.Message, raw_text: str) -> None:
     if len(text) > BANDI_TTS_MAX_CHARS:
         await message.channel.send(f"…한 번에 {BANDI_TTS_MAX_CHARS}자까지만 음성으로 만들 수 있어.")
         return
+
+    voice_request = await plan_bandi_voice_request(voice_request)
 
     try:
         result = await generate_bandi_voice(voice_request)

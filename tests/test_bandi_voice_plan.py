@@ -1,8 +1,10 @@
 from firefly.bandi_voice_plan import (
     build_runpod_input,
     format_emotion_summary,
+    make_bandi_voice_segment,
     parse_bandi_voice_command,
     prepare_tts_text,
+    with_segments,
 )
 
 
@@ -49,3 +51,29 @@ def test_build_runpod_input_adds_reference_mix_fields():
 
 def test_format_emotion_summary_is_empty_without_plan():
     assert format_emotion_summary(parse_bandi_voice_command("상범아 수고했어")) == ""
+
+
+def test_build_runpod_input_adds_segment_payloads():
+    request = with_segments(
+        parse_bandi_voice_command("good work, but I feel sad"),
+        [
+            make_bandi_voice_segment("good work", {"joy": 8}, emotion_strength=0.7, pause_after_seconds=0.42),
+            make_bandi_voice_segment("but I feel sad", {"sad": 7, "calm": 3}, emotion_strength=0.62),
+        ],
+    )
+
+    payload = build_runpod_input(
+        request,
+        request_id="segmented",
+        min_duration_seconds=1.0,
+        retry_attempts=2,
+    )
+
+    assert payload["request_id"] == "segmented"
+    assert payload["segments"][0]["text"] == "good work!"
+    assert payload["segments"][0]["emotion"] == {"joy": 8.0}
+    assert payload["segments"][0]["pause_after_seconds"] == 0.42
+    assert payload["segments"][1]["text"] == "but I feel sad."
+    assert payload["segments"][1]["emotion"] == {"sad": 7.0, "calm": 3.0}
+    assert payload["segments"][1]["pause_after_seconds"] == 0.0
+    assert payload["segment_gap_seconds"] == 0.26
