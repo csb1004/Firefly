@@ -2278,8 +2278,9 @@ def test_bandi_voice_command_sends_generated_wav(monkeypatch):
         async def send(self, content=None, **kwargs):
             sent_payloads.append((content, kwargs))
 
-    async def fake_generate_bandi_voice(text):
-        assert text == "안녕? 나는 반디야."
+    async def fake_generate_bandi_voice(request):
+        assert request.display_text == "안녕? 나는 반디야."
+        assert request.emotion == {}
         return SimpleNamespace(
             audio_bytes=b"RIFF....WAVE",
             filename="bandi-test.wav",
@@ -2317,6 +2318,60 @@ def test_bandi_voice_command_sends_generated_wav(monkeypatch):
     assert "1.2초" in content
     assert kwargs["file"].filename == "bandi-test.wav"
     assert kwargs["file"].fp.getvalue() == b"RIFF....WAVE"
+
+
+def test_bandi_voice_command_passes_emotion_plan(monkeypatch):
+    sent_payloads = []
+    captured_request = None
+
+    class FakeFile:
+        def __init__(self, fp, filename=None):
+            self.fp = fp
+            self.filename = filename
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_payloads.append((content, kwargs))
+
+    async def fake_generate_bandi_voice(request):
+        nonlocal captured_request
+        captured_request = request
+        return SimpleNamespace(
+            audio_bytes=b"RIFF....WAVE",
+            filename="bandi-emotion.wav",
+            duration_seconds=1.5,
+        )
+
+    monkeypatch.setattr(commands.discord, "File", FakeFile)
+    monkeypatch.setattr(commands, "generate_bandi_voice", fake_generate_bandi_voice)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=commands.SPECIAL_USER_ID,
+            name="Owner",
+            display_name="Owner",
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    asyncio.run(
+        commands.handle_mentioned_message(
+            message=message,
+            user_text="/음성생성 감정=기쁨:7,차분:3 강도=0.7 | 상범아 수고했어",
+            user_data={"name": "Owner", "nickname": "Owner", "affection": 1004},
+            room_key="room-1",
+            room_data={},
+            client=client,
+        )
+    )
+
+    assert captured_request.display_text == "상범아 수고했어"
+    assert captured_request.emotion == {"joy": 7.0, "calm": 3.0}
+    assert captured_request.emotion_strength == 0.7
+    assert "감정=joy:7, calm:3" in sent_payloads[0][0]
 
 
 def test_bandi_voice_command_rejects_non_special_user(monkeypatch):

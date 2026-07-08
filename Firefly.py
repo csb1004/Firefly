@@ -373,14 +373,64 @@ async def role_slash(interaction: discord.Interaction, command_text: str):
     await _run_text_command_slash(interaction, f"/역할 {command_text}", ephemeral=True)
 
 
+BANDI_EMOTION_CHOICES = [
+    app_commands.Choice(name="기쁨", value="joy"),
+    app_commands.Choice(name="고조", value="excited"),
+    app_commands.Choice(name="차분", value="calm"),
+    app_commands.Choice(name="슬픔", value="sad"),
+    app_commands.Choice(name="부끄러움", value="shy"),
+    app_commands.Choice(name="불안", value="anxiety"),
+    app_commands.Choice(name="화남", value="anger"),
+    app_commands.Choice(name="놀람", value="surprise"),
+]
+
+
 @tree.command(name="음성생성", description="반디 목소리 WAV 파일을 생성해요. 권한 필요.")
-@app_commands.rename(text="내용")
-@app_commands.describe(text="음성으로 만들 말")
-async def bandi_voice_slash(interaction: discord.Interaction, text: str):
+@app_commands.rename(
+    text="내용",
+    emotion="감정",
+    intensity="강도",
+    emotion2="보조감정",
+    intensity2="보조강도",
+    strength="표현강도",
+)
+@app_commands.describe(
+    text="음성으로 만들 말",
+    emotion="주 감정",
+    intensity="주 감정 비율. 1~10",
+    emotion2="섞을 보조 감정",
+    intensity2="보조 감정 비율. 1~10",
+    strength="감정 표현 강도. 0.0~1.0 또는 1~10",
+)
+@app_commands.choices(emotion=BANDI_EMOTION_CHOICES, emotion2=BANDI_EMOTION_CHOICES)
+async def bandi_voice_slash(
+    interaction: discord.Interaction,
+    text: str,
+    emotion: app_commands.Choice[str] | None = None,
+    intensity: app_commands.Range[int, 1, 10] | None = None,
+    emotion2: app_commands.Choice[str] | None = None,
+    intensity2: app_commands.Range[int, 1, 10] | None = None,
+    strength: float | None = None,
+):
     if not await _require_special_interaction(interaction):
         return
 
-    await _run_text_command_slash(interaction, f"/음성생성 {text}")
+    emotion_parts = []
+    if emotion is not None:
+        emotion_parts.append(f"{emotion.value}:{intensity or 7}")
+    if emotion2 is not None:
+        emotion_parts.append(f"{emotion2.value}:{intensity2 or 3}")
+
+    option_parts = []
+    if emotion_parts:
+        option_parts.append(f"emotion={','.join(emotion_parts)}")
+    if strength is not None:
+        option_parts.append(f"strength={strength:g}")
+
+    if option_parts:
+        await _run_text_command_slash(interaction, f"/음성생성 {' '.join(option_parts)} | {text}")
+    else:
+        await _run_text_command_slash(interaction, f"/음성생성 {text}")
 
 
 @tree.command(name="봇상태", description="메모리, 뉴스, 투표 상태를 확인해요. 권한 필요.")

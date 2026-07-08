@@ -1,10 +1,11 @@
-import base64
 import asyncio
+import base64
 
 import pytest
 
 from firefly import bandi_tts
 from firefly.bandi_tts import BandiVoiceError, decode_bandi_voice_response, generate_bandi_voice
+from firefly.bandi_voice_plan import parse_bandi_voice_command
 
 
 def test_decode_bandi_voice_response_accepts_runpod_output():
@@ -86,11 +87,26 @@ def test_generate_bandi_voice_polls_runpod_status_until_completed(monkeypatch):
     monkeypatch.setattr(bandi_tts, "_get_tts_request_sync", fake_get)
     monkeypatch.setattr(bandi_tts.asyncio, "sleep", fake_sleep)
 
-    result = asyncio.run(generate_bandi_voice("안녕"))
+    result = asyncio.run(generate_bandi_voice("hello"))
 
     assert result.audio_bytes == audio
     assert result.filename == "bandi-voice-123.wav"
-    assert calls[0] == ("post", "https://api.runpod.ai/v2/endpoint-123/runsync", "안녕")
+    assert calls[0] == ("post", "https://api.runpod.ai/v2/endpoint-123/runsync", "hello")
     assert calls[1][0] == "sleep"
     assert calls[2][0] == "get"
     assert calls[2][1] == "https://api.runpod.ai/v2/endpoint-123/status/job-123"
+
+
+def test_build_request_payload_accepts_emotion_voice_request(monkeypatch):
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_MIN_DURATION_SECONDS", 1.0)
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_RETRY_ATTEMPTS", 3)
+    request = parse_bandi_voice_command("emotion=joy:7,calm:3 strength=0.7 | good work")
+
+    payload = bandi_tts._build_request_payload(request, "request-001")
+
+    assert payload["input"]["request_id"] == "request-001"
+    assert payload["input"]["display_text"] == "good work"
+    assert payload["input"]["text"] == "good work!"
+    assert payload["input"]["emotion"] == {"joy": 7.0, "calm": 3.0}
+    assert payload["input"]["emotion_strength"] == 0.7
+    assert payload["input"]["aux_references"] == ["joy/012.wav", "calm/168.wav"]

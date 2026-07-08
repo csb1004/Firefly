@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import config
+from .bandi_voice_plan import BandiVoiceCommandRequest, build_runpod_input
 
 
 class BandiVoiceError(RuntimeError):
@@ -44,7 +45,17 @@ def _authorization_token() -> str:
     return config.RUNPOD_API_KEY
 
 
-def _build_request_payload(text: str, request_id: str) -> dict[str, Any]:
+def _build_request_payload(text: str | BandiVoiceCommandRequest, request_id: str) -> dict[str, Any]:
+    if isinstance(text, BandiVoiceCommandRequest):
+        return {
+            "input": build_runpod_input(
+                text,
+                request_id=request_id,
+                min_duration_seconds=config.BANDI_TTS_MIN_DURATION_SECONDS,
+                retry_attempts=config.BANDI_TTS_RETRY_ATTEMPTS,
+            )
+        }
+
     return {
         "input": {
             "text": text,
@@ -209,8 +220,8 @@ async def _wait_for_runpod_completion(
             return last_payload
 
 
-async def generate_bandi_voice(text: str) -> BandiVoiceResult:
-    clean_text = text.strip()
+async def generate_bandi_voice(text: str | BandiVoiceCommandRequest) -> BandiVoiceResult:
+    clean_text = text.display_text.strip() if isinstance(text, BandiVoiceCommandRequest) else text.strip()
     if not clean_text:
         raise BandiVoiceError("음성으로 만들 문장이 비어 있어.")
     if len(clean_text) > config.BANDI_TTS_MAX_CHARS:

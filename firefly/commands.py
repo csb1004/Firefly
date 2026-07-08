@@ -12,6 +12,7 @@ import discord
 from .affection import change_user_affection, set_user_affection
 from .admin_status import build_admin_status_text
 from .bandi_tts import BandiVoiceError, generate_bandi_voice
+from .bandi_voice_plan import BandiVoicePlanError, format_emotion_summary, parse_bandi_voice_command
 from .ai import (
     generate_reply,
     generate_silent_auto_command,
@@ -743,7 +744,13 @@ async def handle_silent_group_memory_update(
 
 
 async def _send_bandi_voice(message: discord.Message, raw_text: str) -> None:
-    text = raw_text.strip()
+    try:
+        voice_request = parse_bandi_voice_command(raw_text)
+    except BandiVoicePlanError as exc:
+        await message.channel.send(f"…{exc}")
+        return
+
+    text = voice_request.display_text
     if not text:
         await message.channel.send("…음성으로 만들 말을 같이 적어줘. 예: `/음성생성 안녕? 나는 반디야.`")
         return
@@ -752,14 +759,15 @@ async def _send_bandi_voice(message: discord.Message, raw_text: str) -> None:
         return
 
     try:
-        result = await generate_bandi_voice(text)
+        result = await generate_bandi_voice(voice_request)
     except BandiVoiceError as exc:
         await message.channel.send(f"…음성 생성에 실패했어. {exc}")
         return
 
     audio_file = discord.File(io.BytesIO(result.audio_bytes), filename=result.filename)
     duration_text = f" ({result.duration_seconds:.1f}초)" if result.duration_seconds is not None else ""
-    await message.channel.send(f"…반디 목소리로 만들어왔어{duration_text}.", file=audio_file)
+    emotion_text = format_emotion_summary(voice_request)
+    await message.channel.send(f"…반디 목소리로 만들어왔어{duration_text}.{emotion_text}", file=audio_file)
 
 
 async def _send_admin_status(message: discord.Message, room_key: str, room_data: dict) -> None:
