@@ -38,6 +38,7 @@ Rules:
 - Use 0.38 to 0.55 seconds when the next segment changes emotion sharply.
 - Last segment may still include pause_after_seconds; the server will ignore final trailing gap.
 - tts_text may add light punctuation or pauses, but must not add new facts.
+- Do not add filler words such as "그", "음", "어", or "저" unless they already exist in the original text.
 
 Schema:
 {

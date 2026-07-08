@@ -197,9 +197,10 @@ def ensure_sentence_ending(text: str, emotion_weights: dict[str, float]) -> str:
 
 def apply_emotion_tts_pauses(text: str, emotion_weights: dict[str, float]) -> str:
     if emotion_weights.get("sad", 0.0) >= 0.35:
-        text = re.sub(r"조금[\s,.]*마음", "조금... 마음", text)
-    if emotion_weights.get("shy", 0.0) >= 0.45 and not text.startswith("그..."):
-        text = f"그... {text}"
+        text = re.sub(r"^상범아\s+", "상범아, ", text)
+        text = re.sub(r"조금[\s,.]*마음이", "조금... 마음이", text)
+    if emotion_weights.get("shy", 0.0) >= 0.45:
+        text = re.sub(r"^상범아(?:\s+|,\s*)", "상범아, ", text)
     return text
 
 
@@ -515,13 +516,19 @@ def build_runpod_input(
 
 def format_emotion_summary(request: BandiVoiceCommandRequest) -> str:
     if request.has_segments:
-        segment_count = len(request.segments)
-        leading = request.segments[0].emotion if request.segments else {}
-        items = ", ".join(
-            f"{name}:{score:g}" for name, score in sorted(leading.items(), key=lambda item: item[1], reverse=True)
-        )
-        suffix = f", 첫 감정={items}" if items else ""
-        return f" 구간={segment_count}개{suffix}"
+        segment_summaries = []
+        for segment in request.segments:
+            items = "/".join(
+                f"{name}:{score:g}" for name, score in sorted(segment.emotion.items(), key=lambda item: item[1], reverse=True)
+            )
+            if items:
+                segment_summaries.append(items)
+        if not segment_summaries:
+            return f" 구간={len(request.segments)}개"
+        emotion_line = " -> ".join(segment_summaries)
+        if len(emotion_line) > 180:
+            emotion_line = f"{emotion_line[:177]}..."
+        return f" 구간={len(request.segments)}개, 감정선={emotion_line}"
     if not request.has_emotion_plan:
         return ""
     items = ", ".join(

@@ -29,6 +29,10 @@ def test_prepare_tts_text_repairs_punctuation_for_emotion():
     assert prepare_tts_text("오늘은 조금 마음이 무거워", {"sad": 7}) == "오늘은 조금... 마음이 무거워."
 
 
+def test_prepare_tts_text_does_not_insert_shy_filler_word():
+    assert prepare_tts_text("상범아 고마워", {"shy": 7}) == "상범아, 고마워."
+
+
 def test_build_runpod_input_adds_reference_mix_fields():
     request = parse_bandi_voice_command("emotion=sad:7,calm:3 strength=0.72 | 오늘은 조금 마음이 무거워")
 
@@ -77,3 +81,15 @@ def test_build_runpod_input_adds_segment_payloads():
     assert payload["segments"][1]["emotion"] == {"sad": 7.0, "calm": 3.0}
     assert payload["segments"][1]["pause_after_seconds"] == 0.0
     assert payload["segment_gap_seconds"] == 0.26
+
+
+def test_format_emotion_summary_includes_segment_emotion_line():
+    request = with_segments(
+        parse_bandi_voice_command("good work, but I feel sad"),
+        [
+            make_bandi_voice_segment("good work", {"joy": 8}, emotion_strength=0.7),
+            make_bandi_voice_segment("but I feel sad", {"sad": 7, "calm": 3}, emotion_strength=0.62),
+        ],
+    )
+
+    assert format_emotion_summary(request) == " 구간=2개, 감정선=joy:8 -> sad:7/calm:3"
