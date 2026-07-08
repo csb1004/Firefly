@@ -1,5 +1,5 @@
 from firefly.bandi_voice_plan import parse_bandi_voice_command
-from firefly.bandi_voice_preprocess import _extract_json_object, _request_from_llm_payload
+from firefly.bandi_voice_preprocess import SYSTEM_PROMPT, _extract_json_object, _request_from_llm_payload
 
 
 def test_extract_json_object_accepts_fenced_json():
@@ -60,7 +60,7 @@ def test_request_from_llm_payload_uses_single_segment_as_emotion_plan():
     assert planned.tts_text == "good work"
 
 
-def test_request_from_llm_payload_calibrates_embarrassed_scolding():
+def test_request_from_llm_payload_preserves_llm_emotion_selection():
     request = parse_bandi_voice_command("정말! 부끄럽게 꼭 말해야 아는거야? ..사랑해 상범아.")
 
     planned = _request_from_llm_payload(
@@ -83,29 +83,18 @@ def test_request_from_llm_payload_calibrates_embarrassed_scolding():
 
     first_emotion = planned.segments[0].emotion
     second_emotion = planned.segments[1].emotion
-    assert first_emotion["anger"] == 6.0
-    assert first_emotion["shy"] == 5.0
-    assert first_emotion["excited"] == 1.0
-    assert first_emotion["joy"] == 1.0
-    assert second_emotion["shy"] == 6.0
+    assert first_emotion == {"excited": 7.0, "joy": 5.0}
     assert second_emotion["joy"] == 7.0
-    assert second_emotion.get("excited", 0.0) <= 1.0
 
 
-def test_request_from_llm_payload_respects_explicit_emotion_request():
-    request = parse_bandi_voice_command("emotion=joy:8 | 정말! 부끄럽게 꼭 말해야 아는거야?")
+def test_system_prompt_contains_general_emotion_rubric():
+    assert "communicative function" in SYSTEM_PROMPT
+    assert "not from isolated words or punctuation" in SYSTEM_PROMPT
+    assert "High energy plus reproach" in SYSTEM_PROMPT
+    assert "Affection expressed while embarrassed" in SYSTEM_PROMPT
+    assert "split it into separate segments instead of averaging" in SYSTEM_PROMPT
 
-    planned = _request_from_llm_payload(
-        request,
-        {
-            "segments": [
-                {
-                    "text": "정말! 부끄럽게 꼭 말해야 아는거야?",
-                    "emotion": {"joy": 8},
-                    "emotion_strength": 0.7,
-                }
-            ]
-        },
-    )
 
-    assert planned.emotion == {"joy": 8.0}
+def test_system_prompt_has_no_keyword_postprocessing_contract():
+    assert "_calibrate_segment_emotion" not in SYSTEM_PROMPT
+    assert "SCOLDING_PATTERNS" not in SYSTEM_PROMPT

@@ -39,9 +39,30 @@ Rules:
 - Last segment may still include pause_after_seconds; the server will ignore final trailing gap.
 - tts_text may add light punctuation or pauses, but must not add new facts.
 - Do not add filler words such as "그", "음", "어", or "저" unless they already exist in the original text.
-- Do not infer excited or joy from punctuation alone.
-- Scolding rhetorical questions such as "꼭 말해야 아는거야?" should lean anger/frustration, not excited.
-- Embarrassed confession words such as "부끄럽게" or "사랑해" should lean shy, with joy only as a secondary color.
+
+Emotion selection rubric:
+- Judge emotion from the utterance's communicative function, not from isolated words or punctuation.
+- Treat punctuation, repeated marks, and short exclamations as intensity signals only. They can raise emotion_strength, but they must not decide the emotion by themselves.
+- First decide whether the speaker is inviting closeness, teasing, protesting, confessing, reassuring, worrying, reacting to surprise, or grieving.
+- Then assign one primary emotion and optional secondary emotions. Avoid flat averages when the segment has a clear pragmatic intent.
+
+Emotion meanings:
+- joy: warm positive feeling, gratitude, relief, delight, affectionate approval, or soft happiness.
+- excited: forward-moving eagerness, anticipation, playful high energy, or delighted momentum. Do not use it for tense complaints, embarrassment, defensive speech, or scolding just because the text has "!".
+- calm: steady, composed, neutral, reassuring, matter-of-fact, or gentle control.
+- sad: loss, disappointment, loneliness, regret, resignation, or emotional heaviness.
+- shy: embarrassment, bashfulness, vulnerable confession, indirect affection, flustered softness, or wanting closeness while feeling exposed.
+- anxiety: uncertainty, fear of rejection, nervous hesitation, worry, or unstable anticipation.
+- anger: frustration, reproach, protest, boundary-setting, offended teasing, or "why do I have to spell this out?" pressure.
+- surprise: sudden realization, unexpected information, startled reaction, or abrupt discovery.
+
+Conflict rules:
+- High energy plus reproach, complaint, pressure, or a challenging rhetorical question should usually be anger or anxiety first, not excited.
+- Affection expressed while embarrassed or defensive should usually be shy first, with joy as a secondary color.
+- A confession after a tense or defensive clause should usually transition into shy/joy/calm rather than stay in anger.
+- Playful teasing should stay lighter than real anger: combine shy/joy/anger only if the speech act is affectionate rather than hostile.
+- If a segment mixes opposite emotions, split it into separate segments instead of averaging them.
+- If the text can be read in multiple ways, choose the emotion that best explains why the speaker says it that way in context.
 
 Schema:
 {
@@ -56,67 +77,6 @@ Schema:
   ]
 }
 """.strip()
-
-SCOLDING_PATTERNS = (
-    re.compile(r"꼭\s*.+해야\s*아는\s*거야\??"),
-    re.compile(r"말해야\s*아는\s*거야\??"),
-    re.compile(r"정말[!！]?\s*.+아는\s*거야\??"),
-)
-SHY_MARKERS = ("부끄", "수줍", "쑥스", "민망")
-AFFECTION_MARKERS = ("사랑해", "좋아해")
-POSITIVE_JOY_MARKERS = ("기뻐", "좋아", "행복", "고마워", "신나", "기대", "대박")
-
-
-def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
-    return any(marker in text for marker in markers)
-
-
-def _cap_emotion(emotion: dict[str, float], name: str, maximum: float) -> None:
-    if name in emotion:
-        emotion[name] = min(emotion[name], maximum)
-        if emotion[name] <= 0:
-            emotion.pop(name, None)
-
-
-def _raise_emotion(emotion: dict[str, float], name: str, minimum: float) -> None:
-    emotion[name] = max(float(emotion.get(name, 0.0)), minimum)
-
-
-def _calibrate_segment_emotion(
-    text: str,
-    emotion: dict[str, float],
-    *,
-    explicit_request_emotion: bool,
-) -> dict[str, float]:
-    if explicit_request_emotion:
-        return emotion
-
-    clean_text = re.sub(r"\s+", " ", text).strip()
-    calibrated = dict(emotion)
-    has_scolding = any(pattern.search(clean_text) for pattern in SCOLDING_PATTERNS)
-    has_shy_marker = _contains_any(clean_text, SHY_MARKERS)
-    has_affection = _contains_any(clean_text, AFFECTION_MARKERS)
-    has_positive_joy = _contains_any(clean_text, POSITIVE_JOY_MARKERS)
-
-    if has_scolding:
-        _raise_emotion(calibrated, "anger", 6.0)
-        _cap_emotion(calibrated, "excited", 1.0)
-        if not has_positive_joy:
-            _cap_emotion(calibrated, "joy", 1.0)
-
-    if has_shy_marker:
-        _raise_emotion(calibrated, "shy", 5.0)
-        _cap_emotion(calibrated, "excited", 1.0)
-        if not has_positive_joy and not has_affection:
-            _cap_emotion(calibrated, "joy", 1.0)
-
-    if has_affection:
-        _raise_emotion(calibrated, "shy", 6.0)
-        _raise_emotion(calibrated, "joy", 3.0)
-        _cap_emotion(calibrated, "anger", 2.0)
-        _cap_emotion(calibrated, "excited", 1.0)
-
-    return {name: score for name, score in calibrated.items() if score > 0}
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
@@ -141,7 +101,6 @@ def _request_from_llm_payload(
     if not isinstance(raw_segments, list):
         return request
 
-    explicit_request_emotion = bool(request.emotion)
     segments: list[BandiVoiceSegment] = []
     for raw_segment in raw_segments:
         if not isinstance(raw_segment, dict):
@@ -154,15 +113,10 @@ def _request_from_llm_payload(
         emotion = raw_emotion if isinstance(raw_emotion, dict) else request.emotion
         raw_strength = raw_segment.get("emotion_strength")
         strength = raw_strength if raw_strength is not None else request.emotion_strength
-        calibrated_emotion = _calibrate_segment_emotion(
-            text or tts_text or request.display_text,
-            emotion,
-            explicit_request_emotion=explicit_request_emotion,
-        )
         segments.append(
             make_bandi_voice_segment(
                 text or tts_text or request.display_text,
-                calibrated_emotion,
+                emotion,
                 emotion_strength=strength,
                 tts_text=tts_text,
                 pause_after_seconds=raw_segment.get("pause_after_seconds"),
