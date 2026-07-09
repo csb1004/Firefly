@@ -4,7 +4,7 @@ import base64
 import pytest
 
 from firefly import bandi_tts
-from firefly.bandi_tts import BandiVoiceError, decode_bandi_voice_response, generate_bandi_voice
+from firefly.bandi_tts import BandiVoiceError, decode_bandi_voice_response, generate_bandi_voice, purge_runpod_queue
 from firefly.bandi_voice_plan import make_bandi_voice_segment, parse_bandi_voice_command, with_segments
 
 
@@ -61,6 +61,42 @@ def test_runpod_tts_url_uses_async_run_endpoint(monkeypatch):
     monkeypatch.setattr(bandi_tts.config, "RUNPOD_ENDPOINT_ID", "endpoint-123")
 
     assert bandi_tts._bandi_tts_url() == "https://api.runpod.ai/v2/endpoint-123/run"
+
+
+def test_purge_runpod_queue_posts_to_purge_queue_endpoint(monkeypatch):
+    calls = []
+
+    def fake_request_json_sync(url, *, method, payload=None, headers=None, timeout):
+        calls.append((url, method, payload, headers, timeout))
+        return {"removed": 3, "status": "completed"}
+
+    monkeypatch.setattr(bandi_tts.config, "RUNPOD_ENDPOINT_ID", "endpoint-123")
+    monkeypatch.setattr(bandi_tts.config, "RUNPOD_API_KEY", "runpod-secret")
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_TIMEOUT_SECONDS", 300.0)
+    monkeypatch.setattr(bandi_tts, "_request_json_sync", fake_request_json_sync)
+
+    result = asyncio.run(purge_runpod_queue())
+
+    assert result == {"removed": 3, "status": "completed"}
+    assert calls == [
+        (
+            "https://api.runpod.ai/v2/endpoint-123/purge-queue",
+            "POST",
+            None,
+            {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer runpod-secret",
+            },
+            30.0,
+        )
+    ]
+
+
+def test_purge_runpod_queue_requires_runpod_endpoint(monkeypatch):
+    monkeypatch.setattr(bandi_tts.config, "RUNPOD_ENDPOINT_ID", "")
+
+    with pytest.raises(BandiVoiceError, match="RUNPOD_ENDPOINT_ID"):
+        asyncio.run(purge_runpod_queue())
 
 
 def test_generate_bandi_voice_polls_runpod_status_until_completed(monkeypatch):

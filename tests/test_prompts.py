@@ -207,6 +207,7 @@ def test_special_command_guide_uses_placeholder_sections_for_non_poll_commands()
     assert "/투표마감 {메시지ID}" in guide
     assert "/메모리파일 {메모리대상}" in guide
     assert "/메모리초기화 {메모리대상} 확인" in guide
+    assert "/음성큐비우기 확인" in guide
     assert "/검색실행 {프롬프트}" in guide
     assert "/검색실행 {명령어들} || {프롬프트}" in guide
     assert "/인터넷모드 {상태}" in guide

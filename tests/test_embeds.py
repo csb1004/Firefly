@@ -39,6 +39,7 @@ def test_special_help_lists_one_shot_web_search_command():
 
     assert "/검색실행 [프롬프트]" in text
     assert "/검색실행 [명령어들] || [프롬프트]" in text
+    assert "/음성큐비우기 확인" in text
 
 
 def test_special_help_lists_split_memory_commands():

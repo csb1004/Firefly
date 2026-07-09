@@ -70,6 +70,10 @@ def _runpod_status_url(job_id: str) -> str:
     return f"https://api.runpod.ai/v2/{config.RUNPOD_ENDPOINT_ID}/status/{job_id}"
 
 
+def _runpod_purge_queue_url() -> str:
+    return f"https://api.runpod.ai/v2/{config.RUNPOD_ENDPOINT_ID}/purge-queue"
+
+
 def _runpod_status(payload: dict[str, Any]) -> str:
     return str(payload.get("status") or "").strip().upper()
 
@@ -144,6 +148,15 @@ def _request_headers() -> dict[str, str]:
     return headers
 
 
+def _runpod_request_headers() -> dict[str, str]:
+    if not config.RUNPOD_API_KEY:
+        raise BandiVoiceError("RUNPOD_API_KEY가 설정되지 않았어.")
+    return {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {config.RUNPOD_API_KEY}",
+    }
+
+
 def _read_json_response(response_body: bytes) -> dict[str, Any]:
     try:
         decoded = json.loads(response_body.decode("utf-8-sig"))
@@ -159,12 +172,13 @@ def _request_json_sync(
     *,
     method: str,
     payload: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
     timeout: float,
 ) -> dict[str, Any]:
     body = None
     if payload is not None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(url, data=body, headers=_request_headers(), method=method)
+    request = urllib.request.Request(url, data=body, headers=headers or _request_headers(), method=method)
 
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -187,6 +201,19 @@ def _post_tts_request_sync(url: str, payload: dict[str, Any], timeout: float) ->
 
 def _get_tts_request_sync(url: str, timeout: float) -> dict[str, Any]:
     return _request_json_sync(url, method="GET", timeout=timeout)
+
+
+async def purge_runpod_queue() -> dict[str, Any]:
+    if not config.RUNPOD_ENDPOINT_ID:
+        raise BandiVoiceError("RUNPOD_ENDPOINT_ID가 설정되지 않았어.")
+
+    return await asyncio.to_thread(
+        _request_json_sync,
+        _runpod_purge_queue_url(),
+        method="POST",
+        headers=_runpod_request_headers(),
+        timeout=min(30.0, max(1.0, config.BANDI_TTS_TIMEOUT_SECONDS)),
+    )
 
 
 async def _wait_for_runpod_completion(

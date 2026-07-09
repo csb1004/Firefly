@@ -11,7 +11,7 @@ import discord
 
 from .affection import change_user_affection, set_user_affection
 from .admin_status import build_admin_status_text
-from .bandi_tts import BandiVoiceError, generate_bandi_voice
+from .bandi_tts import BandiVoiceError, generate_bandi_voice, purge_runpod_queue
 from .bandi_voice_plan import BandiVoicePlanError, format_emotion_summary, parse_bandi_voice_command
 from .bandi_voice_preprocess import plan_bandi_voice_request
 from .ai import (
@@ -32,7 +32,7 @@ from .brain import (
     parse_brain_index_and_note,
     update_brain_note,
 )
-from .command_registry import ADMIN_STATUS_COMMAND, BANDI_VOICE_COMMAND, ROLE_COMMAND, matched_alias
+from .command_registry import ADMIN_STATUS_COMMAND, BANDI_VOICE_COMMAND, ROLE_COMMAND, RUNPOD_QUEUE_COMMAND, matched_alias
 from .commands_parser import (
     SPECIAL_ONLY_COMMAND_PREFIXES,
     command_arg,
@@ -166,6 +166,9 @@ ADAPTER_BLOCKED_COMMAND_PREFIXES = (
     "/방초기화",
     "/역할",
     "/role",
+    "/음성큐비우기",
+    "/큐비우기",
+    "/runpod-queue-purge",
 )
 PLANNER_COMMAND_ADAPTER_ALIASES = ("/실행", "/명령답변")
 SILENT_GROUP_MEMORY_COMMAND_PREFIXES = ("/뇌추가", "/뇌삭제", "/호감도증감")
@@ -185,7 +188,13 @@ class _PendingMemoryReset:
     expires_at: float
 
 
+@dataclass(frozen=True)
+class _PendingRunpodQueuePurge:
+    expires_at: float
+
+
 _pending_memory_resets: dict[tuple[int, str], _PendingMemoryReset] = {}
+_pending_runpod_queue_purges: dict[tuple[int, str], _PendingRunpodQueuePurge] = {}
 
 
 class _NoopTyping:
@@ -479,6 +488,28 @@ def _get_pending_memory_reset(author_id: int, room_key: str) -> _PendingMemoryRe
     return pending
 
 
+def _pending_runpod_queue_purge_key(author_id: int, room_key: str) -> tuple[int, str]:
+    return author_id, room_key
+
+
+def _set_pending_runpod_queue_purge(author_id: int, room_key: str) -> None:
+    _pending_runpod_queue_purges[_pending_runpod_queue_purge_key(author_id, room_key)] = (
+        _PendingRunpodQueuePurge(expires_at=time.monotonic() + PENDING_MEMORY_RESET_TTL_SECONDS)
+    )
+
+
+def _pop_pending_runpod_queue_purge(author_id: int, room_key: str) -> _PendingRunpodQueuePurge | None:
+    return _pending_runpod_queue_purges.pop(_pending_runpod_queue_purge_key(author_id, room_key), None)
+
+
+def _get_pending_runpod_queue_purge(author_id: int, room_key: str) -> _PendingRunpodQueuePurge | None:
+    pending = _pending_runpod_queue_purges.get(_pending_runpod_queue_purge_key(author_id, room_key))
+    if pending and pending.expires_at <= time.monotonic():
+        _pop_pending_runpod_queue_purge(author_id, room_key)
+        return None
+    return pending
+
+
 async def _execute_memory_reset(message: discord.Message, section: str) -> None:
     reset_memory_section(section)
     if section == "polls":
@@ -486,6 +517,35 @@ async def _execute_memory_reset(message: discord.Message, section: str) -> None:
     label = MEMORY_SECTION_LABELS[section]
     path = get_memory_section_file(section)
     await message.channel.send(f"…응. {label} 메모리 파일 `{path.name}`을 비웠어.")
+
+
+def _format_runpod_queue_purge_result(payload: dict) -> str:
+    removed = payload.get("removed")
+    if isinstance(removed, int):
+        return f"…응. RunPod 음성 대기열에서 {removed}개 작업을 비웠어."
+    return "…응. RunPod 음성 대기열 비우기 요청을 보냈어."
+
+
+async def _execute_runpod_queue_purge(message: discord.Message) -> None:
+    try:
+        payload = await purge_runpod_queue()
+    except BandiVoiceError as exc:
+        await message.channel.send(f"…음성 큐 비우기에 실패했어. {exc}")
+        return
+
+    await message.channel.send(_format_runpod_queue_purge_result(payload))
+
+
+async def _ask_runpod_queue_purge_confirm(
+    message: discord.Message,
+    author_id: int,
+    room_key: str,
+) -> None:
+    _set_pending_runpod_queue_purge(author_id, room_key)
+    await message.channel.send(
+        "RunPod 음성 대기열에서 아직 시작하지 않은 작업을 모두 비울까요? "
+        "진행하려면 `확인`, 중단하려면 `취소`라고 답해주세요."
+    )
 
 
 async def _ask_memory_reset_target(message: discord.Message, author_id: int, room_key: str) -> None:
@@ -556,6 +616,42 @@ async def _handle_pending_memory_reset(
     label = MEMORY_SECTION_LABELS[section]
     await message.channel.send(
         f"{label} 메모리 초기화를 진행하려면 `확인`, 중단하려면 `취소`라고 답해주세요."
+    )
+    return True
+
+
+async def _handle_pending_runpod_queue_purge(
+    *,
+    message: discord.Message,
+    user_text: str,
+    author_id: int,
+    room_key: str,
+    special_user: bool,
+) -> bool:
+    pending = _get_pending_runpod_queue_purge(author_id, room_key)
+    if pending is None:
+        return False
+
+    if matched_alias(user_text, RUNPOD_QUEUE_COMMAND.aliases):
+        return False
+
+    if not special_user:
+        _pop_pending_runpod_queue_purge(author_id, room_key)
+        await message.channel.send(PERMISSION_DENIED_MESSAGE)
+        return True
+
+    if _is_memory_reset_cancel(user_text):
+        _pop_pending_runpod_queue_purge(author_id, room_key)
+        await message.channel.send("…응. 음성 큐 비우기를 취소했어.")
+        return True
+
+    if _is_memory_reset_confirm(user_text):
+        _pop_pending_runpod_queue_purge(author_id, room_key)
+        await _execute_runpod_queue_purge(message)
+        return True
+
+    await message.channel.send(
+        "RunPod 음성 큐를 비우려면 `확인`, 중단하려면 `취소`라고 답해주세요."
     )
     return True
 
@@ -1232,6 +1328,15 @@ async def handle_mentioned_message(
     ):
         return
 
+    if await _handle_pending_runpod_queue_purge(
+        message=message,
+        user_text=user_text,
+        author_id=author_id,
+        room_key=room_key,
+        special_user=special_user,
+    ):
+        return
+
     if not attachment_context and not user_text.strip().startswith("/"):
         display_name = getattr(message.author, "display_name", message.author.name)
         tool_plan = await plan_tool_use(
@@ -1277,6 +1382,25 @@ async def handle_mentioned_message(
             await message.channel.send("…그 명령어를 사용할 권한이 없어.")
             return
         await _send_bandi_voice(message, _command_arg(user_text, bandi_voice_alias))
+        return
+
+    runpod_queue_alias = matched_alias(user_text, RUNPOD_QUEUE_COMMAND.aliases)
+    if runpod_queue_alias:
+        if not special_user:
+            await message.channel.send("…그 명령어를 사용할 권한이 없어.")
+            return
+
+        raw_args = _command_arg(user_text, runpod_queue_alias)
+        if _is_memory_reset_confirm(raw_args):
+            _pop_pending_runpod_queue_purge(author_id, room_key)
+            await _execute_runpod_queue_purge(message)
+            return
+        if _is_memory_reset_cancel(raw_args):
+            _pop_pending_runpod_queue_purge(author_id, room_key)
+            await message.channel.send("…응. 음성 큐 비우기를 취소했어.")
+            return
+
+        await _ask_runpod_queue_purge_confirm(message, author_id, room_key)
         return
 
     for reasoning_alias in ("/추론", "/추론설정"):

@@ -26,11 +26,18 @@ BANDI_VOICE_COMMAND = TextCommandSpec(
     summary="Generate a Bandi voice WAV file from text.",
 )
 
+RUNPOD_QUEUE_COMMAND = TextCommandSpec(
+    aliases=("/음성큐비우기", "/큐비우기", "/runpod-queue-purge"),
+    special_only=True,
+    summary="Purge pending Bandi voice jobs from the RunPod queue.",
+)
+
 
 REGISTERED_TEXT_COMMANDS = (
     ADMIN_STATUS_COMMAND,
     ROLE_COMMAND,
     BANDI_VOICE_COMMAND,
+    RUNPOD_QUEUE_COMMAND,
 )
 
 

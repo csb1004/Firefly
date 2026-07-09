@@ -2225,6 +2225,106 @@ def test_memory_reset_followup_accepts_target_then_confirmation(monkeypatch, tmp
     assert "123" not in data
 
 
+def _run_runpod_queue_purge_messages(
+    monkeypatch,
+    user_texts,
+    *,
+    author_id=commands.SPECIAL_USER_ID,
+    purge_result=None,
+):
+    sent_messages = []
+    purge_calls = 0
+    commands._pending_runpod_queue_purges.clear()
+    display_name = "Owner" if author_id == commands.SPECIAL_USER_ID else "Alice"
+
+    async def fake_purge_runpod_queue():
+        nonlocal purge_calls
+        purge_calls += 1
+        if isinstance(purge_result, BaseException):
+            raise purge_result
+        return purge_result or {"removed": 0, "status": "completed"}
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append(content or "<embed>")
+
+    monkeypatch.setattr(commands, "purge_runpod_queue", fake_purge_runpod_queue)
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(
+            id=author_id,
+            name=display_name,
+            display_name=display_name,
+        ),
+        channel=FakeChannel(),
+        mentions=[],
+        guild=None,
+    )
+    client = SimpleNamespace(user=SimpleNamespace(id=999))
+
+    for user_text in user_texts:
+        asyncio.run(
+            commands.handle_mentioned_message(
+                message=message,
+                user_text=user_text,
+                user_data={"name": display_name, "nickname": display_name, "affection": 1004},
+                room_key="room-1",
+                room_data={},
+                client=client,
+            )
+        )
+    return sent_messages, purge_calls
+
+
+def test_runpod_queue_purge_can_be_confirmed_in_followup(monkeypatch):
+    sent_messages, purge_calls = _run_runpod_queue_purge_messages(
+        monkeypatch,
+        ("/음성큐비우기", "확인"),
+        purge_result={"removed": 2, "status": "completed"},
+    )
+
+    assert purge_calls == 1
+    assert sent_messages == [
+        "RunPod 음성 대기열에서 아직 시작하지 않은 작업을 모두 비울까요? 진행하려면 `확인`, 중단하려면 `취소`라고 답해주세요.",
+        "…응. RunPod 음성 대기열에서 2개 작업을 비웠어.",
+    ]
+
+
+def test_runpod_queue_purge_accepts_inline_confirmation(monkeypatch):
+    sent_messages, _purge_calls = _run_runpod_queue_purge_messages(
+        monkeypatch,
+        ("/음성큐비우기 확인",),
+        purge_result={"removed": 0, "status": "completed"},
+    )
+
+    assert sent_messages == ["…응. RunPod 음성 대기열에서 0개 작업을 비웠어."]
+
+
+def test_runpod_queue_purge_can_be_cancelled(monkeypatch):
+    sent_messages, purge_calls = _run_runpod_queue_purge_messages(
+        monkeypatch,
+        ("/큐비우기", "취소"),
+        purge_result={"removed": 1, "status": "completed"},
+    )
+
+    assert purge_calls == 0
+    assert sent_messages == [
+        "RunPod 음성 대기열에서 아직 시작하지 않은 작업을 모두 비울까요? 진행하려면 `확인`, 중단하려면 `취소`라고 답해주세요.",
+        "…응. 음성 큐 비우기를 취소했어.",
+    ]
+
+
+def test_runpod_queue_purge_rejects_non_special_user(monkeypatch):
+    sent_messages, _purge_calls = _run_runpod_queue_purge_messages(
+        monkeypatch,
+        ("/음성큐비우기 확인",),
+        author_id=123,
+        purge_result=AssertionError("non-special user should not purge RunPod queue"),
+    )
+
+    assert sent_messages == ["…그 명령어를 사용할 권한이 없어."]
+
+
 def test_memory_file_alias_sends_default_conversation_memory(monkeypatch, tmp_path):
     sent_payloads = []
     monkeypatch.setattr(storage, "MEMORY_FILE", tmp_path / "memory.json")
