@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import re
 import urllib.error
 import urllib.request
 import uuid
+import wave
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +21,7 @@ class BandiVoiceError(RuntimeError):
 
 
 PENDING_RUNPOD_STATUSES = {"IN_QUEUE", "IN_PROGRESS", "IN_RETRY"}
+DEFAULT_TAIL_SILENCE_SECONDS = 0.22
 
 
 @dataclass(frozen=True)
@@ -126,6 +129,34 @@ def _decode_audio_base64(value: str) -> bytes:
     return audio_bytes
 
 
+def _append_wav_tail_silence(
+    audio_bytes: bytes,
+    *,
+    seconds: float = DEFAULT_TAIL_SILENCE_SECONDS,
+) -> tuple[bytes, float]:
+    if seconds <= 0 or not audio_bytes.startswith(b"RIFF"):
+        return audio_bytes, 0.0
+
+    try:
+        with wave.open(io.BytesIO(audio_bytes), "rb") as reader:
+            params = reader.getparams()
+            if params.comptype != "NONE" or params.framerate <= 0:
+                return audio_bytes, 0.0
+            frames = reader.readframes(params.nframes)
+    except (EOFError, wave.Error):
+        return audio_bytes, 0.0
+
+    silence_frames = max(1, int(round(params.framerate * seconds)))
+    silence = b"\x00" * silence_frames * params.nchannels * params.sampwidth
+    output = io.BytesIO()
+    with wave.open(output, "wb") as writer:
+        writer.setparams(params)
+        writer.writeframes(frames)
+        writer.writeframes(silence)
+
+    return output.getvalue(), silence_frames / params.framerate
+
+
 def decode_bandi_voice_response(payload: dict[str, Any]) -> BandiVoiceResult:
     output = _response_output(payload)
     audio_base64 = output.get("audio_base64")
@@ -134,10 +165,14 @@ def decode_bandi_voice_response(payload: dict[str, Any]) -> BandiVoiceResult:
 
     request_id = str(output.get("request_id") or payload.get("id") or uuid.uuid4().hex)
     duration = output.get("duration_seconds")
+    audio_bytes, tail_seconds = _append_wav_tail_silence(_decode_audio_base64(audio_base64))
+    duration_seconds = float(duration) if isinstance(duration, int | float) else None
+    if duration_seconds is not None and tail_seconds:
+        duration_seconds += tail_seconds
     return BandiVoiceResult(
-        audio_bytes=_decode_audio_base64(audio_base64),
+        audio_bytes=audio_bytes,
         content_type=str(output.get("content_type") or "audio/wav"),
-        duration_seconds=float(duration) if isinstance(duration, int | float) else None,
+        duration_seconds=duration_seconds,
         preset=str(output.get("preset")) if output.get("preset") is not None else None,
         request_id=request_id,
         filename=_safe_filename(request_id),

@@ -93,8 +93,51 @@ def test_build_runpod_input_adds_segment_payloads():
     assert payload["segments"][0]["pause_after_seconds"] == 0.42
     assert payload["segments"][1]["text"] == "but I feel sad."
     assert payload["segments"][1]["emotion"] == {"sad": 7.0, "calm": 3.0}
-    assert payload["segments"][1]["pause_after_seconds"] == 0.0
+    assert payload["segments"][1]["pause_after_seconds"] == 0.26
     assert payload["segment_gap_seconds"] == 0.26
+
+
+def test_build_runpod_input_skips_post_filter_for_soft_expression():
+    request = parse_bandi_voice_command("emotion=joy:4,calm:6 strength=0.35 | good morning")
+
+    payload = build_runpod_input(
+        request,
+        request_id="soft",
+        min_duration_seconds=1.0,
+        retry_attempts=2,
+    )
+
+    assert payload["post_filter"] == ""
+
+
+def test_build_runpod_input_skips_segment_post_filter_for_soft_expression():
+    request = with_segments(
+        parse_bandi_voice_command("good morning, rest easy"),
+        [
+            make_bandi_voice_segment(
+                "good morning",
+                {"joy": 4, "calm": 6},
+                emotion_strength=0.35,
+            ),
+            make_bandi_voice_segment(
+                "rest easy",
+                {"calm": 8, "joy": 2},
+                emotion_strength=0.32,
+                pause_after_seconds=0.34,
+            ),
+        ],
+    )
+
+    payload = build_runpod_input(
+        request,
+        request_id="soft-segment",
+        min_duration_seconds=1.0,
+        retry_attempts=2,
+    )
+
+    assert payload["segments"][0]["post_filter"] == ""
+    assert payload["segments"][1]["post_filter"] == ""
+    assert payload["segments"][1]["pause_after_seconds"] == 0.34
 
 
 def test_build_runpod_input_keeps_segment_question_only_when_requested():

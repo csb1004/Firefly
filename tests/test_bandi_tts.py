@@ -1,11 +1,28 @@
 import asyncio
 import base64
+import io
+import wave
 
 import pytest
 
 from firefly import bandi_tts
 from firefly.bandi_tts import BandiVoiceError, decode_bandi_voice_response, generate_bandi_voice, purge_runpod_queue
 from firefly.bandi_voice_plan import make_bandi_voice_segment, parse_bandi_voice_command, with_segments
+
+
+def _make_wav(*, frame_count: int = 10, frame_rate: int = 1000) -> bytes:
+    output = io.BytesIO()
+    with wave.open(output, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(frame_rate)
+        writer.writeframes(b"\x01\x00" * frame_count)
+    return output.getvalue()
+
+
+def _wav_frame_count(audio_bytes: bytes) -> int:
+    with wave.open(io.BytesIO(audio_bytes), "rb") as reader:
+        return reader.getnframes()
 
 
 def test_decode_bandi_voice_response_accepts_runpod_output():
@@ -41,6 +58,23 @@ def test_decode_bandi_voice_response_accepts_direct_output():
 
     assert result.audio_bytes == audio
     assert result.filename == "bandi-direct.wav"
+
+
+def test_decode_bandi_voice_response_appends_short_wav_tail_silence():
+    audio = _make_wav(frame_count=10, frame_rate=1000)
+
+    result = decode_bandi_voice_response(
+        {
+            "request_id": "padded",
+            "audio_base64": base64.b64encode(audio).decode("ascii"),
+            "duration_seconds": 0.01,
+        }
+    )
+
+    assert _wav_frame_count(result.audio_bytes) == 10 + int(
+        round(1000 * bandi_tts.DEFAULT_TAIL_SILENCE_SECONDS)
+    )
+    assert result.duration_seconds == pytest.approx(0.01 + bandi_tts.DEFAULT_TAIL_SILENCE_SECONDS)
 
 
 def test_decode_bandi_voice_response_reports_worker_error():

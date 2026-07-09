@@ -74,6 +74,7 @@ MAX_SEGMENT_PAUSE_SECONDS = 0.75
 MAX_VOICE_SEGMENTS = 5
 DEFAULT_PROSODY_CARRY_OVER = 0.24
 MAX_PROSODY_CARRY_OVER = 0.5
+POST_FILTER_MIN_STRENGTH = 0.5
 
 LOWPASS_BY_EMOTION = {
     "joy": 10600,
@@ -310,7 +311,16 @@ def choose_aux_references(
     return refs
 
 
-def choose_post_filter(emotion: dict[str, float], *, min_weight: float = 0.12) -> str:
+def choose_post_filter(
+    emotion: dict[str, float],
+    *,
+    min_weight: float = 0.12,
+    emotion_strength: float | None = None,
+    min_strength: float = POST_FILTER_MIN_STRENGTH,
+) -> str:
+    if emotion_strength is not None and emotion_strength < min_strength:
+        return ""
+
     emotion_weights = normalize_emotion_weights(emotion)
     cutoffs = [
         LOWPASS_BY_EMOTION[name]
@@ -580,10 +590,11 @@ def build_runpod_input(
                     },
                     "primary_reference": DEFAULT_PRIMARY_REFERENCE,
                     "aux_references": choose_aux_references(segment_emotion, max_refs=segment.aux_limit),
-                    "post_filter": choose_post_filter(segment_emotion),
-                    "pause_after_seconds": 0.0
-                    if index == len(request.segments) - 1
-                    else normalize_segment_pause(segment.pause_after_seconds),
+                    "post_filter": choose_post_filter(
+                        segment_emotion,
+                        emotion_strength=segment_strength,
+                    ),
+                    "pause_after_seconds": normalize_segment_pause(segment.pause_after_seconds),
                 }
             )
         return {
@@ -617,7 +628,7 @@ def build_runpod_input(
         "continuity": _continuity_payload(request.continuity_mode, request.carry_over),
         "primary_reference": DEFAULT_PRIMARY_REFERENCE,
         "aux_references": choose_aux_references(request.emotion, max_refs=request.aux_limit),
-        "post_filter": choose_post_filter(request.emotion),
+        "post_filter": choose_post_filter(request.emotion, emotion_strength=request.emotion_strength),
         "min_duration_seconds": min_duration_seconds,
         "retry_attempts": retry_attempts,
         "aux_limit": request.aux_limit,
