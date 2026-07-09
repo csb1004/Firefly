@@ -1,6 +1,7 @@
 from .brain import format_brain_notes
 from .affection import get_affection_stage_text
 from .config import (
+    BANDI_LOREBOOK_FILE,
     COMMAND_GUIDE_FILE,
     DEFAULT_AFFECTION,
     MAX_MODEL_HISTORY,
@@ -8,7 +9,25 @@ from .config import (
     SPECIAL_COMMAND_GUIDE_FILE,
     SPECIAL_USER_ID,
 )
+from .emoticons import build_emoticon_prompt
 from .text_utils import get_base_prompt, get_current_time_text, is_command_text, load_text_file
+
+LOREBOOK_RUNTIME_START = "<!-- RUNTIME-START -->"
+LOREBOOK_RUNTIME_END = "<!-- RUNTIME-END -->"
+
+
+def _extract_lorebook_runtime(text: str) -> str:
+    start_index = text.find(LOREBOOK_RUNTIME_START)
+    end_index = text.find(LOREBOOK_RUNTIME_END)
+    if start_index == -1 or end_index == -1 or end_index <= start_index:
+        return text.strip()
+    return text[start_index + len(LOREBOOK_RUNTIME_START):end_index].strip()
+
+
+def load_bandi_lorebook_prompt() -> str:
+    if not BANDI_LOREBOOK_FILE.exists():
+        return ""
+    return _extract_lorebook_runtime(BANDI_LOREBOOK_FILE.read_text(encoding="utf-8"))
 
 
 def build_group_context_prompt(
@@ -131,12 +150,14 @@ def build_system_prompt(
     include_command_guides: bool = True,
 ) -> str:
     base_prompt = get_base_prompt(user_id)
+    lorebook_prompt = load_bandi_lorebook_prompt()
     nickname = user_data.get("nickname", user_data.get("name", "너"))
     affection = int(user_data.get("affection", DEFAULT_AFFECTION))
     memory_notes = format_brain_notes(user_data)
     current_time_text = get_current_time_text()
     last_seen = user_data.get("last_seen", "없음")
     is_special_user = user_id == SPECIAL_USER_ID
+    emoticon_guide = build_emoticon_prompt()
     if include_command_guides:
         command_guides = [load_text_file(COMMAND_GUIDE_FILE)]
         if is_special_user:
@@ -149,8 +170,18 @@ def build_system_prompt(
 """.strip()
     affection_text = get_affection_stage_text(affection, is_special_user)
 
+    lorebook_section = (
+        f"""
+
+[반디 세부 설정집]
+{lorebook_prompt}
+""".rstrip()
+        if lorebook_prompt
+        else ""
+    )
+
     return f"""
-{base_prompt}
+{base_prompt}{lorebook_section}
 
 [반디 기본 정보]
 - 반디의 생일: 6월 19일
@@ -197,4 +228,6 @@ def build_system_prompt(
 - 단체 모드에서는 각 사용자의 이름, 호칭, 호감도를 참고해서 사람마다 다른 거리감으로 반응할 수 있다.
 
 {command_guide}
+
+{emoticon_guide}
 """.strip()

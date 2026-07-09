@@ -64,6 +64,54 @@ def test_generate_reply_persists_natural_reply_when_command_persistence_is_disab
     ]
 
 
+def test_generate_reply_strips_emoticon_marker_from_persisted_memory(monkeypatch, tmp_path):
+    _use_temp_memory(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        ai.client_openai.responses,
+        "create",
+        lambda **kwargs: SimpleNamespace(output_text="고마워.\n[[EMOTICON: pom_heart]]"),
+    )
+
+    reply = asyncio.run(
+        ai.generate_reply(
+            "고마워",
+            user_id=123,
+            display_name="Alice",
+            room_key="room-1",
+            persist_command_reply=False,
+        )
+    )
+
+    data = storage.load_memory()
+    assert reply == "고마워.\n[[EMOTICON: pom_heart]]"
+    assert [item["content"] for item in data["123"]["history"]] == ["고마워", "고마워."]
+    assert [item["content"] for item in data[ROOMS_KEY]["room-1"]["history"]] == ["고마워", "고마워."]
+
+
+def test_generate_reply_can_detect_auto_command_with_emoticon_marker(monkeypatch, tmp_path):
+    _use_temp_memory(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        ai.client_openai.responses,
+        "create",
+        lambda **kwargs: SimpleNamespace(output_text="/주사위 1 6\n[[EMOTICON: none]]"),
+    )
+
+    reply = asyncio.run(
+        ai.generate_reply(
+            "주사위 굴려줘",
+            user_id=123,
+            display_name="Alice",
+            room_key="room-1",
+            persist_command_reply=False,
+        )
+    )
+
+    data = storage.load_memory()
+    assert reply == "/주사위 1 6"
+    assert data["123"]["history"] == []
+    assert data[ROOMS_KEY]["room-1"]["history"] == []
+
+
 def test_generate_reply_passes_room_reasoning_effort(monkeypatch, tmp_path):
     _use_temp_memory(monkeypatch, tmp_path)
     storage.save_memory({

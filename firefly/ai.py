@@ -22,6 +22,7 @@ from .config import (
     WEB_SEARCH_MODEL,
 )
 from .content import LONG_SAM_LINE
+from .emoticons import parse_reply_emoticon
 from .prompts import (
     build_group_context_prompt,
     build_model_history,
@@ -129,7 +130,7 @@ async def generate_silent_auto_command(
         print("Silent auto command generation error:", exc)
         return None
 
-    reply = response.output_text.strip()
+    reply = parse_reply_emoticon(response.output_text.strip()).text
     if not _is_auto_command_reply(reply):
         return None
     if not any(
@@ -549,7 +550,9 @@ async def generate_reply(
             client_openai.responses.create,
             **request_kwargs,
         )
-        reply = response.output_text.strip()
+        raw_reply = response.output_text.strip()
+        parsed_reply = parse_reply_emoticon(raw_reply)
+        reply = parsed_reply.text
 
         if not persist_command_reply and _is_auto_command_reply(reply):
             return reply
@@ -595,7 +598,7 @@ async def generate_reply(
         )
         update_room_data(room_key, room_data)
 
-        return reply
+        return raw_reply
 
     except RateLimitError as e:
         error_text = str(e)

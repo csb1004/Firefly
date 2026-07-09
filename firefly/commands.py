@@ -41,6 +41,7 @@ from .commands_parser import (
     parse_summary_args,
 )
 from .config import BANDI_TTS_MAX_CHARS, BOT_DISPLAY_NAME, DEFAULT_AFFECTION, SPECIAL_USER_ID, SPECIAL_USER_NAME, SUMMARY_DEFAULT_LIMIT
+from .emoticons import get_emoticon_path, parse_reply_emoticon
 from .embeds import (
     create_help_embed,
     create_profile_embed,
@@ -657,7 +658,8 @@ async def _handle_pending_runpod_queue_purge(
 
 
 def _extract_auto_command(reply: str) -> str | None:
-    lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
+    parsed_reply = parse_reply_emoticon(reply)
+    lines = [line.strip() for line in parsed_reply.text.splitlines() if line.strip()]
     if len(lines) != 1:
         return None
 
@@ -665,6 +667,19 @@ def _extract_auto_command(reply: str) -> str | None:
     if not command.startswith("/") or command == "/":
         return None
     return command[:1900]
+
+
+async def _send_reply_with_emoticon(channel, reply: str) -> None:
+    parsed_reply = parse_reply_emoticon(reply)
+    content = parsed_reply.text[:1900]
+    emoticon_path = get_emoticon_path(parsed_reply.emoticon_key)
+    if emoticon_path is None:
+        await channel.send(content or "…")
+        return
+
+    filename = f"{parsed_reply.emoticon_key}{emoticon_path.suffix}"
+    file = discord.File(str(emoticon_path), filename=filename)
+    await channel.send(content or None, file=file)
 
 
 def _format_auto_command_history(command_text: str, command_output: str) -> str:
@@ -1157,7 +1172,7 @@ async def _run_command_adapter_request(
             force_web_search=force_web_search,
             allow_command_output=False,
         )
-        await message.channel.send(reply[:1900])
+        await _send_reply_with_emoticon(message.channel, reply)
         return
 
     capture_channel = _CommandCaptureChannel(message.channel)
@@ -1217,7 +1232,7 @@ async def _run_command_adapter_request(
 
         followup_command = _extract_auto_command(reply)
         if not followup_command:
-            await message.channel.send(reply[:1900])
+            await _send_reply_with_emoticon(message.channel, reply)
             return
 
         if len(command_summaries) >= MAX_ADAPTER_COMMANDS:
@@ -1754,4 +1769,4 @@ async def handle_mentioned_message(
     ):
         return
 
-    await message.channel.send(reply[:1900])
+    await _send_reply_with_emoticon(message.channel, reply)

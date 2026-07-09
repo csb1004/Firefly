@@ -88,6 +88,8 @@ TOOL_PLANNER_PROMPT_FILE = _resolve_project_path(os.getenv("TOOL_PLANNER_PROMPT_
 STATE_UPDATER_PROMPT_FILE = _resolve_project_path(
     os.getenv("STATE_UPDATER_PROMPT_FILE", "prompt_state_updater.txt")
 )
+BANDI_LOREBOOK_FILE = _resolve_project_path(os.getenv("BANDI_LOREBOOK_FILE", "docs/bandi_lorebook.md"))
+BANDI_EMOTICON_DIR = _resolve_project_path(os.getenv("BANDI_EMOTICON_DIR", "FireflyEmoticon"))
 
 DATA_DIR = _resolve_data_dir()
 MEMORY_FILE = _resolve_memory_file(DATA_DIR)

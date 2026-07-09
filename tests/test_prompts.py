@@ -64,6 +64,7 @@ def test_build_system_prompt_uses_base_prompt_user_state_and_time(monkeypatch):
     monkeypatch.setattr(prompts, "get_base_prompt", lambda user_id: f"base prompt for {user_id}")
     monkeypatch.setattr(prompts, "load_text_file", lambda path: "general command guide")
     monkeypatch.setattr(prompts, "get_current_time_text", lambda: "2026-05-16 12:00:00")
+    monkeypatch.setattr(prompts, "load_bandi_lorebook_prompt", lambda: "반디는 참나무 롤케이크를 좋아한다.")
 
     prompt = prompts.build_system_prompt(
         123,
@@ -77,6 +78,8 @@ def test_build_system_prompt_uses_base_prompt_user_state_and_time(monkeypatch):
     )
 
     assert "base prompt for 123" in prompt
+    assert "반디 세부 설정집" in prompt
+    assert "참나무 롤케이크" in prompt
     assert "6월 19일" in prompt
     assert "123" in prompt
     assert "Alice" in prompt
@@ -88,11 +91,14 @@ def test_build_system_prompt_uses_base_prompt_user_state_and_time(monkeypatch):
     assert "2026-05-16 12:00:00" in prompt
     assert "yesterday" in prompt
     assert "general command guide" in prompt
+    assert "반디 이모티콘 선택 규칙" in prompt
+    assert "[[EMOTICON: none]]" in prompt
 
 
 def test_build_system_prompt_adds_special_command_guide_for_special_user(monkeypatch):
     monkeypatch.setattr(prompts, "get_base_prompt", lambda user_id: "base prompt")
     monkeypatch.setattr(prompts, "get_current_time_text", lambda: "2026-05-16 12:00:00")
+    monkeypatch.setattr(prompts, "load_bandi_lorebook_prompt", lambda: "")
 
     def fake_load_text_file(path):
         if path == prompts.COMMAND_GUIDE_FILE:
@@ -122,6 +128,7 @@ def test_build_system_prompt_can_disable_command_guides(monkeypatch):
     monkeypatch.setattr(prompts, "get_base_prompt", lambda user_id: "base prompt")
     monkeypatch.setattr(prompts, "load_text_file", lambda path: "/검색실행 {프롬프트}")
     monkeypatch.setattr(prompts, "get_current_time_text", lambda: "2026-05-16 12:00:00")
+    monkeypatch.setattr(prompts, "load_bandi_lorebook_prompt", lambda: "AR-26710")
 
     prompt = prompts.build_system_prompt(
         prompts.SPECIAL_USER_ID,
@@ -130,7 +137,21 @@ def test_build_system_prompt_can_disable_command_guides(monkeypatch):
     )
 
     assert "/검색실행 {프롬프트}" not in prompt
+    assert "AR-26710" in prompt
     assert "봇 명령어를 출력하지 말고" in prompt
+    assert "반디 이모티콘 선택 규칙" in prompt
+
+
+def test_lorebook_runtime_extraction_uses_marker_body_only():
+    text = """
+before
+<!-- RUNTIME-START -->
+runtime body
+<!-- RUNTIME-END -->
+after
+"""
+
+    assert prompts._extract_lorebook_runtime(text) == "runtime body"
 
 
 def test_special_command_guide_describes_poll_placeholders_before_examples():

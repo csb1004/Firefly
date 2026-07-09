@@ -37,9 +37,56 @@ def test_extract_auto_command_requires_first_response_line_to_be_command():
     assert commands._extract_auto_command("  /투표 저녁 | 항목수=2 | 치킨 | 피자  ") == (
         "/투표 저녁 | 항목수=2 | 치킨 | 피자"
     )
+    assert commands._extract_auto_command("/주사위 1 6\n[[EMOTICON: none]]") == "/주사위 1 6"
     assert commands._extract_auto_command("/투표 저녁 | 항목수=2 | 치킨 | 피자\n잠깐만.") is None
     assert commands._extract_auto_command("좋아. /요약") is None
     assert commands._extract_auto_command("/") is None
+
+
+def test_send_reply_with_emoticon_strips_marker_and_attaches_file(monkeypatch, tmp_path):
+    sent_messages = []
+    emoticon_file = tmp_path / "heart.webp"
+    emoticon_file.write_bytes(b"webp")
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append((content, kwargs))
+
+    def fake_get_emoticon_path(key):
+        if key == "pom_heart":
+            return emoticon_file
+        return None
+
+    monkeypatch.setattr(commands, "get_emoticon_path", fake_get_emoticon_path)
+
+    asyncio.run(
+        commands._send_reply_with_emoticon(
+            FakeChannel(),
+            "고마워.\n[[EMOTICON: pom_heart]]",
+        )
+    )
+
+    assert sent_messages[0][0] == "고마워."
+    assert sent_messages[0][1]["file"].filename == "pom_heart.webp"
+
+
+def test_send_reply_with_emoticon_uses_fallback_for_marker_only_reply(monkeypatch):
+    sent_messages = []
+
+    class FakeChannel:
+        async def send(self, content=None, **kwargs):
+            sent_messages.append((content, kwargs))
+
+    monkeypatch.setattr(commands, "get_emoticon_path", lambda key: None)
+
+    asyncio.run(
+        commands._send_reply_with_emoticon(
+            FakeChannel(),
+            "[[EMOTICON: none]]",
+        )
+    )
+
+    assert sent_messages == [("…", {})]
 
 
 def test_auto_command_runs_with_original_message_author(monkeypatch, tmp_path):
