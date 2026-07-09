@@ -252,7 +252,7 @@ def soften_terminal_question(text: str, ending_style: str) -> str:
 def focus_terminal_question_rise(text: str, ending_style: str) -> str:
     if normalize_ending_style(ending_style) != "question":
         return text
-    return re.sub(r"([가-힣]*볼)래(\?+)$", r"\1, 래~\2", text.strip())
+    return re.sub(r"([가-힣]*볼)래(\?+)$", r"\1래~\2", text.strip())
 
 
 def ensure_sentence_ending(

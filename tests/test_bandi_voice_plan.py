@@ -48,7 +48,7 @@ def test_prepare_tts_text_preserves_explicit_question_ending_style():
 def test_prepare_tts_text_focuses_bollae_question_rise_on_final_syllable():
     assert (
         prepare_tts_text("조금만 더 눈 떠볼래?", {"calm": 7}, ending_style="question")
-        == "조금만 더 눈 떠볼, 래~?"
+        == "조금만 더 눈 떠볼래~?"
     )
 
 
