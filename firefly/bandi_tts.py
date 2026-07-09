@@ -82,6 +82,12 @@ def _runpod_job_id(payload: dict[str, Any]) -> str:
     return str(payload.get("id") or "").strip()
 
 
+def _tts_wait_timeout_seconds() -> float:
+    if config.RUNPOD_ENDPOINT_ID and not config.BANDI_TTS_URL:
+        return max(config.BANDI_TTS_TIMEOUT_SECONDS, config.RUNPOD_TTS_TIMEOUT_SECONDS)
+    return config.BANDI_TTS_TIMEOUT_SECONDS
+
+
 def _safe_filename(request_id: str) -> str:
     safe_request_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", request_id).strip("-")
     return f"bandi-{(safe_request_id or 'voice')[:64]}.wav"
@@ -220,6 +226,7 @@ async def _wait_for_runpod_completion(
     payload: dict[str, Any],
     *,
     deadline: float,
+    timeout_seconds: float,
 ) -> dict[str, Any]:
     status = _runpod_status(payload)
     if status not in PENDING_RUNPOD_STATUSES:
@@ -234,7 +241,11 @@ async def _wait_for_runpod_completion(
     while True:
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
-            raise BandiVoiceError(f"TTS 작업이 제한 시간 안에 완료되지 않았어. status={status}")
+            job_suffix = f" job_id={job_id}" if job_id else ""
+            raise BandiVoiceError(
+                f"TTS 작업이 제한 시간({timeout_seconds:.0f}초) 안에 완료되지 않았어. "
+                f"status={status}{job_suffix}"
+            )
 
         await asyncio.sleep(min(2.0, remaining))
         last_payload = await asyncio.to_thread(
@@ -260,12 +271,17 @@ async def generate_bandi_voice(text: str | BandiVoiceCommandRequest) -> BandiVoi
 
     request_id = f"bandi-{uuid.uuid4().hex[:12]}"
     payload = _build_request_payload(text if isinstance(text, BandiVoiceCommandRequest) else clean_text, request_id)
-    deadline = asyncio.get_running_loop().time() + config.BANDI_TTS_TIMEOUT_SECONDS
+    timeout_seconds = _tts_wait_timeout_seconds()
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
     response_payload = await asyncio.to_thread(
         _post_tts_request_sync,
         url,
         payload,
-        config.BANDI_TTS_TIMEOUT_SECONDS,
+        timeout_seconds,
     )
-    response_payload = await _wait_for_runpod_completion(response_payload, deadline=deadline)
+    response_payload = await _wait_for_runpod_completion(
+        response_payload,
+        deadline=deadline,
+        timeout_seconds=timeout_seconds,
+    )
     return decode_bandi_voice_response(response_payload)

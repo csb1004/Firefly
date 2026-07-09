@@ -124,7 +124,8 @@ WEB_SEARCH_MODEL = "gpt-5.4"
 
 BANDI_TTS_URL = os.getenv("BANDI_TTS_URL", "").strip()
 BANDI_TTS_API_KEY = os.getenv("BANDI_TTS_API_KEY", "").strip()
-BANDI_TTS_TIMEOUT_SECONDS = _get_float_env("BANDI_TTS_TIMEOUT_SECONDS", 300.0, minimum=1.0, maximum=900.0)
+BANDI_TTS_TIMEOUT_SECONDS = _get_float_env("BANDI_TTS_TIMEOUT_SECONDS", 300.0, minimum=1.0, maximum=3600.0)
+RUNPOD_TTS_TIMEOUT_SECONDS = _get_float_env("RUNPOD_TTS_TIMEOUT_SECONDS", 900.0, minimum=1.0, maximum=3600.0)
 BANDI_TTS_MAX_CHARS = _get_int_env("BANDI_TTS_MAX_CHARS", 500, minimum=1, maximum=2000)
 BANDI_TTS_MIN_DURATION_SECONDS = _get_float_env("BANDI_TTS_MIN_DURATION_SECONDS", 0.0, minimum=0.0, maximum=60.0)
 BANDI_TTS_RETRY_ATTEMPTS = _get_int_env("BANDI_TTS_RETRY_ATTEMPTS", 1, minimum=1, maximum=10)

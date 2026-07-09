@@ -63,6 +63,24 @@ def test_runpod_tts_url_uses_async_run_endpoint(monkeypatch):
     assert bandi_tts._bandi_tts_url() == "https://api.runpod.ai/v2/endpoint-123/run"
 
 
+def test_runpod_wait_timeout_uses_runpod_specific_floor(monkeypatch):
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_URL", "")
+    monkeypatch.setattr(bandi_tts.config, "RUNPOD_ENDPOINT_ID", "endpoint-123")
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_TIMEOUT_SECONDS", 300.0)
+    monkeypatch.setattr(bandi_tts.config, "RUNPOD_TTS_TIMEOUT_SECONDS", 900.0)
+
+    assert bandi_tts._tts_wait_timeout_seconds() == 900.0
+
+
+def test_direct_tts_wait_timeout_uses_bandi_timeout(monkeypatch):
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_URL", "https://tts.example.test")
+    monkeypatch.setattr(bandi_tts.config, "RUNPOD_ENDPOINT_ID", "endpoint-123")
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_TIMEOUT_SECONDS", 300.0)
+    monkeypatch.setattr(bandi_tts.config, "RUNPOD_TTS_TIMEOUT_SECONDS", 900.0)
+
+    assert bandi_tts._tts_wait_timeout_seconds() == 300.0
+
+
 def test_purge_runpod_queue_posts_to_purge_queue_endpoint(monkeypatch):
     calls = []
 
@@ -138,6 +156,22 @@ def test_generate_bandi_voice_polls_runpod_status_until_completed(monkeypatch):
     assert calls[1][0] == "sleep"
     assert calls[2][0] == "get"
     assert calls[2][1] == "https://api.runpod.ai/v2/endpoint-123/status/job-123"
+
+
+def test_wait_for_runpod_completion_timeout_mentions_job_id(monkeypatch):
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_URL", "")
+    monkeypatch.setattr(bandi_tts.config, "RUNPOD_ENDPOINT_ID", "endpoint-123")
+
+    async def run_wait():
+        loop = asyncio.get_running_loop()
+        return await bandi_tts._wait_for_runpod_completion(
+            {"id": "job-123", "status": "IN_PROGRESS"},
+            deadline=loop.time() - 1.0,
+            timeout_seconds=900.0,
+        )
+
+    with pytest.raises(BandiVoiceError, match="job_id=job-123"):
+        asyncio.run(run_wait())
 
 
 def test_build_request_payload_accepts_emotion_voice_request(monkeypatch):
