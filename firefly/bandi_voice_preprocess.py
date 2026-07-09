@@ -49,6 +49,9 @@ Prosody continuity rules:
 - Decide whether adjacent segments belong to the same spoken breath.
 - Do not split greetings, names, vocatives, short acknowledgements, soft address phrases, or intimate continuations unless there is a clear semantic emotion shift.
 - A comma does not imply an emotional boundary. Treat comma-connected address phrases as the same spoken breath by default.
+- If the whole utterance is a short greeting plus an address/vocative phrase, keep it as one segment even if the user typed a comma or period between them.
+- For same_breath greeting/address phrases, set tts_text to a smooth single-breath form by replacing hard internal punctuation with a space. Preserve the original words.
+- For short same_breath greeting/address phrases, prefer calm as the primary emotion, optional low joy as a secondary color, and a low-to-moderate emotion_strength around 0.25 to 0.40 unless the text clearly demands stronger emotion.
 - If two adjacent segments belong to the same breath, keep emotion and prosody continuous.
 - Output continuity.carry_over from 0.0 to 0.5 for each segment:
   - 0.4 to 0.5: same breath, vocative/address phrase, intimate continuation, or the next words should feel acoustically connected.
@@ -166,6 +169,8 @@ def _request_from_llm_payload(
             tts_text=segment.tts_text or segment.display_text,
             aux_limit=request.aux_limit,
             ending_style=segment.ending_style,
+            continuity_mode=segment.continuity_mode,
+            carry_over=segment.carry_over,
         )
     return request
 

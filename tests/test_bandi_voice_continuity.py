@@ -94,9 +94,71 @@ def test_request_from_llm_payload_preserves_continuity_decision():
     assert planned.segments[1].carry_over == 0.28
 
 
+def test_single_llm_segment_preserves_top_level_continuity():
+    request = parse_bandi_voice_command("hello. Sangbeom.")
+
+    planned = _request_from_llm_payload(
+        request,
+        {
+            "segments": [
+                {
+                    "text": "hello. Sangbeom.",
+                    "tts_text": "hello Sangbeom.",
+                    "emotion": {"calm": 7, "joy": 2},
+                    "emotion_strength": 0.34,
+                    "continuity": {
+                        "mode": "same_breath",
+                        "carry_over": 0.45,
+                    },
+                }
+            ]
+        },
+    )
+
+    assert not planned.has_segments
+    assert planned.tts_text == "hello Sangbeom."
+    assert planned.continuity_mode == "same_breath"
+    assert planned.carry_over == 0.45
+
+
+def test_build_runpod_input_includes_top_level_continuity():
+    request = _request_from_llm_payload(
+        parse_bandi_voice_command("hello. Sangbeom."),
+        {
+            "segments": [
+                {
+                    "text": "hello. Sangbeom.",
+                    "tts_text": "hello Sangbeom.",
+                    "emotion": {"calm": 7, "joy": 2},
+                    "emotion_strength": 0.34,
+                    "continuity": {
+                        "mode": "same_breath",
+                        "carry_over": 0.45,
+                    },
+                }
+            ]
+        },
+    )
+
+    payload = build_runpod_input(
+        request,
+        request_id="single-continuity",
+        min_duration_seconds=1.0,
+        retry_attempts=2,
+    )
+
+    assert payload["text"] == "hello Sangbeom."
+    assert payload["continuity"] == {
+        "mode": "same_breath",
+        "carry_over": 0.45,
+    }
+
+
 def test_system_prompt_requests_general_prosody_continuity():
     assert "Prosody continuity rules" in SYSTEM_PROMPT
     assert "Punctuation alone is not a segmentation boundary" in SYSTEM_PROMPT
     assert "A comma does not imply an emotional boundary" in SYSTEM_PROMPT
+    assert "short greeting plus an address/vocative phrase" in SYSTEM_PROMPT
+    assert "replacing hard internal punctuation with a space" in SYSTEM_PROMPT
     assert "continuity.carry_over" in SYSTEM_PROMPT
     assert "same_breath | soft_transition | hard_shift | reset" in SYSTEM_PROMPT

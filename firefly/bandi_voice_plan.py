@@ -123,6 +123,8 @@ class BandiVoiceCommandRequest:
     tts_text: str | None = None
     aux_limit: int = 3
     ending_style: str = "flat"
+    continuity_mode: str = "normal"
+    carry_over: float = DEFAULT_PROSODY_CARRY_OVER
     segments: tuple[BandiVoiceSegment, ...] = ()
 
     @property
@@ -463,6 +465,8 @@ def with_segments(
         tts_text=request.tts_text,
         aux_limit=request.aux_limit,
         ending_style=request.ending_style,
+        continuity_mode=request.continuity_mode,
+        carry_over=request.carry_over,
         segments=clean_segments,
     )
 
@@ -533,6 +537,14 @@ def parse_bandi_voice_command(raw_text: str) -> BandiVoiceCommandRequest:
     )
 
 
+def _continuity_payload(mode: str, carry_over: float) -> dict[str, Any]:
+    normalized_mode = normalize_continuity_mode(mode)
+    return {
+        "mode": normalized_mode,
+        "carry_over": normalize_carry_over(carry_over, continuity_mode=normalized_mode),
+    }
+
+
 def build_runpod_input(
     request: BandiVoiceCommandRequest,
     *,
@@ -589,6 +601,7 @@ def build_runpod_input(
         return {
             "text": clean_punctuation(request.tts_text or request.display_text),
             "request_id": request_id,
+            "continuity": _continuity_payload(request.continuity_mode, request.carry_over),
             "min_duration_seconds": min_duration_seconds,
             "retry_attempts": retry_attempts,
         }
@@ -601,6 +614,7 @@ def build_runpod_input(
         "emotion": request.emotion,
         "emotion_strength": request.emotion_strength,
         "ending_style": request.ending_style,
+        "continuity": _continuity_payload(request.continuity_mode, request.carry_over),
         "primary_reference": DEFAULT_PRIMARY_REFERENCE,
         "aux_references": choose_aux_references(request.emotion, max_refs=request.aux_limit),
         "post_filter": choose_post_filter(request.emotion),
