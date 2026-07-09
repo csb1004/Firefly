@@ -56,6 +56,13 @@ def test_direct_tts_url_does_not_reuse_runpod_api_key(monkeypatch):
     assert bandi_tts._authorization_token() == ""
 
 
+def test_runpod_tts_url_uses_async_run_endpoint(monkeypatch):
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_URL", "")
+    monkeypatch.setattr(bandi_tts.config, "RUNPOD_ENDPOINT_ID", "endpoint-123")
+
+    assert bandi_tts._bandi_tts_url() == "https://api.runpod.ai/v2/endpoint-123/run"
+
+
 def test_generate_bandi_voice_polls_runpod_status_until_completed(monkeypatch):
     audio = b"RIFF....WAVE"
     calls = []
@@ -91,7 +98,7 @@ def test_generate_bandi_voice_polls_runpod_status_until_completed(monkeypatch):
 
     assert result.audio_bytes == audio
     assert result.filename == "bandi-voice-123.wav"
-    assert calls[0] == ("post", "https://api.runpod.ai/v2/endpoint-123/runsync", "hello")
+    assert calls[0] == ("post", "https://api.runpod.ai/v2/endpoint-123/run", "hello")
     assert calls[1][0] == "sleep"
     assert calls[2][0] == "get"
     assert calls[2][1] == "https://api.runpod.ai/v2/endpoint-123/status/job-123"

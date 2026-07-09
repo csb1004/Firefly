@@ -35,7 +35,7 @@ def _bandi_tts_url() -> str:
     if config.BANDI_TTS_URL:
         return config.BANDI_TTS_URL
     if config.RUNPOD_ENDPOINT_ID:
-        return f"https://api.runpod.ai/v2/{config.RUNPOD_ENDPOINT_ID}/runsync"
+        return f"https://api.runpod.ai/v2/{config.RUNPOD_ENDPOINT_ID}/run"
     return ""
 
 
