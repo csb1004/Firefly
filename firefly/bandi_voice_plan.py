@@ -75,6 +75,9 @@ MAX_VOICE_SEGMENTS = 5
 DEFAULT_PROSODY_CARRY_OVER = 0.24
 MAX_PROSODY_CARRY_OVER = 0.5
 POST_FILTER_MIN_STRENGTH = 0.5
+DEFAULT_SPEECH_RATE = 1.0
+MIN_SPEECH_RATE = 0.5
+MAX_SPEECH_RATE = 2.0
 
 LOWPASS_BY_EMOTION = {
     "joy": 10600,
@@ -246,6 +249,12 @@ def soften_terminal_question(text: str, ending_style: str) -> str:
     return re.sub(r"\?+$", ".", text.strip())
 
 
+def focus_terminal_question_rise(text: str, ending_style: str) -> str:
+    if normalize_ending_style(ending_style) != "question":
+        return text
+    return re.sub(r"([가-힣]{2,})래(\?+)$", r"\1 래\2", text.strip())
+
+
 def ensure_sentence_ending(
     text: str,
     emotion_weights: dict[str, float],
@@ -287,6 +296,7 @@ def prepare_tts_text(
     text = apply_emotion_tts_pauses(text, emotion_weights)
     text = clean_punctuation(text)
     text = ensure_sentence_ending(text, emotion_weights, ending_style)
+    text = focus_terminal_question_rise(text, ending_style)
     return soften_terminal_question(text, ending_style)
 
 
@@ -419,6 +429,16 @@ def normalize_segment_pause(value: float | int | str | None) -> float:
     except (TypeError, ValueError):
         return DEFAULT_SEGMENT_PAUSE_SECONDS
     return round(clamp_float(pause, MIN_SEGMENT_PAUSE_SECONDS, MAX_SEGMENT_PAUSE_SECONDS), 3)
+
+
+def normalize_speech_rate(value: float | int | str | None) -> float:
+    if value is None:
+        return DEFAULT_SPEECH_RATE
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_SPEECH_RATE
+    return round(clamp_float(rate, MIN_SPEECH_RATE, MAX_SPEECH_RATE), 3)
 
 
 def make_bandi_voice_segment(
@@ -561,7 +581,9 @@ def build_runpod_input(
     request_id: str,
     min_duration_seconds: float,
     retry_attempts: int,
+    speech_rate: float = DEFAULT_SPEECH_RATE,
 ) -> dict[str, Any]:
+    normalized_speech_rate = normalize_speech_rate(speech_rate)
     if request.has_segments:
         segments = []
         for index, segment in enumerate(request.segments):
@@ -604,6 +626,7 @@ def build_runpod_input(
             "segments": segments,
             "min_duration_seconds": min_duration_seconds,
             "retry_attempts": retry_attempts,
+            "speech_rate": normalized_speech_rate,
             "segment_gap_seconds": DEFAULT_SEGMENT_PAUSE_SECONDS,
             "ending_style": request.ending_style,
         }
@@ -615,6 +638,7 @@ def build_runpod_input(
             "continuity": _continuity_payload(request.continuity_mode, request.carry_over),
             "min_duration_seconds": min_duration_seconds,
             "retry_attempts": retry_attempts,
+            "speech_rate": normalized_speech_rate,
         }
 
     tts_text = prepare_tts_text(request.display_text, request.emotion, request.tts_text, request.ending_style)
@@ -631,6 +655,7 @@ def build_runpod_input(
         "post_filter": choose_post_filter(request.emotion, emotion_strength=request.emotion_strength),
         "min_duration_seconds": min_duration_seconds,
         "retry_attempts": retry_attempts,
+        "speech_rate": normalized_speech_rate,
         "aux_limit": request.aux_limit,
     }
 

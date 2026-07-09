@@ -211,6 +211,7 @@ def test_wait_for_runpod_completion_timeout_mentions_job_id(monkeypatch):
 def test_build_request_payload_accepts_emotion_voice_request(monkeypatch):
     monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_MIN_DURATION_SECONDS", 1.0)
     monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_RETRY_ATTEMPTS", 3)
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_SPEECH_RATE", 1.05)
     request = parse_bandi_voice_command("emotion=joy:7,calm:3 strength=0.7 | good work")
 
     payload = bandi_tts._build_request_payload(request, "request-001")
@@ -221,6 +222,18 @@ def test_build_request_payload_accepts_emotion_voice_request(monkeypatch):
     assert payload["input"]["emotion"] == {"joy": 7.0, "calm": 3.0}
     assert payload["input"]["emotion_strength"] == 0.7
     assert payload["input"]["aux_references"] == ["joy/012.wav", "calm/168.wav"]
+    assert payload["input"]["speech_rate"] == 1.05
+
+
+def test_build_request_payload_adds_speech_rate_to_plain_text(monkeypatch):
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_MIN_DURATION_SECONDS", 1.0)
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_RETRY_ATTEMPTS", 3)
+    monkeypatch.setattr(bandi_tts.config, "BANDI_TTS_SPEECH_RATE", 1.05)
+
+    payload = bandi_tts._build_request_payload("good morning", "request-001")
+
+    assert payload["input"]["text"] == "good morning"
+    assert payload["input"]["speech_rate"] == 1.05
 
 
 def test_generate_bandi_voice_sends_emotion_request_payload(monkeypatch):

@@ -131,5 +131,6 @@ RUNPOD_TTS_TIMEOUT_SECONDS = _get_float_env("RUNPOD_TTS_TIMEOUT_SECONDS", 900.0,
 BANDI_TTS_MAX_CHARS = _get_int_env("BANDI_TTS_MAX_CHARS", 500, minimum=1, maximum=2000)
 BANDI_TTS_MIN_DURATION_SECONDS = _get_float_env("BANDI_TTS_MIN_DURATION_SECONDS", 0.0, minimum=0.0, maximum=60.0)
 BANDI_TTS_RETRY_ATTEMPTS = _get_int_env("BANDI_TTS_RETRY_ATTEMPTS", 1, minimum=1, maximum=10)
+BANDI_TTS_SPEECH_RATE = _get_float_env("BANDI_TTS_SPEECH_RATE", 1.05, minimum=0.5, maximum=2.0)
 RUNPOD_ENDPOINT_ID = os.getenv("RUNPOD_ENDPOINT_ID", "").strip()
 RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY", "").strip()

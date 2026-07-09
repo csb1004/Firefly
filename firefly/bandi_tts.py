@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import config
-from .bandi_voice_plan import BandiVoiceCommandRequest, build_runpod_input
+from .bandi_voice_plan import BandiVoiceCommandRequest, build_runpod_input, normalize_speech_rate
 
 
 class BandiVoiceError(RuntimeError):
@@ -56,6 +56,7 @@ def _build_request_payload(text: str | BandiVoiceCommandRequest, request_id: str
                 request_id=request_id,
                 min_duration_seconds=config.BANDI_TTS_MIN_DURATION_SECONDS,
                 retry_attempts=config.BANDI_TTS_RETRY_ATTEMPTS,
+                speech_rate=config.BANDI_TTS_SPEECH_RATE,
             )
         }
 
@@ -65,6 +66,7 @@ def _build_request_payload(text: str | BandiVoiceCommandRequest, request_id: str
             "request_id": request_id,
             "min_duration_seconds": config.BANDI_TTS_MIN_DURATION_SECONDS,
             "retry_attempts": config.BANDI_TTS_RETRY_ATTEMPTS,
+            "speech_rate": normalize_speech_rate(config.BANDI_TTS_SPEECH_RATE),
         }
     }
 

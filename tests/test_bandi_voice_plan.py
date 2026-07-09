@@ -45,6 +45,13 @@ def test_prepare_tts_text_preserves_explicit_question_ending_style():
     )
 
 
+def test_prepare_tts_text_focuses_bollae_question_rise_on_final_syllable():
+    assert (
+        prepare_tts_text("조금만 더 눈 떠볼래?", {"calm": 7}, ending_style="question")
+        == "조금만 더 눈 떠볼 래?"
+    )
+
+
 def test_build_runpod_input_adds_reference_mix_fields():
     request = parse_bandi_voice_command("emotion=sad:7,calm:3 strength=0.72 | 오늘은 조금 마음이 무거워")
 
@@ -138,6 +145,20 @@ def test_build_runpod_input_skips_segment_post_filter_for_soft_expression():
     assert payload["segments"][0]["post_filter"] == ""
     assert payload["segments"][1]["post_filter"] == ""
     assert payload["segments"][1]["pause_after_seconds"] == 0.34
+
+
+def test_build_runpod_input_includes_speech_rate_hint():
+    request = parse_bandi_voice_command("상범아 좋은 아침이야")
+
+    payload = build_runpod_input(
+        request,
+        request_id="speed",
+        min_duration_seconds=1.0,
+        retry_attempts=2,
+        speech_rate=1.05,
+    )
+
+    assert payload["speech_rate"] == 1.05
 
 
 def test_build_runpod_input_keeps_segment_question_only_when_requested():
