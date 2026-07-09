@@ -72,6 +72,8 @@ DEFAULT_SEGMENT_PAUSE_SECONDS = 0.26
 MIN_SEGMENT_PAUSE_SECONDS = 0.16
 MAX_SEGMENT_PAUSE_SECONDS = 0.75
 MAX_VOICE_SEGMENTS = 5
+DEFAULT_PROSODY_CARRY_OVER = 0.24
+MAX_PROSODY_CARRY_OVER = 0.5
 
 LOWPASS_BY_EMOTION = {
     "joy": 10600,
@@ -109,6 +111,8 @@ class BandiVoiceSegment:
     pause_after_seconds: float = DEFAULT_SEGMENT_PAUSE_SECONDS
     aux_limit: int = 3
     ending_style: str = "flat"
+    continuity_mode: str = "normal"
+    carry_over: float = DEFAULT_PROSODY_CARRY_OVER
 
 
 @dataclass(frozen=True)
@@ -195,6 +199,42 @@ def normalize_ending_style(value: object) -> str:
     if style in {"excited", "exclaim", "exclamation", "감탄", "감탄형"}:
         return "exclaim"
     return "flat"
+
+
+def normalize_continuity_mode(value: object) -> str:
+    mode = re.sub(r"[\s\-]+", "_", str(value or "normal").strip().lower())
+    if mode in {"same_breath", "samebreath", "breath", "continuation", "vocative", "address", "intimate"}:
+        return "same_breath"
+    if mode in {"soft_transition", "soft", "connected", "normal"}:
+        return "soft_transition"
+    if mode in {"hard_shift", "hard", "turn", "contrast"}:
+        return "hard_shift"
+    if mode in {"reset", "scene_reset", "new_scene"}:
+        return "reset"
+    return "normal"
+
+
+def default_carry_over_for_mode(mode: str) -> float:
+    normalized_mode = normalize_continuity_mode(mode)
+    if normalized_mode == "same_breath":
+        return 0.42
+    if normalized_mode == "soft_transition":
+        return 0.28
+    if normalized_mode == "hard_shift":
+        return 0.1
+    if normalized_mode == "reset":
+        return 0.0
+    return DEFAULT_PROSODY_CARRY_OVER
+
+
+def normalize_carry_over(value: object, *, continuity_mode: object = "normal") -> float:
+    if value is None:
+        return default_carry_over_for_mode(str(continuity_mode or "normal"))
+    try:
+        carry_over = float(value)
+    except (TypeError, ValueError):
+        carry_over = default_carry_over_for_mode(str(continuity_mode or "normal"))
+    return round(clamp_float(carry_over, 0.0, MAX_PROSODY_CARRY_OVER), 3)
 
 
 def soften_terminal_question(text: str, ending_style: str) -> str:
@@ -378,6 +418,8 @@ def make_bandi_voice_segment(
     pause_after_seconds: float | int | str | None = None,
     aux_limit: int = 3,
     ending_style: str | None = None,
+    continuity_mode: str | None = None,
+    carry_over: float | int | str | None = None,
 ) -> BandiVoiceSegment:
     clean_display_text = clean_punctuation(display_text)
     normalized_emotion = normalize_emotion_scores(emotion or {})
@@ -389,6 +431,7 @@ def make_bandi_voice_segment(
         )
     except (TypeError, ValueError):
         strength = _derive_strength(normalized_emotion)
+    normalized_continuity_mode = normalize_continuity_mode(continuity_mode)
     return BandiVoiceSegment(
         display_text=clean_display_text,
         emotion=normalized_emotion,
@@ -397,6 +440,8 @@ def make_bandi_voice_segment(
         pause_after_seconds=normalize_segment_pause(pause_after_seconds),
         aux_limit=max(1, min(int(aux_limit), 5)),
         ending_style=normalize_ending_style(ending_style),
+        continuity_mode=normalized_continuity_mode,
+        carry_over=normalize_carry_over(carry_over, continuity_mode=normalized_continuity_mode),
     )
 
 
@@ -517,6 +562,10 @@ def build_runpod_input(
                     "emotion": segment_emotion,
                     "emotion_strength": segment_strength,
                     "ending_style": segment.ending_style,
+                    "continuity": {
+                        "mode": segment.continuity_mode,
+                        "carry_over": segment.carry_over,
+                    },
                     "primary_reference": DEFAULT_PRIMARY_REFERENCE,
                     "aux_references": choose_aux_references(segment_emotion, max_refs=segment.aux_limit),
                     "post_filter": choose_post_filter(segment_emotion),

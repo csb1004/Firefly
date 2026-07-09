@@ -32,6 +32,7 @@ Rules:
 - Segment by sentence or clause. Do not split by individual words.
 - Use 1 to 5 segments.
 - Each segment must be long enough to sound natural.
+- Punctuation alone is not a segmentation boundary.
 - Use emotion scores from 0 to 10.
 - emotion_strength must be 0.0 to 1.0.
 - Use pause_after_seconds to avoid rushed joins. Prefer 0.22 to 0.36 seconds.
@@ -43,6 +44,19 @@ Rules:
 - Use flat for rhetorical questions, teasing protests, shy confessions, affectionate closings, and emotional statements.
 - The last segment should usually be flat unless the speaker truly asks for an answer.
 - Do not add filler words such as "그", "음", "어", or "저" unless they already exist in the original text.
+
+Prosody continuity rules:
+- Decide whether adjacent segments belong to the same spoken breath.
+- Do not split greetings, names, vocatives, short acknowledgements, soft address phrases, or intimate continuations unless there is a clear semantic emotion shift.
+- A comma does not imply an emotional boundary. Treat comma-connected address phrases as the same spoken breath by default.
+- If two adjacent segments belong to the same breath, keep emotion and prosody continuous.
+- Output continuity.carry_over from 0.0 to 0.5 for each segment:
+  - 0.4 to 0.5: same breath, vocative/address phrase, intimate continuation, or the next words should feel acoustically connected.
+  - 0.2 to 0.35: normal sentence-to-sentence continuity.
+  - 0.05 to 0.15: clear emotional turn that should still not sound mechanically detached.
+  - 0.0: hard reset, scene change, or intentionally separate delivery.
+- Split only when the listener should clearly hear a change in intent, not merely because punctuation exists.
+- The first segment may use carry_over 0.0 unless it is a continuation of a supplied tts_text hint.
 
 Emotion selection rubric:
 - Judge emotion from the utterance's communicative function, not from isolated words or punctuation.
@@ -77,7 +91,12 @@ Schema:
       "emotion": {"calm": 6, "sad": 4},
       "emotion_strength": 0.62,
       "pause_after_seconds": 0.30,
-      "ending_style": "flat"
+      "ending_style": "flat",
+      "continuity": {
+        "mode": "same_breath | soft_transition | hard_shift | reset",
+        "carry_over": 0.30,
+        "reason": "short explanation"
+      }
     }
   ]
 }
@@ -118,6 +137,10 @@ def _request_from_llm_payload(
         emotion = raw_emotion if isinstance(raw_emotion, dict) else request.emotion
         raw_strength = raw_segment.get("emotion_strength")
         strength = raw_strength if raw_strength is not None else request.emotion_strength
+        raw_continuity = raw_segment.get("continuity")
+        continuity = raw_continuity if isinstance(raw_continuity, dict) else {}
+        continuity_mode = continuity.get("mode", raw_segment.get("continuity_mode"))
+        carry_over = continuity.get("carry_over", raw_segment.get("carry_over"))
         segments.append(
             make_bandi_voice_segment(
                 text or tts_text or request.display_text,
@@ -127,6 +150,8 @@ def _request_from_llm_payload(
                 pause_after_seconds=raw_segment.get("pause_after_seconds"),
                 aux_limit=request.aux_limit,
                 ending_style=raw_segment.get("ending_style"),
+                continuity_mode=continuity_mode,
+                carry_over=carry_over,
             )
         )
 
