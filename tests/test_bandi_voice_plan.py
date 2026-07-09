@@ -33,6 +33,18 @@ def test_prepare_tts_text_does_not_insert_shy_filler_word():
     assert prepare_tts_text("상범아 고마워", {"shy": 7}) == "상범아, 고마워."
 
 
+def test_prepare_tts_text_avoids_unintended_rising_question_ending():
+    assert prepare_tts_text("사랑해 상범아", {"anxiety": 7}) == "사랑해 상범아."
+    assert prepare_tts_text("사랑해 상범아?", {"shy": 6, "anxiety": 4}) == "사랑해 상범아."
+
+
+def test_prepare_tts_text_preserves_explicit_question_ending_style():
+    assert (
+        prepare_tts_text("괜찮아?", {"anxiety": 7}, ending_style="question")
+        == "괜찮아?"
+    )
+
+
 def test_build_runpod_input_adds_reference_mix_fields():
     request = parse_bandi_voice_command("emotion=sad:7,calm:3 strength=0.72 | 오늘은 조금 마음이 무거워")
 
@@ -48,6 +60,7 @@ def test_build_runpod_input_adds_reference_mix_fields():
     assert payload["text"] == "오늘은 조금... 마음이 무거워."
     assert payload["emotion"] == {"sad": 7.0, "calm": 3.0}
     assert payload["emotion_strength"] == 0.72
+    assert payload["ending_style"] == "flat"
     assert payload["primary_reference"] == "neutral/168.wav"
     assert payload["aux_references"] == ["sad/020.wav", "calm/168.wav"]
     assert payload["post_filter"] == "lowpass=f=9600"
@@ -75,12 +88,40 @@ def test_build_runpod_input_adds_segment_payloads():
 
     assert payload["request_id"] == "segmented"
     assert payload["segments"][0]["text"] == "good work!"
+    assert payload["segments"][0]["ending_style"] == "flat"
     assert payload["segments"][0]["emotion"] == {"joy": 8.0}
     assert payload["segments"][0]["pause_after_seconds"] == 0.42
     assert payload["segments"][1]["text"] == "but I feel sad."
     assert payload["segments"][1]["emotion"] == {"sad": 7.0, "calm": 3.0}
     assert payload["segments"][1]["pause_after_seconds"] == 0.0
     assert payload["segment_gap_seconds"] == 0.26
+
+
+def test_build_runpod_input_keeps_segment_question_only_when_requested():
+    request = with_segments(
+        parse_bandi_voice_command("maybe worried, then ask"),
+        [
+            make_bandi_voice_segment("I am worried", {"anxiety": 8}, emotion_strength=0.7),
+            make_bandi_voice_segment(
+                "Are you okay?",
+                {"anxiety": 7},
+                emotion_strength=0.65,
+                ending_style="question",
+            ),
+        ],
+    )
+
+    payload = build_runpod_input(
+        request,
+        request_id="questions",
+        min_duration_seconds=1.0,
+        retry_attempts=2,
+    )
+
+    assert payload["segments"][0]["text"] == "I am worried."
+    assert payload["segments"][0]["ending_style"] == "flat"
+    assert payload["segments"][1]["text"] == "Are you okay?"
+    assert payload["segments"][1]["ending_style"] == "question"
 
 
 def test_format_emotion_summary_includes_segment_emotion_line():

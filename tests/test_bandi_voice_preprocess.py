@@ -26,6 +26,7 @@ def test_request_from_llm_payload_builds_voice_segments():
                     "emotion": {"sad": 7, "calm": 3},
                     "emotion_strength": 0.62,
                     "pause_after_seconds": 0.3,
+                    "ending_style": "flat",
                 },
             ]
         },
@@ -36,6 +37,7 @@ def test_request_from_llm_payload_builds_voice_segments():
     assert planned.segments[0].emotion == {"joy": 8.0}
     assert planned.segments[0].pause_after_seconds == 0.44
     assert planned.segments[1].emotion == {"sad": 7.0, "calm": 3.0}
+    assert planned.segments[1].ending_style == "flat"
 
 
 def test_request_from_llm_payload_uses_single_segment_as_emotion_plan():
@@ -49,6 +51,7 @@ def test_request_from_llm_payload_uses_single_segment_as_emotion_plan():
                     "text": "good work",
                     "emotion": {"joy": 7},
                     "emotion_strength": 0.65,
+                    "ending_style": "exclaim",
                 }
             ]
         },
@@ -58,6 +61,27 @@ def test_request_from_llm_payload_uses_single_segment_as_emotion_plan():
     assert planned.emotion == {"joy": 7.0}
     assert planned.emotion_strength == 0.65
     assert planned.tts_text == "good work"
+    assert planned.ending_style == "exclaim"
+
+
+def test_request_from_llm_payload_preserves_question_ending_style():
+    request = parse_bandi_voice_command("are you okay?")
+
+    planned = _request_from_llm_payload(
+        request,
+        {
+            "segments": [
+                {
+                    "text": "are you okay?",
+                    "emotion": {"anxiety": 7},
+                    "emotion_strength": 0.65,
+                    "ending_style": "question",
+                }
+            ]
+        },
+    )
+
+    assert planned.ending_style == "question"
 
 
 def test_request_from_llm_payload_preserves_llm_emotion_selection():
@@ -93,6 +117,8 @@ def test_system_prompt_contains_general_emotion_rubric():
     assert "High energy plus reproach" in SYSTEM_PROMPT
     assert "Affection expressed while embarrassed" in SYSTEM_PROMPT
     assert "split it into separate segments instead of averaging" in SYSTEM_PROMPT
+    assert "Use question only for a genuine information-seeking question" in SYSTEM_PROMPT
+    assert "affectionate closings" in SYSTEM_PROMPT
 
 
 def test_system_prompt_has_no_keyword_postprocessing_contract():

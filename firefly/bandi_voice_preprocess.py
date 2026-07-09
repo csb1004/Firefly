@@ -38,6 +38,10 @@ Rules:
 - Use 0.38 to 0.55 seconds when the next segment changes emotion sharply.
 - Last segment may still include pause_after_seconds; the server will ignore final trailing gap.
 - tts_text may add light punctuation or pauses, but must not add new facts.
+- Set ending_style to flat, question, or exclaim for each segment.
+- Use question only for a genuine information-seeking question that should rise at the end.
+- Use flat for rhetorical questions, teasing protests, shy confessions, affectionate closings, and emotional statements.
+- The last segment should usually be flat unless the speaker truly asks for an answer.
 - Do not add filler words such as "그", "음", "어", or "저" unless they already exist in the original text.
 
 Emotion selection rubric:
@@ -72,7 +76,8 @@ Schema:
       "tts_text": "optional TTS-friendly text",
       "emotion": {"calm": 6, "sad": 4},
       "emotion_strength": 0.62,
-      "pause_after_seconds": 0.30
+      "pause_after_seconds": 0.30,
+      "ending_style": "flat"
     }
   ]
 }
@@ -121,6 +126,7 @@ def _request_from_llm_payload(
                 tts_text=tts_text,
                 pause_after_seconds=raw_segment.get("pause_after_seconds"),
                 aux_limit=request.aux_limit,
+                ending_style=raw_segment.get("ending_style"),
             )
         )
 
@@ -134,6 +140,7 @@ def _request_from_llm_payload(
             emotion_strength=segment.emotion_strength,
             tts_text=segment.tts_text or segment.display_text,
             aux_limit=request.aux_limit,
+            ending_style=segment.ending_style,
         )
     return request
 
@@ -148,6 +155,7 @@ async def plan_bandi_voice_request(request: BandiVoiceCommandRequest) -> BandiVo
         "tts_text": request.tts_text,
         "requested_emotion": emotion_hint,
         "requested_emotion_strength": request.emotion_strength,
+        "requested_ending_style": request.ending_style,
     }
 
     try:

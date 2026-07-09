@@ -93,6 +93,10 @@ OPTION_KEYS = {
     "표현강도",
     "tts",
     "tts_text",
+    "ending_style",
+    "intonation",
+    "끝억양",
+    "억양",
 }
 
 
@@ -104,6 +108,7 @@ class BandiVoiceSegment:
     tts_text: str | None = None
     pause_after_seconds: float = DEFAULT_SEGMENT_PAUSE_SECONDS
     aux_limit: int = 3
+    ending_style: str = "flat"
 
 
 @dataclass(frozen=True)
@@ -113,6 +118,7 @@ class BandiVoiceCommandRequest:
     emotion_strength: float
     tts_text: str | None = None
     aux_limit: int = 3
+    ending_style: str = "flat"
     segments: tuple[BandiVoiceSegment, ...] = ()
 
     @property
@@ -182,16 +188,38 @@ def clean_punctuation(text: str) -> str:
     return text.strip()
 
 
-def ensure_sentence_ending(text: str, emotion_weights: dict[str, float]) -> str:
+def normalize_ending_style(value: object) -> str:
+    style = re.sub(r"[\s_\-]+", "", str(value or "flat").strip().lower())
+    if style in {"question", "questionintonation", "rising", "rise", "물음", "질문", "질문형"}:
+        return "question"
+    if style in {"excited", "exclaim", "exclamation", "감탄", "감탄형"}:
+        return "exclaim"
+    return "flat"
+
+
+def soften_terminal_question(text: str, ending_style: str) -> str:
+    if normalize_ending_style(ending_style) == "question":
+        return text
+    return re.sub(r"\?+$", ".", text.strip())
+
+
+def ensure_sentence_ending(
+    text: str,
+    emotion_weights: dict[str, float],
+    ending_style: str = "flat",
+) -> str:
     if not text:
         return text
     if text[-1] in ".?!~":
         return text
+    normalized_ending = normalize_ending_style(ending_style)
+    if normalized_ending == "question":
+        return f"{text}?"
+    if normalized_ending == "exclaim":
+        return f"{text}!"
     top_emotion = max(emotion_weights, key=emotion_weights.get, default="")
     if top_emotion in {"joy", "excited"}:
         return f"{text}!"
-    if top_emotion in {"anxiety", "surprise"}:
-        return f"{text}?"
     return f"{text}."
 
 
@@ -208,13 +236,15 @@ def prepare_tts_text(
     display_text: str,
     emotion: dict[str, float],
     proposed_tts_text: str | None = None,
+    ending_style: str = "flat",
 ) -> str:
     emotion_weights = normalize_emotion_weights(emotion)
     text = proposed_tts_text if proposed_tts_text else display_text
     text = clean_punctuation(text)
     text = apply_emotion_tts_pauses(text, emotion_weights)
     text = clean_punctuation(text)
-    return ensure_sentence_ending(text, emotion_weights)
+    text = ensure_sentence_ending(text, emotion_weights, ending_style)
+    return soften_terminal_question(text, ending_style)
 
 
 def choose_aux_references(
@@ -347,6 +377,7 @@ def make_bandi_voice_segment(
     tts_text: str | None = None,
     pause_after_seconds: float | int | str | None = None,
     aux_limit: int = 3,
+    ending_style: str | None = None,
 ) -> BandiVoiceSegment:
     clean_display_text = clean_punctuation(display_text)
     normalized_emotion = normalize_emotion_scores(emotion or {})
@@ -365,6 +396,7 @@ def make_bandi_voice_segment(
         tts_text=clean_punctuation(tts_text) if tts_text else None,
         pause_after_seconds=normalize_segment_pause(pause_after_seconds),
         aux_limit=max(1, min(int(aux_limit), 5)),
+        ending_style=normalize_ending_style(ending_style),
     )
 
 
@@ -385,14 +417,16 @@ def with_segments(
         emotion_strength=request.emotion_strength,
         tts_text=request.tts_text,
         aux_limit=request.aux_limit,
+        ending_style=request.ending_style,
         segments=clean_segments,
     )
 
 
-def _parse_options(option_text: str) -> tuple[dict[str, float], float | None, str | None]:
+def _parse_options(option_text: str) -> tuple[dict[str, float], float | None, str | None, str]:
     emotion: dict[str, float] = {}
     strength: float | None = None
     tts_text: str | None = None
+    ending_style = "flat"
 
     for token in option_text.split():
         if not token:
@@ -418,13 +452,16 @@ def _parse_options(option_text: str) -> tuple[dict[str, float], float | None, st
         if normalized_key in {"tts", "tts_text"}:
             tts_text = raw_value.strip() or None
             continue
+        if normalized_key in {"ending_style", "intonation", "끝억양", "억양"}:
+            ending_style = normalize_ending_style(raw_value)
+            continue
 
         parsed = _parse_emotion_token(token)
         if parsed is not None:
             name, score = parsed
             emotion[name] = emotion.get(name, 0.0) + score
 
-    return emotion, strength, tts_text
+    return emotion, strength, tts_text, ending_style
 
 
 def parse_bandi_voice_command(raw_text: str) -> BandiVoiceCommandRequest:
@@ -432,13 +469,14 @@ def parse_bandi_voice_command(raw_text: str) -> BandiVoiceCommandRequest:
     if not display_text:
         raise BandiVoicePlanError("음성으로 만들 말을 같이 적어줘. 예: `/음성생성 감정=기쁨:7,차분:3 | 안녕?`")
 
-    emotion, strength, tts_text = _parse_options(option_text)
+    emotion, strength, tts_text, ending_style = _parse_options(option_text)
     if not emotion:
         return BandiVoiceCommandRequest(
             display_text=display_text,
             emotion={},
             emotion_strength=0.0,
             tts_text=tts_text,
+            ending_style=ending_style,
         )
 
     return BandiVoiceCommandRequest(
@@ -446,6 +484,7 @@ def parse_bandi_voice_command(raw_text: str) -> BandiVoiceCommandRequest:
         emotion=emotion,
         emotion_strength=strength if strength is not None else _derive_strength(emotion),
         tts_text=tts_text,
+        ending_style=ending_style,
     )
 
 
@@ -465,13 +504,19 @@ def build_runpod_input(
                 if segment.emotion
                 else request.emotion_strength
             )
-            tts_text = prepare_tts_text(segment.display_text, segment_emotion, segment.tts_text)
+            tts_text = prepare_tts_text(
+                segment.display_text,
+                segment_emotion,
+                segment.tts_text,
+                segment.ending_style,
+            )
             segments.append(
                 {
                     "display_text": segment.display_text,
                     "text": tts_text,
                     "emotion": segment_emotion,
                     "emotion_strength": segment_strength,
+                    "ending_style": segment.ending_style,
                     "primary_reference": DEFAULT_PRIMARY_REFERENCE,
                     "aux_references": choose_aux_references(segment_emotion, max_refs=segment.aux_limit),
                     "post_filter": choose_post_filter(segment_emotion),
@@ -488,6 +533,7 @@ def build_runpod_input(
             "min_duration_seconds": min_duration_seconds,
             "retry_attempts": retry_attempts,
             "segment_gap_seconds": DEFAULT_SEGMENT_PAUSE_SECONDS,
+            "ending_style": request.ending_style,
         }
 
     if not request.has_emotion_plan:
@@ -498,13 +544,14 @@ def build_runpod_input(
             "retry_attempts": retry_attempts,
         }
 
-    tts_text = prepare_tts_text(request.display_text, request.emotion, request.tts_text)
+    tts_text = prepare_tts_text(request.display_text, request.emotion, request.tts_text, request.ending_style)
     return {
         "request_id": request_id,
         "display_text": request.display_text,
         "text": tts_text,
         "emotion": request.emotion,
         "emotion_strength": request.emotion_strength,
+        "ending_style": request.ending_style,
         "primary_reference": DEFAULT_PRIMARY_REFERENCE,
         "aux_references": choose_aux_references(request.emotion, max_refs=request.aux_limit),
         "post_filter": choose_post_filter(request.emotion),
