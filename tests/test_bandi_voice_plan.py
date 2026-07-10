@@ -106,6 +106,7 @@ def test_build_runpod_input_adds_segment_payloads():
     assert payload["segments"][1]["emotion"] == {"sad": 7.0, "calm": 3.0}
     assert payload["segments"][1]["pause_after_seconds"] == 0.26
     assert payload["segment_gap_seconds"] == 0.26
+    assert payload["synthesis_unit"] == "sentence"
 
 
 def test_build_runpod_input_skips_post_filter_for_soft_expression():
@@ -149,6 +150,28 @@ def test_build_runpod_input_skips_segment_post_filter_for_soft_expression():
     assert payload["segments"][0]["post_filter"] == ""
     assert payload["segments"][1]["post_filter"] == ""
     assert payload["segments"][1]["pause_after_seconds"] == 0.34
+
+
+def test_calm_joy_sentences_do_not_apply_unneeded_lowpass():
+    request = with_segments(
+        parse_bandi_voice_command("상범아, 아침이야."),
+        [
+            make_bandi_voice_segment(
+                "상범아, 아침이야.",
+                {"calm": 8, "joy": 3},
+                emotion_strength=0.62,
+            )
+        ],
+    )
+
+    payload = build_runpod_input(
+        request,
+        request_id="clean-calm-joy",
+        min_duration_seconds=1.0,
+        retry_attempts=2,
+    )
+
+    assert payload["segments"][0]["post_filter"] == ""
 
 
 def test_build_runpod_input_includes_speech_rate_hint():

@@ -80,7 +80,6 @@ MIN_SPEECH_RATE = 0.5
 MAX_SPEECH_RATE = 2.0
 
 LOWPASS_BY_EMOTION = {
-    "joy": 10600,
     "excited": 10400,
     "sad": 9600,
     "anxiety": 9800,
@@ -624,6 +623,7 @@ def build_runpod_input(
             "display_text": request.display_text,
             "text": " ".join(segment["text"] for segment in segments),
             "segments": segments,
+            "synthesis_unit": "sentence",
             "min_duration_seconds": min_duration_seconds,
             "retry_attempts": retry_attempts,
             "speech_rate": normalized_speech_rate,

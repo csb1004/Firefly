@@ -1,4 +1,4 @@
-from firefly.bandi_voice_plan import parse_bandi_voice_command
+from firefly.bandi_voice_plan import build_runpod_input, parse_bandi_voice_command
 from firefly.bandi_voice_preprocess import SYSTEM_PROMPT, _extract_json_object, _request_from_llm_payload
 
 
@@ -84,6 +84,59 @@ def test_request_from_llm_payload_preserves_question_ending_style():
     assert planned.ending_style == "question"
 
 
+def test_llm_emotion_segments_are_projected_onto_original_sentences():
+    request = parse_bandi_voice_command(
+        "상범아, 아침이야.\n조금만 더 눈 떠볼래?\n물 한 잔 마시고, 천천히 시작하자."
+    )
+
+    planned = _request_from_llm_payload(
+        request,
+        {
+            "segments": [
+                {
+                    "text": "상범아, 아침이야.",
+                    "emotion": {"calm": 8, "joy": 3},
+                    "emotion_strength": 0.48,
+                    "ending_style": "flat",
+                },
+                {
+                    "text": "조금만 더 눈 떠볼래? 물 한 잔 마시고, 천천히 시작하자.",
+                    "emotion": {"calm": 9, "joy": 2},
+                    "emotion_strength": 0.44,
+                    "ending_style": "flat",
+                    "continuity": {"mode": "same_breath", "carry_over": 0.45},
+                },
+            ]
+        },
+    )
+
+    assert [segment.display_text for segment in planned.segments] == [
+        "상범아, 아침이야.",
+        "조금만 더 눈 떠볼래?",
+        "물 한 잔 마시고, 천천히 시작하자.",
+    ]
+    assert planned.segments[0].emotion == {"calm": 8.0, "joy": 3.0}
+    assert planned.segments[1].emotion == {"calm": 9.0, "joy": 2.0}
+    assert planned.segments[2].emotion == {"calm": 9.0, "joy": 2.0}
+    assert planned.segments[1].ending_style == "question"
+    assert planned.segments[2].ending_style == "flat"
+    assert all(segment.continuity_mode != "same_breath" for segment in planned.segments)
+
+    runpod_input = build_runpod_input(
+        planned,
+        request_id="morning-three-sentences",
+        min_duration_seconds=1.0,
+        retry_attempts=2,
+    )
+    assert runpod_input["synthesis_unit"] == "sentence"
+    assert [segment["text"] for segment in runpod_input["segments"]] == [
+        "상범아, 아침이야.",
+        "조금만 더 눈 떠볼래~?",
+        "물 한 잔 마시고, 천천히 시작하자.",
+    ]
+    assert all(segment["post_filter"] == "" for segment in runpod_input["segments"])
+
+
 def test_request_from_llm_payload_preserves_llm_emotion_selection():
     request = parse_bandi_voice_command("정말! 부끄럽게 꼭 말해야 아는거야? ..사랑해 상범아.")
 
@@ -106,7 +159,7 @@ def test_request_from_llm_payload_preserves_llm_emotion_selection():
     )
 
     first_emotion = planned.segments[0].emotion
-    second_emotion = planned.segments[1].emotion
+    second_emotion = planned.segments[-1].emotion
     assert first_emotion == {"excited": 7.0, "joy": 5.0}
     assert second_emotion["joy"] == 7.0
 

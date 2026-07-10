@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from difflib import SequenceMatcher
 import json
 import re
 from typing import Any
@@ -28,6 +29,7 @@ Supported emotions: joy, excited, calm, sad, shy, anxiety, anger, surprise.
 
 Rules:
 - Preserve the user's meaning and spoken content.
+- Treat segments as emotion annotations. The application will choose sentence-level acoustic boundaries.
 - Split into segments only when the emotion meaningfully changes.
 - Segment by sentence or clause. Do not split by individual words.
 - Use 1 to 5 segments.
@@ -120,6 +122,102 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     return payload
 
 
+def _split_spoken_sentences(text: str) -> list[str]:
+    """Return stable acoustic units without letting an LLM choose their count."""
+    clean_text = str(text or "").strip()
+    if not clean_text:
+        return []
+    sentences = [
+        match.group(0).strip()
+        for match in re.finditer(r"[^.!?~\n]+(?:[.!?~]+|(?=\n|$))", clean_text)
+        if match.group(0).strip()
+    ]
+    return sentences or [clean_text]
+
+
+def _alignment_text(text: str) -> str:
+    return re.sub(r"[^0-9A-Za-z가-힣]+", "", str(text or "")).lower()
+
+
+def _best_annotation_indexes(
+    sentences: list[str],
+    annotations: list[BandiVoiceSegment],
+) -> list[int]:
+    if len(annotations) == 1:
+        return [0] * len(sentences)
+
+    indexes = []
+    for sentence_index, sentence in enumerate(sentences):
+        sentence_key = _alignment_text(sentence)
+        expected = round(sentence_index * (len(annotations) - 1) / max(len(sentences) - 1, 1))
+        scored = []
+        for annotation_index, annotation in enumerate(annotations):
+            annotation_key = _alignment_text(annotation.display_text)
+            score = SequenceMatcher(None, sentence_key, annotation_key).ratio()
+            if sentence_key and annotation_key and (
+                sentence_key in annotation_key or annotation_key in sentence_key
+            ):
+                score += 1.0
+            scored.append((score, -abs(annotation_index - expected), -annotation_index))
+        indexes.append(max(range(len(scored)), key=scored.__getitem__))
+    return indexes
+
+
+def _sentence_ending_style(sentence: str, annotation: BandiVoiceSegment) -> str:
+    stripped = sentence.rstrip()
+    if stripped.endswith("?"):
+        return "question"
+    if stripped.endswith("!"):
+        return "exclaim"
+    return annotation.ending_style if annotation.ending_style != "question" else "flat"
+
+
+def _project_annotations_to_sentences(
+    request: BandiVoiceCommandRequest,
+    annotations: list[BandiVoiceSegment],
+) -> list[BandiVoiceSegment]:
+    sentences = _split_spoken_sentences(request.display_text)
+    if len(sentences) <= 1 or not annotations:
+        return annotations
+    if (
+        len(annotations) == 1
+        and annotations[0].continuity_mode == "same_breath"
+        and annotations[0].tts_text
+    ):
+        return annotations
+
+    annotation_indexes = _best_annotation_indexes(sentences, annotations)
+    usage_counts = {
+        index: annotation_indexes.count(index)
+        for index in set(annotation_indexes)
+    }
+    projected = []
+    for sentence, annotation_index in zip(sentences, annotation_indexes):
+        annotation = annotations[annotation_index]
+        annotation_is_shared = usage_counts[annotation_index] > 1
+        continuity_mode = annotation.continuity_mode
+        if annotation_is_shared and continuity_mode == "same_breath":
+            continuity_mode = "soft_transition"
+        projected.append(
+            make_bandi_voice_segment(
+                sentence,
+                annotation.emotion,
+                emotion_strength=annotation.emotion_strength,
+                tts_text=annotation.tts_text if usage_counts[annotation_index] == 1 else None,
+                pause_after_seconds=annotation.pause_after_seconds,
+                aux_limit=annotation.aux_limit,
+                ending_style=_sentence_ending_style(sentence, annotation),
+                continuity_mode=continuity_mode,
+                carry_over=(
+                    min(annotation.carry_over, 0.28)
+                    if annotation_is_shared
+                    else annotation.carry_over
+                ),
+            )
+        )
+    return projected
+
+
 def _request_from_llm_payload(
     request: BandiVoiceCommandRequest,
     payload: dict[str, Any],
@@ -158,10 +256,11 @@ def _request_from_llm_payload(
             )
         )
 
-    if len(segments) >= 2:
-        return with_segments(request, segments)
-    if len(segments) == 1:
-        segment = segments[0]
+    projected_segments = _project_annotations_to_sentences(request, segments)
+    if len(projected_segments) >= 2:
+        return with_segments(request, projected_segments)
+    if len(projected_segments) == 1:
+        segment = projected_segments[0]
         return BandiVoiceCommandRequest(
             display_text=request.display_text,
             emotion=segment.emotion,
