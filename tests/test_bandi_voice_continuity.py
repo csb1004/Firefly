@@ -88,10 +88,17 @@ def test_request_from_llm_payload_preserves_continuity_decision():
         },
     )
 
-    assert planned.segments[0].continuity_mode == "same_breath"
-    assert planned.segments[0].carry_over == 0.46
+    assert [segment.display_text for segment in planned.segments] == [
+        "hello",
+        "Sangbeom.",
+        "I was resting quietly.",
+    ]
+    assert planned.segments[0].continuity_mode == "soft_transition"
+    assert planned.segments[0].carry_over == 0.28
     assert planned.segments[1].continuity_mode == "soft_transition"
     assert planned.segments[1].carry_over == 0.28
+    assert planned.segments[2].continuity_mode == "soft_transition"
+    assert planned.segments[2].carry_over == 0.28
 
 
 def test_single_llm_segment_preserves_top_level_continuity():

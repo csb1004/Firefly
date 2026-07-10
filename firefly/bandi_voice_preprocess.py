@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 import json
 import re
@@ -29,7 +30,7 @@ Supported emotions: joy, excited, calm, sad, shy, anxiety, anger, surprise.
 
 Rules:
 - Preserve the user's meaning and spoken content.
-- Treat segments as emotion annotations. The application will choose sentence-level acoustic boundaries.
+- Treat segments as emotion annotations. The application will choose phrase-level acoustic boundaries.
 - Split into segments only when the emotion meaningfully changes.
 - Segment by sentence or clause. Do not split by individual words.
 - Use 1 to 5 segments.
@@ -122,8 +123,32 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     return payload
 
 
-def _split_spoken_sentences(text: str) -> list[str]:
-    """Return stable acoustic units without letting an LLM choose their count."""
+CLAUSE_PAUSE_SECONDS = 0.34
+
+
+@dataclass(frozen=True)
+class _SpokenUnit:
+    text: str
+    pause_after_seconds: float | None = None
+    follows_clause_break: bool = False
+
+
+def _split_comma_clauses(sentence: str) -> list[_SpokenUnit]:
+    pieces = [piece.strip() for piece in sentence.split(",") if piece.strip()]
+    if len(pieces) <= 1:
+        return [_SpokenUnit(sentence.strip())]
+    return [
+        _SpokenUnit(
+            piece,
+            CLAUSE_PAUSE_SECONDS if index < len(pieces) - 1 else None,
+            follows_clause_break=index > 0,
+        )
+        for index, piece in enumerate(pieces)
+    ]
+
+
+def _split_spoken_units(text: str) -> list[_SpokenUnit]:
+    """Return stable sentence or breath-sized phrase synthesis units."""
     clean_text = str(text or "").strip()
     if not clean_text:
         return []
@@ -132,7 +157,13 @@ def _split_spoken_sentences(text: str) -> list[str]:
         for match in re.finditer(r"[^.!?~\n]+(?:[.!?~]+|(?=\n|$))", clean_text)
         if match.group(0).strip()
     ]
-    return sentences or [clean_text]
+    if not sentences:
+        sentences = [clean_text]
+
+    units = []
+    for sentence in sentences:
+        units.extend(_split_comma_clauses(sentence))
+    return units
 
 
 def _alignment_text(text: str) -> str:
@@ -140,22 +171,22 @@ def _alignment_text(text: str) -> str:
 
 
 def _best_annotation_indexes(
-    sentences: list[str],
+    units: list[str],
     annotations: list[BandiVoiceSegment],
 ) -> list[int]:
     if len(annotations) == 1:
-        return [0] * len(sentences)
+        return [0] * len(units)
 
     indexes = []
-    for sentence_index, sentence in enumerate(sentences):
-        sentence_key = _alignment_text(sentence)
-        expected = round(sentence_index * (len(annotations) - 1) / max(len(sentences) - 1, 1))
+    for unit_index, unit in enumerate(units):
+        unit_key = _alignment_text(unit)
+        expected = round(unit_index * (len(annotations) - 1) / max(len(units) - 1, 1))
         scored = []
         for annotation_index, annotation in enumerate(annotations):
             annotation_key = _alignment_text(annotation.display_text)
-            score = SequenceMatcher(None, sentence_key, annotation_key).ratio()
-            if sentence_key and annotation_key and (
-                sentence_key in annotation_key or annotation_key in sentence_key
+            score = SequenceMatcher(None, unit_key, annotation_key).ratio()
+            if unit_key and annotation_key and (
+                unit_key in annotation_key or annotation_key in unit_key
             ):
                 score += 1.0
             scored.append((score, -abs(annotation_index - expected), -annotation_index))
@@ -163,8 +194,8 @@ def _best_annotation_indexes(
     return indexes
 
 
-def _sentence_ending_style(sentence: str, annotation: BandiVoiceSegment) -> str:
-    stripped = sentence.rstrip()
+def _unit_ending_style(unit: str, annotation: BandiVoiceSegment) -> str:
+    stripped = unit.rstrip()
     if stripped.endswith("?"):
         return "question"
     if stripped.endswith("!"):
@@ -172,27 +203,29 @@ def _sentence_ending_style(sentence: str, annotation: BandiVoiceSegment) -> str:
     return annotation.ending_style if annotation.ending_style != "question" else "flat"
 
 
-def _project_annotations_to_sentences(
+def _project_annotations_to_spoken_units(
     request: BandiVoiceCommandRequest,
     annotations: list[BandiVoiceSegment],
 ) -> list[BandiVoiceSegment]:
-    sentences = _split_spoken_sentences(request.display_text)
-    if len(sentences) <= 1 or not annotations:
+    spoken_units = _split_spoken_units(request.display_text)
+    if len(spoken_units) <= 1 or not annotations:
         return annotations
     if (
         len(annotations) == 1
         and annotations[0].continuity_mode == "same_breath"
         and annotations[0].tts_text
+        and not any(unit.follows_clause_break for unit in spoken_units)
     ):
         return annotations
 
-    annotation_indexes = _best_annotation_indexes(sentences, annotations)
+    unit_texts = [unit.text for unit in spoken_units]
+    annotation_indexes = _best_annotation_indexes(unit_texts, annotations)
     usage_counts = {
         index: annotation_indexes.count(index)
         for index in set(annotation_indexes)
     }
     projected = []
-    for sentence, annotation_index in zip(sentences, annotation_indexes):
+    for unit, annotation_index in zip(spoken_units, annotation_indexes):
         annotation = annotations[annotation_index]
         annotation_is_shared = usage_counts[annotation_index] > 1
         continuity_mode = annotation.continuity_mode
@@ -200,13 +233,17 @@ def _project_annotations_to_sentences(
             continuity_mode = "soft_transition"
         projected.append(
             make_bandi_voice_segment(
-                sentence,
+                unit.text,
                 annotation.emotion,
                 emotion_strength=annotation.emotion_strength,
                 tts_text=annotation.tts_text if usage_counts[annotation_index] == 1 else None,
-                pause_after_seconds=annotation.pause_after_seconds,
+                pause_after_seconds=(
+                    max(unit.pause_after_seconds, annotation.pause_after_seconds)
+                    if unit.pause_after_seconds is not None
+                    else annotation.pause_after_seconds
+                ),
                 aux_limit=annotation.aux_limit,
-                ending_style=_sentence_ending_style(sentence, annotation),
+                ending_style=_unit_ending_style(unit.text, annotation),
                 continuity_mode=continuity_mode,
                 carry_over=(
                     min(annotation.carry_over, 0.28)
@@ -256,7 +293,7 @@ def _request_from_llm_payload(
             )
         )
 
-    projected_segments = _project_annotations_to_sentences(request, segments)
+    projected_segments = _project_annotations_to_spoken_units(request, segments)
     if len(projected_segments) >= 2:
         return with_segments(request, projected_segments)
     if len(projected_segments) == 1:

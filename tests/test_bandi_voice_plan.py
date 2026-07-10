@@ -106,7 +106,7 @@ def test_build_runpod_input_adds_segment_payloads():
     assert payload["segments"][1]["emotion"] == {"sad": 7.0, "calm": 3.0}
     assert payload["segments"][1]["pause_after_seconds"] == 0.26
     assert payload["segment_gap_seconds"] == 0.26
-    assert payload["synthesis_unit"] == "sentence"
+    assert payload["synthesis_unit"] == "phrase"
 
 
 def test_build_runpod_input_skips_post_filter_for_soft_expression():

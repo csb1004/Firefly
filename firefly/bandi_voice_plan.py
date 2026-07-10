@@ -623,7 +623,7 @@ def build_runpod_input(
             "display_text": request.display_text,
             "text": " ".join(segment["text"] for segment in segments),
             "segments": segments,
-            "synthesis_unit": "sentence",
+            "synthesis_unit": "phrase",
             "min_duration_seconds": min_duration_seconds,
             "retry_attempts": retry_attempts,
             "speech_rate": normalized_speech_rate,

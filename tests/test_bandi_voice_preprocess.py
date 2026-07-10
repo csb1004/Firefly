@@ -84,7 +84,7 @@ def test_request_from_llm_payload_preserves_question_ending_style():
     assert planned.ending_style == "question"
 
 
-def test_llm_emotion_segments_are_projected_onto_original_sentences():
+def test_llm_emotion_segments_are_projected_onto_spoken_units():
     request = parse_bandi_voice_command(
         "상범아, 아침이야.\n조금만 더 눈 떠볼래?\n물 한 잔 마시고, 천천히 시작하자."
     )
@@ -111,15 +111,21 @@ def test_llm_emotion_segments_are_projected_onto_original_sentences():
     )
 
     assert [segment.display_text for segment in planned.segments] == [
-        "상범아, 아침이야.",
+        "상범아",
+        "아침이야.",
         "조금만 더 눈 떠볼래?",
-        "물 한 잔 마시고, 천천히 시작하자.",
+        "물 한 잔 마시고",
+        "천천히 시작하자.",
     ]
     assert planned.segments[0].emotion == {"calm": 8.0, "joy": 3.0}
-    assert planned.segments[1].emotion == {"calm": 9.0, "joy": 2.0}
+    assert planned.segments[1].emotion == {"calm": 8.0, "joy": 3.0}
     assert planned.segments[2].emotion == {"calm": 9.0, "joy": 2.0}
-    assert planned.segments[1].ending_style == "question"
-    assert planned.segments[2].ending_style == "flat"
+    assert planned.segments[3].emotion == {"calm": 9.0, "joy": 2.0}
+    assert planned.segments[4].emotion == {"calm": 9.0, "joy": 2.0}
+    assert planned.segments[2].ending_style == "question"
+    assert planned.segments[3].ending_style == "flat"
+    assert planned.segments[0].pause_after_seconds == 0.34
+    assert planned.segments[3].pause_after_seconds == 0.34
     assert all(segment.continuity_mode != "same_breath" for segment in planned.segments)
 
     runpod_input = build_runpod_input(
@@ -128,13 +134,63 @@ def test_llm_emotion_segments_are_projected_onto_original_sentences():
         min_duration_seconds=1.0,
         retry_attempts=2,
     )
-    assert runpod_input["synthesis_unit"] == "sentence"
+    assert runpod_input["synthesis_unit"] == "phrase"
     assert [segment["text"] for segment in runpod_input["segments"]] == [
-        "상범아, 아침이야.",
+        "상범아.",
+        "아침이야.",
         "조금만 더 눈 떠볼래~?",
-        "물 한 잔 마시고, 천천히 시작하자.",
+        "물 한 잔 마시고.",
+        "천천히 시작하자.",
     ]
     assert all(segment["post_filter"] == "" for segment in runpod_input["segments"])
+
+
+def test_long_comma_clauses_become_separate_synthesis_units():
+    request = parse_bandi_voice_command("이리와 상범아, 꼭 안아줄게")
+
+    planned = _request_from_llm_payload(
+        request,
+        {
+            "segments": [
+                {
+                    "text": "이리와 상범아, 꼭 안아줄게",
+                    "emotion": {"calm": 7, "joy": 3},
+                    "emotion_strength": 0.45,
+                    "continuity": {"mode": "same_breath", "carry_over": 0.45},
+                }
+            ]
+        },
+    )
+
+    assert [segment.display_text for segment in planned.segments] == [
+        "이리와 상범아",
+        "꼭 안아줄게",
+    ]
+    assert planned.segments[0].pause_after_seconds == 0.34
+    assert all(segment.continuity_mode != "same_breath" for segment in planned.segments)
+
+
+def test_short_vocative_comma_gets_an_explicit_breath_pause():
+    request = parse_bandi_voice_command("상범아, 아침이야.")
+
+    planned = _request_from_llm_payload(
+        request,
+        {
+            "segments": [
+                {
+                    "text": "상범아, 아침이야.",
+                    "tts_text": "상범아 아침이야.",
+                    "emotion": {"calm": 8, "joy": 2},
+                    "emotion_strength": 0.35,
+                    "continuity": {"mode": "same_breath", "carry_over": 0.44},
+                }
+            ]
+        },
+    )
+
+    assert [segment.display_text for segment in planned.segments] == ["상범아", "아침이야."]
+    assert planned.segments[0].pause_after_seconds == 0.34
+    assert all(segment.continuity_mode != "same_breath" for segment in planned.segments)
 
 
 def test_request_from_llm_payload_preserves_llm_emotion_selection():
