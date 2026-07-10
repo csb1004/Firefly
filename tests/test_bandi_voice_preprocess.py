@@ -124,8 +124,8 @@ def test_llm_emotion_segments_are_projected_onto_spoken_units():
     assert planned.segments[4].emotion == {"calm": 9.0, "joy": 2.0}
     assert planned.segments[2].ending_style == "question"
     assert planned.segments[3].ending_style == "flat"
-    assert planned.segments[0].pause_after_seconds == 0.25
-    assert planned.segments[3].pause_after_seconds == 0.25
+    assert planned.segments[0].pause_after_seconds == 0.34
+    assert planned.segments[3].pause_after_seconds == 0.34
     assert all(segment.continuity_mode != "same_breath" for segment in planned.segments)
 
     runpod_input = build_runpod_input(
@@ -166,7 +166,7 @@ def test_long_comma_clauses_become_separate_synthesis_units():
         "이리와 상범아",
         "꼭 안아줄게",
     ]
-    assert planned.segments[0].pause_after_seconds == 0.25
+    assert planned.segments[0].pause_after_seconds == 0.34
     assert all(segment.continuity_mode != "same_breath" for segment in planned.segments)
 
 
@@ -189,7 +189,7 @@ def test_short_vocative_comma_gets_an_explicit_breath_pause():
     )
 
     assert [segment.display_text for segment in planned.segments] == ["상범아", "아침이야."]
-    assert planned.segments[0].pause_after_seconds == 0.25
+    assert planned.segments[0].pause_after_seconds == 0.34
     assert all(segment.continuity_mode != "same_breath" for segment in planned.segments)
 
 

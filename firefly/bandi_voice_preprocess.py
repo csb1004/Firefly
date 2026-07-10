@@ -124,7 +124,7 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     return payload
 
 
-CLAUSE_PAUSE_SECONDS = 0.25
+CLAUSE_PAUSE_SECONDS = 0.34
 
 
 @dataclass(frozen=True)
