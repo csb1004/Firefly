@@ -13,6 +13,7 @@ from . import config
 from .bandi_voice_plan import (
     BandiVoiceCommandRequest,
     BandiVoiceSegment,
+    DEFAULT_SEGMENT_PAUSE_SECONDS,
     make_bandi_voice_segment,
     with_segments,
 )
@@ -123,7 +124,7 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     return payload
 
 
-CLAUSE_PAUSE_SECONDS = 0.34
+CLAUSE_PAUSE_SECONDS = 0.25
 
 
 @dataclass(frozen=True)
@@ -238,7 +239,11 @@ def _project_annotations_to_spoken_units(
                 emotion_strength=annotation.emotion_strength,
                 tts_text=annotation.tts_text if usage_counts[annotation_index] == 1 else None,
                 pause_after_seconds=(
-                    max(unit.pause_after_seconds, annotation.pause_after_seconds)
+                    (
+                        max(unit.pause_after_seconds, annotation.pause_after_seconds)
+                        if annotation.pause_after_seconds > DEFAULT_SEGMENT_PAUSE_SECONDS
+                        else unit.pause_after_seconds
+                    )
                     if unit.pause_after_seconds is not None
                     else annotation.pause_after_seconds
                 ),
