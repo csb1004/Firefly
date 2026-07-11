@@ -31,6 +31,10 @@ Supported emotions: joy, excited, calm, sad, shy, anxiety, anger, surprise.
 
 Rules:
 - Preserve the user's meaning and spoken content.
+- Return normalized_text with the exact same words as the input, changing only spacing and punctuation.
+- Add sentence or phrase punctuation where it makes Korean TTS clearer and easier to synthesize.
+- Use periods to separate complete spoken thoughts that should be generated independently.
+- Never add, remove, replace, or reorder spoken words in normalized_text.
 - Treat segments as emotion annotations. The application will choose phrase-level acoustic boundaries.
 - Split into segments only when the emotion meaningfully changes.
 - Segment by sentence or clause. Do not split by individual words.
@@ -51,10 +55,8 @@ Rules:
 
 Prosody continuity rules:
 - Decide whether adjacent segments belong to the same spoken breath.
-- Do not split greetings, names, vocatives, short acknowledgements, soft address phrases, or intimate continuations unless there is a clear semantic emotion shift.
-- A comma does not imply an emotional boundary. Treat comma-connected address phrases as the same spoken breath by default.
-- If the whole utterance is a short greeting plus an address/vocative phrase, keep it as one segment even if the user typed a comma or period between them.
-- For same_breath greeting/address phrases, set tts_text to a smooth single-breath form by replacing hard internal punctuation with a space. Preserve the original words.
+- A comma or period in normalized_text may create an acoustic boundary without creating a new emotion annotation.
+- Do not merge punctuation-separated phrases merely because their emotions are similar.
 - For short same_breath greeting/address phrases, prefer calm as the primary emotion, optional low joy as a secondary color, and a low-to-moderate emotion_strength around 0.25 to 0.40 unless the text clearly demands stronger emotion.
 - If two adjacent segments belong to the same breath, keep emotion and prosody continuous.
 - Output continuity.carry_over from 0.0 to 0.5 for each segment:
@@ -91,6 +93,7 @@ Conflict rules:
 
 Schema:
 {
+  "normalized_text": "same spoken words with TTS-friendly spacing and punctuation",
   "segments": [
     {
       "text": "spoken segment",
@@ -171,6 +174,19 @@ def _alignment_text(text: str) -> str:
     return re.sub(r"[^0-9A-Za-z가-힣]+", "", str(text or "")).lower()
 
 
+def _validated_normalized_text(
+    request: BandiVoiceCommandRequest,
+    payload: dict[str, Any],
+) -> str:
+    source_text = request.tts_text or request.display_text
+    candidate = str(payload.get("normalized_text") or "").strip()
+    if not candidate:
+        return source_text
+    if _alignment_text(candidate) != _alignment_text(request.display_text):
+        return source_text
+    return candidate
+
+
 def _best_annotation_indexes(
     units: list[str],
     annotations: list[BandiVoiceSegment],
@@ -207,16 +223,10 @@ def _unit_ending_style(unit: str, annotation: BandiVoiceSegment) -> str:
 def _project_annotations_to_spoken_units(
     request: BandiVoiceCommandRequest,
     annotations: list[BandiVoiceSegment],
+    synthesis_text: str,
 ) -> list[BandiVoiceSegment]:
-    spoken_units = _split_spoken_units(request.display_text)
+    spoken_units = _split_spoken_units(synthesis_text)
     if len(spoken_units) <= 1 or not annotations:
-        return annotations
-    if (
-        len(annotations) == 1
-        and annotations[0].continuity_mode == "same_breath"
-        and annotations[0].tts_text
-        and not any(unit.follows_clause_break for unit in spoken_units)
-    ):
         return annotations
 
     unit_texts = [unit.text for unit in spoken_units]
@@ -298,7 +308,12 @@ def _request_from_llm_payload(
             )
         )
 
-    projected_segments = _project_annotations_to_spoken_units(request, segments)
+    synthesis_text = _validated_normalized_text(request, payload)
+    projected_segments = _project_annotations_to_spoken_units(
+        request,
+        segments,
+        synthesis_text,
+    )
     if len(projected_segments) >= 2:
         return with_segments(request, projected_segments)
     if len(projected_segments) == 1:

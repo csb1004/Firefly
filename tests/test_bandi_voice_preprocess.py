@@ -84,6 +84,52 @@ def test_request_from_llm_payload_preserves_question_ending_style():
     assert planned.ending_style == "question"
 
 
+def test_llm_normalized_text_adds_acoustic_boundaries_without_changing_words():
+    request = parse_bandi_voice_command("좋은 아침이야 상범아")
+
+    planned = _request_from_llm_payload(
+        request,
+        {
+            "normalized_text": "좋은 아침이야. 상범아.",
+            "segments": [
+                {
+                    "text": "좋은 아침이야 상범아",
+                    "emotion": {"calm": 8, "joy": 2},
+                    "emotion_strength": 0.4,
+                    "continuity": {"mode": "same_breath", "carry_over": 0.44},
+                }
+            ],
+        },
+    )
+
+    assert [segment.display_text for segment in planned.segments] == [
+        "좋은 아침이야.",
+        "상범아.",
+    ]
+    assert all(segment.continuity_mode != "same_breath" for segment in planned.segments)
+
+
+def test_llm_normalized_text_rejects_added_or_removed_words():
+    request = parse_bandi_voice_command("좋은 아침이야 상범아")
+
+    planned = _request_from_llm_payload(
+        request,
+        {
+            "normalized_text": "정말 좋은 아침이야. 상범아.",
+            "segments": [
+                {
+                    "text": "좋은 아침이야 상범아",
+                    "emotion": {"calm": 8, "joy": 2},
+                    "emotion_strength": 0.4,
+                }
+            ],
+        },
+    )
+
+    assert not planned.has_segments
+    assert planned.tts_text == "좋은 아침이야 상범아"
+
+
 def test_llm_emotion_segments_are_projected_onto_spoken_units():
     request = parse_bandi_voice_command(
         "상범아, 아침이야.\n조금만 더 눈 떠볼래?\n물 한 잔 마시고, 천천히 시작하자."
@@ -228,6 +274,8 @@ def test_system_prompt_contains_general_emotion_rubric():
     assert "split it into separate segments instead of averaging" in SYSTEM_PROMPT
     assert "Use question only for a genuine information-seeking question" in SYSTEM_PROMPT
     assert "affectionate closings" in SYSTEM_PROMPT
+    assert "normalized_text" in SYSTEM_PROMPT
+    assert "Never add, remove, replace, or reorder spoken words" in SYSTEM_PROMPT
 
 
 def test_system_prompt_has_no_keyword_postprocessing_contract():

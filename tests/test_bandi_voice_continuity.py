@@ -101,7 +101,7 @@ def test_request_from_llm_payload_preserves_continuity_decision():
     assert planned.segments[2].carry_over == 0.28
 
 
-def test_single_llm_segment_preserves_top_level_continuity():
+def test_single_llm_emotion_annotation_keeps_punctuation_acoustic_boundaries():
     request = parse_bandi_voice_command("hello. Sangbeom.")
 
     planned = _request_from_llm_payload(
@@ -122,13 +122,12 @@ def test_single_llm_segment_preserves_top_level_continuity():
         },
     )
 
-    assert not planned.has_segments
-    assert planned.tts_text == "hello Sangbeom."
-    assert planned.continuity_mode == "same_breath"
-    assert planned.carry_over == 0.45
+    assert [segment.display_text for segment in planned.segments] == ["hello.", "Sangbeom."]
+    assert all(segment.continuity_mode == "soft_transition" for segment in planned.segments)
+    assert all(segment.carry_over == 0.28 for segment in planned.segments)
 
 
-def test_build_runpod_input_includes_top_level_continuity():
+def test_build_runpod_input_includes_normalized_phrase_continuity():
     request = _request_from_llm_payload(
         parse_bandi_voice_command("hello. Sangbeom."),
         {
@@ -154,18 +153,17 @@ def test_build_runpod_input_includes_top_level_continuity():
         retry_attempts=2,
     )
 
-    assert payload["text"] == "hello Sangbeom."
-    assert payload["continuity"] == {
-        "mode": "same_breath",
-        "carry_over": 0.45,
-    }
+    assert [segment["text"] for segment in payload["segments"]] == ["hello.", "Sangbeom."]
+    assert all(
+        segment["continuity"] == {"mode": "soft_transition", "carry_over": 0.28}
+        for segment in payload["segments"]
+    )
 
 
 def test_system_prompt_requests_general_prosody_continuity():
     assert "Prosody continuity rules" in SYSTEM_PROMPT
     assert "Punctuation alone is not a segmentation boundary" in SYSTEM_PROMPT
-    assert "A comma does not imply an emotional boundary" in SYSTEM_PROMPT
-    assert "short greeting plus an address/vocative phrase" in SYSTEM_PROMPT
-    assert "replacing hard internal punctuation with a space" in SYSTEM_PROMPT
+    assert "may create an acoustic boundary" in SYSTEM_PROMPT
+    assert "Do not merge punctuation-separated phrases" in SYSTEM_PROMPT
     assert "continuity.carry_over" in SYSTEM_PROMPT
     assert "same_breath | soft_transition | hard_shift | reset" in SYSTEM_PROMPT
