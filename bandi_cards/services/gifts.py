@@ -7,7 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Card, Gift, Inventory, User
+from .inventory import unlock_card
 from .notifications import enqueue_notification
+from .set_effects import effective_yp
 
 
 @dataclass(frozen=True)
@@ -62,13 +64,16 @@ def preview_gift(db: Session, sender_id: int, receiver_id: int, card_id: str, qu
     _receiver, card, sender_inventory, receiver_inventory = _validate_gift(
         db, sender_id, receiver_id, card_id, quantity
     )
-    sender_loses_type = sender_inventory.quantity == quantity
-    receiver_gains_type = receiver_inventory is None or receiver_inventory.quantity == 0
+    sender_before = effective_yp(db, sender_id).total_yp
+    receiver_before = effective_yp(db, receiver_id).total_yp
+    sender_after = effective_yp(db, sender_id, quantity_overrides={card_id: sender_inventory.quantity - quantity}).total_yp
+    receiver_quantity = receiver_inventory.quantity if receiver_inventory else 0
+    receiver_after = effective_yp(db, receiver_id, quantity_overrides={card_id: receiver_quantity + quantity}).total_yp
     return GiftPreview(
         card=card,
         quantity=quantity,
-        sender_yp_change=-card.yp if sender_loses_type else 0,
-        receiver_yp_change=card.yp if receiver_gains_type else 0,
+        sender_yp_change=sender_after - sender_before,
+        receiver_yp_change=receiver_after - receiver_before,
     )
 
 
@@ -97,17 +102,18 @@ def send_gift(
     receiver, card, sender_inventory, receiver_inventory = _validate_gift(
         db, sender_id, receiver_id, card_id, quantity, lock=True
     )
-    preview = GiftPreview(
-        card=card,
-        quantity=quantity,
-        sender_yp_change=-card.yp if sender_inventory.quantity == quantity else 0,
-        receiver_yp_change=card.yp if receiver_inventory is None or receiver_inventory.quantity == 0 else 0,
-    )
+    sender_before = effective_yp(db, sender_id).total_yp
+    receiver_before = effective_yp(db, receiver_id).total_yp
+    sender_after = effective_yp(db, sender_id, quantity_overrides={card_id: sender_inventory.quantity - quantity}).total_yp
+    receiver_quantity = receiver_inventory.quantity if receiver_inventory else 0
+    receiver_after = effective_yp(db, receiver_id, quantity_overrides={card_id: receiver_quantity + quantity}).total_yp
+    preview = GiftPreview(card, quantity, sender_after - sender_before, receiver_after - receiver_before)
     sender_inventory.quantity -= quantity
     if receiver_inventory is None:
         receiver_inventory = Inventory(user_id=receiver_id, card_id=card_id, quantity=0)
         db.add(receiver_inventory)
     receiver_inventory.quantity += quantity
+    unlock_card(db, receiver_id, card_id)
     gift = Gift(
         sender_id=sender_id,
         receiver_id=receiver_id,

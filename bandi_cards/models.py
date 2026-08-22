@@ -114,6 +114,55 @@ class Card(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class CardSet(Base):
+    __tablename__ = "card_sets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_string)
+    name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class CardSetMember(Base):
+    __tablename__ = "card_set_members"
+
+    set_id: Mapped[str] = mapped_column(ForeignKey("card_sets.id", ondelete="CASCADE"), primary_key=True)
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True)
+
+
+class SetEffect(Base):
+    __tablename__ = "set_effects"
+    __table_args__ = (
+        CheckConstraint(
+            "target_scope IN ('set_members', 'selected_cards', 'rarity', 'collection')",
+            name="ck_set_effect_target_scope",
+        ),
+        CheckConstraint("count_mode IN ('once', 'distinct', 'quantity')", name="ck_set_effect_count_mode"),
+        CheckConstraint("bonus_type IN ('fixed', 'percent')", name="ck_set_effect_bonus_type"),
+        CheckConstraint("value >= 0", name="ck_set_effect_value"),
+        CheckConstraint("max_count IS NULL OR max_count > 0", name="ck_set_effect_max_count"),
+        CheckConstraint("target_rarity IS NULL OR (target_rarity >= 1 AND target_rarity <= 5)", name="ck_set_effect_rarity"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_string)
+    set_id: Mapped[str] = mapped_column(ForeignKey("card_sets.id", ondelete="CASCADE"), index=True)
+    target_scope: Mapped[str] = mapped_column(String(24))
+    target_rarity: Mapped[int | None] = mapped_column(Integer)
+    count_mode: Mapped[str] = mapped_column(String(16))
+    bonus_type: Mapped[str] = mapped_column(String(16))
+    value: Mapped[float] = mapped_column(Numeric(12, 4))
+    max_count: Mapped[int | None] = mapped_column(Integer)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class SetEffectTargetCard(Base):
+    __tablename__ = "set_effect_target_cards"
+
+    effect_id: Mapped[str] = mapped_column(ForeignKey("set_effects.id", ondelete="CASCADE"), primary_key=True)
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True)
+
+
 class Inventory(Base):
     __tablename__ = "inventory"
     __table_args__ = (
@@ -127,6 +176,33 @@ class Inventory(Base):
     quantity: Mapped[int] = mapped_column(Integer, default=0)
     reserved_quantity: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class CatalogUnlock(Base):
+    __tablename__ = "catalog_unlocks"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True)
+    unlocked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DiscardEvent(Base):
+    __tablename__ = "discard_events"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_discard_quantity"),
+        UniqueConstraint("user_id", "idempotency_key", name="uq_discard_user_idempotency"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_string)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    card_id: Mapped[str | None] = mapped_column(ForeignKey("cards.id", ondelete="SET NULL"), index=True)
+    card_name: Mapped[str] = mapped_column(String(100))
+    quantity: Mapped[int] = mapped_column(Integer)
+    quantity_after: Mapped[int] = mapped_column(Integer)
+    yp_before: Mapped[int] = mapped_column(Integer)
+    yp_after: Mapped[int] = mapped_column(Integer)
+    idempotency_key: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class DrawState(Base):
@@ -169,6 +245,20 @@ class DailyDrawAllowance(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class DrawBatch(Base):
+    __tablename__ = "draw_batches"
+    __table_args__ = (
+        CheckConstraint("requested_count IN (1, 10)", name="ck_draw_batch_count"),
+        UniqueConstraint("user_id", "idempotency_key", name="uq_draw_batch_user_idempotency"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_string)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    requested_count: Mapped[int] = mapped_column(Integer)
+    idempotency_key: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class DrawHistory(Base):
     __tablename__ = "draw_history"
     __table_args__ = (
@@ -177,6 +267,8 @@ class DrawHistory(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_string)
+    batch_id: Mapped[str | None] = mapped_column(ForeignKey("draw_batches.id", ondelete="SET NULL"), index=True)
+    batch_position: Mapped[int | None] = mapped_column(Integer)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     card_id: Mapped[str | None] = mapped_column(ForeignKey("cards.id", ondelete="SET NULL"), index=True)
     card_name: Mapped[str] = mapped_column(String(100))

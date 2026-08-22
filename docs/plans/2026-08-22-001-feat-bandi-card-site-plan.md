@@ -10,13 +10,13 @@ deepened: 2026-08-22
 
 ## Summary
 
-기존 반디봇을 유지하면서 같은 저장소에 Discord OAuth 기반 카드 웹서비스를 추가한다. 웹과 봇은 Railway에서 별도 서비스로 실행하고 PostgreSQL, Railway Bucket, 트랜잭션 아웃박스를 통해 뽑기·수집·실시간 거래·DM 알림을 일관되게 연결한다.
+기존 반디봇을 유지하면서 같은 저장소의 Discord OAuth 기반 카드 웹서비스를 확장한다. 현재 구현된 뽑기·도감·관리 기능 위에 영구 도감 기록, 안전한 카드 버리기, 원자적 10회 뽑기, 플레이어별 관리자 보정, 구성 가능한 세트 효과를 추가한다.
 
 ---
 
 ## Problem Frame
 
-현재 저장소는 `Firefly.py`가 시작하는 단일 Discord 봇과 JSON 파일 기반 메모리 저장소로 구성되어 있다. 웹 인증, 관계형 데이터, 이미지 저장, 브라우저 UI, 실시간 양방향 연결을 위한 기반은 없으며 기존 JSON 저장 방식은 동시 뽑기와 카드 교환의 원자성을 보장할 수 없다.
+초기 계획 이후 FastAPI·SQLAlchemy·Alembic·React 기반 웹서비스와 Railway PostgreSQL 배포가 추가되었다. 현재 도감 해금은 인벤토리 수량에서 파생되고 YP는 보유 카드의 기본값을 단순 합산하므로, 카드를 버린 뒤에도 도감을 유지하거나 세트 규칙을 모든 화면에 동일하게 적용할 수 없다.
 
 새 사이트는 Discord 서버와 무관한 전역 계정 및 자산을 제공해야 한다. 동시에 기존 봇의 대화·메모리 기능과 배포를 깨뜨리지 않고, 웹에서 완료된 행동이 Discord DM 실패 때문에 취소되지 않도록 두 런타임의 경계를 분명히 해야 한다.
 
@@ -24,7 +24,7 @@ deepened: 2026-08-22
 
 ## Requirements
 
-원본 요구사항의 R1-R68이 제품 동작의 기준이며, 아래 표는 구현 책임을 묶어 보여준다.
+원본 요구사항의 R1-R91이 제품 동작의 기준이며, 아래 표는 구현 책임을 묶어 보여준다.
 
 | Origin IDs | Implementation outcome | Primary units |
 |---|---|---|
@@ -36,6 +36,9 @@ deepened: 2026-08-22
 | R46-R55 | 온라인 판별, 실시간 거래방, 요청·수락·거절, 카드 예약, 원자적 교환 | U8 |
 | R56-R59 | 웹 실시간 초대와 반디봇의 비차단성 DM 링크 | U8, U9 |
 | R60-R68 | 단일 관리자 UI, 카드·확률 관리, 삭제 영향 미리보기, 내부 감사 | U4 |
+| R70-R77 | 영구 도감 해금, 카드 버리기, 플레이어별 인벤토리·도감 보정 | U11, U12 |
+| R78-R81 | 순차 천장과 원자성을 유지하는 10회 뽑기 및 통합 연출 | U11, U14 |
+| R82-R91 | 세트 구성, 범용 효과 규칙, 최종 YP 계산과 모든 화면의 일관성 | U11, U13, U15 |
 
 **Quality requirements**
 
@@ -57,7 +60,12 @@ deepened: 2026-08-22
 - **Separate Railway services from one repository:** 봇과 웹을 각각 독립 프로세스로 배포한다. 봇 장애가 웹을 내리지 않고 웹 배포가 Discord 연결을 재시작하지 않게 한다.
 - **Single-origin FastAPI and React application:** FastAPI가 API, OAuth 콜백, WebSocket, 빌드된 React 정적 파일을 같은 도메인에서 제공한다. 별도 프런트엔드 도메인과 CORS 복잡성을 피한다.
 - **PostgreSQL as the card-domain authority:** 계정, 카드, 인벤토리, 천장, 거래, 선물, 감사, 알림 아웃박스를 PostgreSQL에 둔다. `firefly/storage.py`의 JSON 메모리는 봇 대화 도메인에만 남긴다.
-- **Derived YP instead of a cached balance:** 랭킹 YP는 수량이 1 이상인 고유 카드 종류의 현재 YP 합으로 계산한다. 카드 YP 수정과 마지막 장 이전이 별도 보정 작업 없이 즉시 반영된다.
+- **One derived effective-YP authority:** 기본 YP, 세트 완성 여부, 효과 대상, 집계 방식, 고정 보너스, 합산 퍼센트를 하나의 순수 계산 서비스에서 평가한다. 랭킹을 포함한 모든 조회와 미리보기는 이 서비스를 사용하며 별도 YP 잔액을 저장하지 않는다.
+- **Permanent catalog state separate from inventory:** 도감 해금은 사용자·카드별 영구 기록으로 저장하고 인벤토리 수량과 독립적으로 관리한다. 카드를 새로 획득하면 해금되지만 수량이 0이 되어도 자동으로 잠기지 않는다.
+- **Normalized and validated set rules:** 세트 구성 카드, 효과 대상 카드, 성급 필터, 집계 방식, 보너스 유형, 적용 상한을 관계형 데이터로 저장한다. 임의 수식 입력은 허용하지 않고 관리자 API가 완전성과 범위를 검증한다.
+- **Targets determine application count, not a separate subtotal:** 효과 대상과 성급 필터는 고정값 또는 퍼센트포인트를 몇 번 적용할지 결정한다. 모든 고정 보너스를 기본 컬렉션 YP에 더한 뒤 모든 퍼센트포인트를 전체 결과에 한 번 적용하므로 카드별 반올림과 복리 차이가 생기지 않는다.
+- **Atomic draw batches:** 1회와 10회 뽑기는 같은 단일 결과 계산기를 사용하되 10회 요청은 별도 배치 idempotency 경계 안에서 열 장을 순서대로 처리하고 한 번만 커밋한다.
+- **Additive schema rollout with application rollback:** 새 테이블과 nullable 연결을 먼저 추가하고 idempotent backfill을 같은 migration에서 수행한다. 배포 실패 시 이전 애플리케이션이 추가 테이블을 무시하도록 유지하며, 운영 rollback은 데이터를 삭제하는 downgrade보다 이전 이미지 재배포를 우선한다.
 - **Locked and idempotent mutations:** 뽑기, 선물, 거래 완료, 카드 삭제는 관련 사용자 행을 Discord ID 순서로, 인벤토리 행을 카드 ID 순서로 잠근 뒤 하나의 트랜잭션에서 처리한다. 일일 뽑기 창과 완료 작업에는 고유 제약을 두고, 클라이언트 재시도에는 작업별 idempotency key를 적용한다.
 - **Deterministic pity precedence:** 90회째에는 5성을 강제하고, 그 전에는 현재 5성 확률을 먼저 평가한다. 5성이 아니면서 4성 보장 회차이면 4성을 강제하고, 나머지는 관리 확률로 추첨한다.
 - **Pity probability redistribution:** 소프트 천장으로 5성 확률이 올라가면 남은 확률 질량을 1~4성의 관리자 설정 비율대로 정규화한다. 4성 보장 회차에서는 5성 판정이 실패한 경우에만 4성을 강제한다.
@@ -117,7 +125,43 @@ erDiagram
 
 인벤토리는 사용자·카드 조합당 한 행을 유지하고 `quantity`와 `reserved_quantity`를 분리한다. YP 합계는 인벤토리와 현재 카드 값을 조인해 계산하며 별도 잔액 열을 두지 않는다.
 
-### Atomic daily draw
+### Collection and set-effect extension
+
+```mermaid
+erDiagram
+  USERS ||--o{ CATALOG_UNLOCKS : discovered
+  CARDS ||--o{ CATALOG_UNLOCKS : unlocks
+  USERS ||--o{ DISCARD_EVENTS : performs
+  CARDS ||--o{ DISCARD_EVENTS : removes
+  USERS ||--o{ DRAW_BATCHES : requests
+  DRAW_BATCHES ||--|{ DRAW_HISTORY : contains
+  CARD_SETS ||--|{ CARD_SET_MEMBERS : requires
+  CARDS ||--o{ CARD_SET_MEMBERS : belongs_to
+  CARD_SETS ||--|{ SET_EFFECTS : grants
+  SET_EFFECTS ||--o{ SET_EFFECT_TARGET_CARDS : targets
+  CARDS ||--o{ SET_EFFECT_TARGET_CARDS : selected_by
+```
+
+도감 해금은 획득 이력이고 인벤토리는 현재 자산이다. 세트 활성화와 YP는 인벤토리만 읽으며, 카드 삭제는 도감·세트 구성·대상 연결까지 같은 트랜잭션에서 정리한다.
+
+### Effective YP pipeline
+
+```mermaid
+flowchart TB
+  Inventory[Current inventory quantities] --> Base[Distinct owned-card base YP]
+  Inventory --> Activation[Complete-set activation]
+  Rules[Enabled validated rules] --> Activation
+  Activation --> Fixed[Sum applicable fixed bonuses]
+  Activation --> Percent[Sum linear percentage points]
+  Base --> Fixed
+  Fixed --> Final[Floor after one final percentage application]
+  Percent --> Final
+  Final --> Surfaces[Collection profile ranking gift trade discard previews]
+```
+
+같은 입력은 항상 같은 정수 YP를 반환한다. 카드 종류 수와 실제 수량 집계는 효과별로 선택하고 최대 적용 개수가 있으면 보너스를 계산하기 전에 집계값을 제한한다.
+
+### Atomic single or ten-draw
 
 ```mermaid
 sequenceDiagram
@@ -125,17 +169,19 @@ sequenceDiagram
   participant W as Web
   participant D as PostgreSQL
 
-  P->>W: Start draw
-  W->>D: Lock draw state and validate KST window
-  D-->>W: Eligibility and pity counters
-  W->>W: Resolve 5-star then 4-star guarantees
-  W->>D: Insert draw and update inventory and pity
-  W->>D: Insert 5-star event when applicable
-  D-->>W: Commit one result
-  W-->>P: Result and updated remaining counts
+  P->>W: Start one or ten-draw with idempotency key
+  W->>D: Lock user wallet and pity state
+  D-->>W: Available daily and bonus tickets
+  loop Requested draw count in order
+    W->>W: Resolve 5-star then 4-star guarantees
+    W->>D: Insert result update inventory unlock catalog and pity
+    W->>D: Insert 5-star event when applicable
+  end
+  D-->>W: Commit complete batch once
+  W-->>P: Ordered results and updated remaining counts
 ```
 
-동일 KST 창에 대한 중복 요청은 사용자별 잠금과 고유 제약에서 하나만 성공한다. 클라이언트 애니메이션은 커밋된 결과를 표현할 뿐 결과를 결정하지 않는다.
+같은 idempotency key의 재요청은 저장된 단일 결과 또는 열 장의 순서가 같은 배치를 반환한다. 열 장을 모두 지급할 수 없으면 티켓·인벤토리·천장·도감·피드가 전부 이전 상태를 유지한다.
 
 ### Live trade lifecycle
 
@@ -169,20 +215,25 @@ bandi_cards/
   app.py
   config.py
   db.py
-  models/
+  models.py
   routes/
+    admin_collections.py
+    admin_sets.py
+    collections.py
+    draws.py
   services/
+    draws.py
+    inventory.py
+    set_effects.py
   realtime/
-  static/
 web/
-  package.json
   src/
-    api/
     components/
-    pages/
-    styles/
-  e2e/
-alembic/
+    App.tsx
+    App.test.tsx
+    styles.css
+    types.ts
+alembic/versions/
 tests/
   bandi_cards/
 firefly/
@@ -191,11 +242,13 @@ Dockerfile.web
 railpack.json
 ```
 
-`bandi_cards/`는 웹 백엔드와 도메인 서비스, `web/`은 React 소스, `firefly/`는 기존 봇에 추가되는 아웃박스 소비자만 소유한다.
+현재 저장소의 통합 모델과 단일 React 앱 구조를 유지하면서 복잡한 새 도메인 계산만 서비스와 라우트로 분리한다. `firefly/`의 기존 봇 런타임은 이번 확장에서 변경하지 않는다.
 
 ---
 
 ## Implementation Units
+
+U1-U10은 현재 사이트의 기반 계획이며 구현 여부는 git 상태에서 판별한다. 이번 확장의 실행 대상은 기존 U-ID를 보존한 U11-U15이고, 실행 중 발견되는 기존 기능 결함은 이 단위들의 회귀 범위 안에서만 수정한다.
 
 ### U1. Web platform and deployment scaffold
 
@@ -389,6 +442,105 @@ railpack.json
   - WebSocket 재시작과 DM 실패가 구조화 로그에 남으며 건강 확인은 복구 후 정상으로 돌아온다.
 - **Verification:** CI와 staging Railway 환경에서 모든 핵심 흐름이 통과하고 운영 문서만으로 환경 변수·서비스·버킷·DB·장애 확인 절차를 재현할 수 있다.
 
+### U11. Collection, draw-batch, and set-rule persistence
+
+- **Goal:** 영구 도감, 버리기 재전송 방지, 원자적 뽑기 배치, 세트 구성과 효과 규칙을 위한 관계형 모델과 배포 마이그레이션을 추가한다.
+- **Requirements:** Origin R70-R91; origin F6-F9; Q1
+- **Dependencies:** U2, U4, U5, U8
+- **Files:** `bandi_cards/models.py`, `bandi_cards/db.py`, `alembic/versions/20260823_0003_collection_sets_and_draw_batches.py`, `tests/bandi_cards/test_database.py`, `tests/bandi_cards/test_collection_extensions.py`, `tests/bandi_cards/test_migrations.py`
+- **Approach:** 사용자·카드별 도감 해금, 사용자별 버리기 이벤트, 사용자별 뽑기 배치, 세트와 구성 카드, 효과 규칙과 선택 대상 카드를 정규화한다. 효과 규칙은 허용된 대상 범위·집계 방식·보너스 유형만 저장하고 고정 보너스는 정수, 퍼센트는 정밀 숫자로 제한한다. 기존 데이터의 도감은 현재 인벤토리, 뽑기 기록, 수신 선물, 완료 거래에서 확인 가능한 획득 이력을 합쳐 중복 없이 backfill한다.
+- **Technical design:** backfill은 획득 근거별 사용자·카드 쌍의 합집합을 만든 뒤 도감 고유 키 충돌을 무시하는 방향으로 설계한다. 완료 거래에서는 상대 제안 카드를 수신자의 해금으로 해석하고 취소·협상 중 거래는 제외한다.
+- **Execution note:** 마이그레이션 전후 데이터 보존과 제약 실패 테스트를 먼저 작성한다.
+- **Patterns to follow:** `alembic/versions/20260822_0002_draw_tickets.py`의 역호환 추가 마이그레이션과 `bandi_cards/models.py`의 DB 제약 방식을 따른다.
+- **Test scenarios:**
+  - 빈 데이터베이스와 기존 스키마 모두 새 head까지 업그레이드되고 현재 인벤토리 수량과 예약 수량은 변하지 않는다.
+  - 현재 보유, 과거 뽑기, 수신 선물, 완료 거래로 획득이 확인되는 카드만 사용자 도감에 한 번씩 backfill된다.
+  - 같은 사용자·카드 도감 해금, 같은 사용자·버리기 key, 같은 사용자·뽑기 배치 key는 중복 저장되지 않는다.
+  - 세트 구성 카드와 선택 대상 카드는 중복될 수 없고 세트 또는 카드 삭제 시 연결 행이 고아로 남지 않는다.
+  - 알 수 없는 대상 범위·집계 방식·보너스 유형, 음수 값, 0 이하 적용 상한은 DB 또는 도메인 검증에서 거절된다.
+  - 뽑기 배치에는 요청 수와 정확히 같은 순번의 결과만 연결될 수 있다.
+- **Verification:** 업그레이드와 downgrade 경로가 유효하고 새 불변식이 SQLite 단위 테스트와 PostgreSQL형 마이그레이션 검증에서 유지된다.
+
+### U12. Permanent catalog and safe inventory mutations
+
+- **Goal:** 모든 카드 유입에서 도감을 영구 해금하고 플레이어 버리기와 관리자 인벤토리·도감 보정을 거래 예약 안전성 안에서 제공한다.
+- **Requirements:** Origin R70-R77, R83-R84, R91; origin F6, F8; origin AE13-AE14, AE16
+- **Dependencies:** U11
+- **Files:** `bandi_cards/services/inventory.py`, `bandi_cards/services/draws.py`, `bandi_cards/services/gifts.py`, `bandi_cards/services/trades.py`, `bandi_cards/routes/collections.py`, `bandi_cards/routes/admin_collections.py`, `bandi_cards/routes/cards.py`, `bandi_cards/app.py`, `web/src/App.tsx`, `web/src/types.ts`, `web/src/styles.css`, `tests/bandi_cards/test_collection_extensions.py`, `tests/bandi_cards/test_gifts.py`, `tests/bandi_cards/test_trades.py`, `web/src/App.test.tsx`
+- **Approach:** 인벤토리 증가와 도감 해금을 공유 서비스 경계에 모아 뽑기·선물·거래·관리자 지급이 같은 잠금 순서와 동작을 사용하게 한다. 버리기는 사용자와 인벤토리를 잠그고 미예약 수량을 다시 확인한 뒤 idempotency key로 한 번만 적용한다. 관리자는 등록 사용자를 검색해 카드별 수량과 도감 해금 여부를 독립적으로 수정하며 모든 변경을 감사 기록에 남긴다.
+- **Execution note:** 마지막 장, 예약 카드, 재전송, 관리자와 거래의 경쟁 조건을 테스트 우선으로 고정한다.
+- **Patterns to follow:** `bandi_cards/services/gifts.py`의 사용자·인벤토리 고정 잠금 순서와 `bandi_cards/routes/admin_draws.py`의 사용자 검색·감사 패턴을 재사용한다.
+- **Test scenarios:**
+  - **Covers origin AE13.** 마지막 미예약 카드를 버리면 수량과 YP는 0 기준으로 바뀌지만 도감 해금은 유지된다.
+  - 같은 버리기 요청을 재전송하면 최초 결과를 반환하고 수량을 두 번 줄이지 않는다.
+  - **Covers origin AE14.** 다섯 장 중 세 장이 예약된 상태에서 세 장 이상을 버리거나 관리자가 총수량을 2로 설정하면 아무 변경 없이 실패한다.
+  - 관리자가 수량을 늘리면 해당 카드가 해금되고, 이후 도감만 잠그거나 다시 해금해도 인벤토리 수량은 변하지 않는다.
+  - 선물 수신과 거래 완료는 수신자의 도감을 해금하며 발신자의 마지막 장 이전은 기존 도감 기록을 지우지 않는다.
+  - 카드 영구 삭제는 관련 도감 해금과 세트 연결을 제거하고 미리보기의 영향 수에 도감 사용자도 포함한다.
+  - 비관리자는 다른 사용자의 수량이나 도감 상태를 변경할 수 없고 플레이어는 다른 사용자의 카드를 버릴 수 없다.
+  - 컬렉션의 버리기 확인은 삭제 수량, 남은 수량, 변경 전후 YP를 보여주고 성공 뒤 카드 목록과 도감 진행도를 새로 읽는다.
+- **Verification:** 획득·이전·버리기·관리자 보정의 모든 경로에서 현재 수량, 예약 수량, 영구 도감, 감사 기록이 일관된다.
+
+### U13. Configurable set effects and shared effective YP
+
+- **Goal:** 관리자가 세트와 범용 효과 규칙을 운영하고 모든 YP 조회·미리보기가 같은 최종 계산을 사용하게 한다.
+- **Requirements:** Origin R82-R91; origin F9; origin AE16-AE18
+- **Dependencies:** U11, U12
+- **Files:** `bandi_cards/services/set_effects.py`, `bandi_cards/services/draws.py`, `bandi_cards/services/gifts.py`, `bandi_cards/services/trades.py`, `bandi_cards/routes/admin_sets.py`, `bandi_cards/routes/draws.py`, `bandi_cards/routes/gifts.py`, `bandi_cards/routes/trades.py`, `bandi_cards/app.py`, `web/src/App.tsx`, `web/src/types.ts`, `web/src/styles.css`, `tests/bandi_cards/test_set_effects.py`, `tests/bandi_cards/test_draws.py`, `tests/bandi_cards/test_gifts.py`, `tests/bandi_cards/test_trades.py`, `web/src/App.test.tsx`
+- **Approach:** 계산기는 사용자 인벤토리와 활성 규칙을 한 번에 읽어 기본 YP, 완성된 세트, 효과별 적용 개수, 고정 합계, 퍼센트포인트 합계, 최종 정수 YP를 반환한다. 랭킹은 모든 대상 사용자의 입력을 bulk 조회해 같은 순수 평가기를 적용하고 사용자별 반복 쿼리를 피한다. 관리자 편집기는 구성 카드와 여러 효과 행을 저장 전에 미리 검증하고 예상 규칙 요약을 보여준다.
+- **Execution note:** 계산 순서와 중첩 규칙을 순수 함수 테스트로 먼저 고정한 뒤 API와 UI에 연결한다.
+- **Patterns to follow:** `bandi_cards/services/probabilities.py`의 검증 후 활성화 방식과 `bandi_cards/routes/cards.py`의 관리자 감사 방식을 따른다.
+- **Test scenarios:**
+  - 세트 구성 카드 종류를 모두 한 장 이상 보유하면 활성화되고 한 종류의 마지막 장을 잃으면 도감 상태와 무관하게 비활성화된다.
+  - 효과 대상은 세트 구성 카드, 선택 카드, 선택 성급, 전체 현재 컬렉션을 각각 정확히 필터링한다.
+  - 한 번, 고유 카드 종류당, 실제 보유 수량당 집계가 중복 카드에서 서로 다른 적용 개수를 반환한다.
+  - 최대 적용 개수가 있으면 고유 종류 또는 실제 수량을 보너스 계산 전에 제한하고, 없으면 전체 개수를 사용한다.
+  - **Covers origin AE17.** 1성 실제 수량당 5%, 최대 20장인 효과는 30장 보유 시 100%만 더한다.
+  - **Covers origin AE18.** 기본 1,000, 고정 100, 퍼센트포인트 15이면 모든 화면에서 소수점 버림 후 1,265를 반환한다.
+  - 여러 세트의 고정값은 먼저 합산되고 모든 퍼센트포인트는 복리 없이 한 번만 적용된다.
+  - 비활성·불완전·구성 카드가 없는 세트는 보너스를 만들지 않고, 유효한 마지막 구성 카드 삭제는 해당 세트를 자동 비활성화한다.
+  - 카드 YP·성급·세트 규칙 수정 직후 컬렉션, 프로필, 랭킹, 선물·거래·버리기 미리보기가 새 값을 사용한다.
+  - 랭킹 bulk 계산은 동점 보조 정렬과 페이지 순서를 유지하며 사용자 수에 비례하는 추가 쿼리를 발생시키지 않는다.
+  - 비관리자는 세트 API를 조회하거나 변경할 수 없고 잘못된 조합은 기존 활성 규칙을 보존한 채 거절된다.
+- **Verification:** 동일 인벤토리와 규칙 입력에 대한 YP 및 계산 내역이 모든 API에서 같고 관리자 UI만으로 세트 생명주기를 운영할 수 있다.
+
+### U14. Atomic ten-draw and combined reveal
+
+- **Goal:** 뽑기권 열 장을 한 트랜잭션에서 순차 천장 계산으로 소비하고 최고 등급 연출 뒤 열 장 결과를 보여준다.
+- **Requirements:** Origin R78-R81; origin F7; origin AE15; Q1, Q3
+- **Dependencies:** U11, U12
+- **Files:** `bandi_cards/services/draws.py`, `bandi_cards/routes/draws.py`, `web/src/App.tsx`, `web/src/types.ts`, `web/src/styles.css`, `tests/bandi_cards/test_draws.py`, `tests/bandi_cards/test_multi_draw.py`, `web/src/App.test.tsx`
+- **Approach:** 기존 확률·천장 계산을 커밋 없는 단일 결과 함수로 분리하고 1회와 10회가 공유하게 한다. 10회 요청은 사용자·지갑·천장 상태를 한 번 잠그고 일일분을 먼저, 추가권을 다음으로 소비하며 각 결과가 갱신한 천장을 다음 결과에 전달한다. 응답은 순서가 고정된 결과와 최고 등급, 최종 티켓·천장·YP 상태를 포함한다.
+- **Execution note:** 4·5성 경계가 배치 중간에 걸리는 결정론적 테스트와 전체 rollback 테스트를 먼저 작성한다.
+- **Patterns to follow:** `bandi_cards/services/draws.py`의 기존 확률 함수와 사용자별 idempotency 제약을 배치 경계로 확장한다.
+- **Test scenarios:**
+  - 티켓이 정확히 열 장이면 일일분 다음 추가권 순서로 모두 소비하고 열 장의 인벤토리·도감·기록을 한 번만 만든다.
+  - 티켓이 아홉 장이면 뽑기 결과, 천장, 인벤토리, 도감, 피드, 지갑이 전혀 바뀌지 않는다.
+  - **Covers origin AE15.** 4성 보장까지 한 번 남은 배치는 첫 결과를 4성 이상으로 만들고 나머지 아홉 장은 초기화된 카운터에서 이어진다.
+  - 배치 중 90번째 결과가 발생하면 그 결과는 5성이고 뒤 결과는 초기화된 5성 카운터를 사용한다.
+  - 결과 저장 또는 5성 이벤트 생성 중 하나가 실패하면 열 장 전체와 티켓 소비가 rollback된다.
+  - 같은 idempotency key 재전송은 카드 순서와 상태를 그대로 반환하고 새 난수나 티켓 소비를 만들지 않는다.
+  - 같은 사용자의 1회와 10회 요청이 동시에 도착해도 사용 가능한 티켓을 초과 지급하지 않는다.
+  - 최고 등급이 1~3성, 4성, 5성인 각 배치는 대응 연출 한 번만 재생하고 건너뛰기 뒤 열 장 결과 격자를 보여준다.
+  - 모션 감소 환경은 최고 등급 구분을 유지하면서 움직임과 번쩍임을 줄인다.
+- **Verification:** 단일 뽑기의 기존 확률·천장 테스트가 유지되고 10회 요청은 성공과 실패 모두 원자적이며 UI가 커밋된 순서를 그대로 표시한다.
+
+### U15. Cross-feature regression and Railway rollout
+
+- **Goal:** 새 영구 도감·세트 YP·인벤토리 수정·10회 뽑기가 기존 선물·거래·랭킹·관리자 흐름과 함께 배포 가능한지 검증한다.
+- **Requirements:** Origin R70-R91; origin AE13-AE18; Q1-Q5
+- **Dependencies:** U11-U14
+- **Files:** `tests/bandi_cards/test_full_flow.py`, `tests/bandi_cards/test_migrations.py`, `web/src/App.test.tsx`, `README.md`, `docs/operations/bandi-card-site.md`
+- **Approach:** 기존 단일 인스턴스 Railway 구조와 현재 배포 명령은 유지한다. 배포 전에 기존 데이터 backfill 결과와 세트 계산 성능을 확인하고, 배포 후 관리자 설정 없이 기존 사용자의 기본 YP가 이전 값과 같은지 canary 점검한다.
+- **Test scenarios:**
+  - 기존 데이터 snapshot을 마이그레이션하면 기본 YP와 인벤토리가 보존되고 확인 가능한 과거 획득 카드가 도감에 남는다.
+  - 관리자가 세트를 활성화한 뒤 랭킹 순서가 바뀌고, 구성 카드의 마지막 장을 선물·거래·버리기로 잃으면 즉시 원래 계산으로 돌아간다.
+  - 두 브라우저의 거래 예약 중 관리자가 수량을 낮추려 하면 수정은 실패하고 양쪽 거래방은 그대로 유지된다.
+  - 10회 뽑기로 새 카드가 여러 장 들어오면 도감 진행도는 새 카드 종류만큼만 늘고 중복 수량은 세트 규칙이 선택한 경우에만 YP에 영향을 준다.
+  - 모바일과 데스크톱에서 카드 버리기 확인, 10장 결과 격자, 플레이어 관리, 세트 규칙 편집을 키보드로 완료할 수 있다.
+  - 마이그레이션 실패는 새 웹 프로세스 활성화를 막고 기존 데이터에 부분 스키마나 부분 backfill을 남기지 않는다.
+- **Verification:** Python·프런트엔드·마이그레이션·브라우저 회귀 검증과 Railway canary 확인이 통과하고 운영 문서가 복구·점검 절차를 설명한다.
+
 ---
 
 ## Phased Delivery
@@ -397,6 +549,7 @@ railpack.json
 2. **Core collection:** U3-U6로 로그인부터 관리자 카드 등록, 뽑기, 인벤토리, 랭킹까지 하나의 수직 흐름을 완성한다.
 3. **Social exchange:** U7-U9로 선물, 실시간 거래, 반디 DM을 원자적 전송 모델 위에 추가한다.
 4. **Release hardening:** U10에서 실제 브라우저·PostgreSQL·Railway 조건을 묶어 첫 버전 승인 기준을 검증한다.
+5. **Collection expansion:** U11-U15에서 영구 도감과 새 규칙 데이터를 먼저 배포하고, 안전한 인벤토리 변경, 공통 세트 YP, 10회 뽑기, 전체 회귀 검증 순으로 확장한다.
 
 첫 버전의 제품 범위는 모든 단계가 끝나야 충족된다. 단계 구분은 구현 의존성과 검증 실패 범위를 줄이기 위한 순서다.
 
@@ -407,6 +560,9 @@ railpack.json
 - **Authentication boundary:** Discord 사용자 ID가 웹 자산과 관리자 권한의 기준이 된다. 봇 메모리 사용자 레코드와 웹 계정은 ID만 공유하고 데이터를 합치지 않는다.
 - **Profile freshness:** OAuth 로그인은 즉시 프로필을 갱신하고 반디봇은 6시간 주기로 오래된 등록 계정을 동기화한다. 모든 화면은 이벤트에 복제한 이름이 아니라 사용자 테이블의 최신 username·global name·avatar를 사용한다.
 - **Data lifecycle:** 카드 삭제는 인벤토리, 거래 예약, 5성 피드에 파급되므로 단일 관리자 트랜잭션과 영향 미리보기가 필요하다.
+- **Catalog lifecycle:** 도감은 획득 이력으로 남고 인벤토리 감소로 지워지지 않는다. 관리자 잠금과 카드 영구 삭제만 도감 행을 제거한다.
+- **YP authority:** 카드·성급·세트·수량 변화는 캐시 보정 없이 공통 계산 결과에 즉시 반영되어야 한다. 랭킹은 같은 평가기를 bulk 입력으로 호출한다.
+- **Batch mutation:** 10회 뽑기는 티켓, 천장, 열 장의 기록, 인벤토리, 도감, 5성 피드를 하나의 트랜잭션으로 묶는다.
 - **Concurrency:** 뽑기·선물·거래는 동일 인벤토리를 변경할 수 있다. 모든 서비스가 사용자 ID, 카드 ID의 고정 잠금 순서와 같은 가용 수량 계산을 사용하며, HTTP 재전송과 WebSocket 중복 메시지도 같은 idempotency 규칙을 거친다.
 - **Process lifecycle:** 15초 유예는 살아 있는 프로세스 안의 일시적 WebSocket 단절만 복구한다. 배포·크래시 후 시작 작업은 미완료 거래를 취소하고 예약을 풀며, 클라이언트는 종료 상태를 DB에서 다시 읽는다.
 - **Cross-store lifecycle:** PostgreSQL과 Bucket은 하나의 트랜잭션을 공유하지 않는다. 새 이미지 객체를 먼저 만든 뒤 DB가 가리키게 하고, 교체·삭제된 객체는 커밋 후 정리 큐가 지우며 실패한 정리는 재시도·관측한다.
@@ -429,7 +585,11 @@ railpack.json
 | Database and bucket divergence | 고아 이미지 또는 깨진 카드 이미지 | 객체 선생성·DB 후참조, 커밋 후 정리 큐, 재시도 가능한 고아 객체 점검과 관리자 교체 경로 |
 | At-least-once DM delivery | 장애 경계에서 동일 DM 중복 | 아웃박스 작업 ID 기록, 제한된 재시도, 중복 가능성을 운영 문서에 명시하고 카드 도메인 처리는 절대 재실행하지 않음 |
 | Bot regression | 기존 대화·뉴스 기능 장애 | 웹 의존성 분리, 아웃박스 소비자 격리, 기존 전체 pytest 유지 |
-| Schema rollout failure | 웹 시작 실패 또는 부분 스키마 | 컨테이너 시작 전 Alembic 적용, 역호환 가능한 단계적 마이그레이션, staging 검증, DB 백업 절차 |
+| Schema rollout failure | 웹 시작 실패 또는 부분 스키마 | 추가형 migration, 트랜잭션 backfill, staging 복제본 검증, DB 백업, 이전 애플리케이션 이미지 재배포 |
+| Incomplete catalog backfill | 과거 획득 카드가 미해금으로 표시 | 현재 인벤토리·뽑기·선물·완료 거래를 합친 idempotent backfill, 배포 전 사용자별 표본 검증 |
+| Set-rule misconfiguration | 전체 랭킹 급변 또는 과도한 YP | 제한된 규칙 DSL, 서버 검증, 적용 상한, 관리자 미리보기, 변경 감사 |
+| Effective-YP ranking cost | 사용자·카드·세트 증가 시 랭킹 지연 | bulk 조회와 순수 배치 평가, 쿼리 수 회귀 테스트, 관측 후에만 materialized cache 고려 |
+| Partial ten-draw | 티켓 소모와 지급 수량 불일치 | 단일 사용자 잠금, 배치 idempotency, 한 번의 commit, 중간 실패 rollback 테스트 |
 
 ---
 
@@ -476,6 +636,9 @@ railpack.json
 - 운영 로그는 사용자 콘텐츠나 OAuth 토큰을 남기지 않고 요청 상관 ID, 거래방 ID, 아웃박스 ID, 실패 분류만 기록한다.
 - 배포 전 DB 백업과 마이그레이션 상태를 확인하고, 배포 후 OAuth 콜백·건강 확인·샘플 이미지·WebSocket·봇 아웃박스를 순서대로 점검한다.
 - 운영 점검에는 미완료 거래·고아 예약·재시도 누적 아웃박스·정리 대기 이미지 수를 포함하고, 임계치를 넘으면 신규 거래를 열기 전에 원인을 확인한다.
+- 확장 배포 전 도감 backfill 예상 행 수와 기존 기본 YP 표본을 기록하고, 배포 후 같은 표본과 1회·10회 뽑기 canary를 비교한다.
+- 세트 효과 감사에는 변경 전후 규칙, 영향받는 카드와 예상 대상 사용자 수를 남기되 사용자별 전체 인벤토리는 로그에 기록하지 않는다.
+- 새 스키마가 적용된 뒤 애플리케이션 rollback은 이전 웹 이미지를 재배포하는 방식으로 수행한다. 도감·세트·배치 데이터를 제거하는 Alembic downgrade는 별도 백업과 명시적 운영 판단 없이는 실행하지 않는다.
 
 ---
 
@@ -488,6 +651,11 @@ railpack.json
 - `firefly/storage.py`는 JSON 원자 교체와 프로세스 내 잠금을 사용하므로 새 카드 도메인의 다중 프로세스 트랜잭션에는 재사용하지 않는다.
 - `firefly/news.py`는 사용자 조회, DM 실패 격리, 단일 asyncio 작업 시작 패턴을 제공한다.
 - `tests/conftest.py`와 `tests/test_storage.py`는 외부 자격증명 없이 격리된 저장소를 시험하는 기존 테스트 관례를 보여준다.
+- `bandi_cards/models.py`는 현재 카드 도메인 모델과 수량·예약 수량 DB 제약의 실제 단일 위치다.
+- `bandi_cards/services/draws.py`는 1회 뽑기, 티켓 우선순위, 천장 순서, 현재 파생 YP 계산의 확장 지점이다.
+- `bandi_cards/services/gifts.py`와 `bandi_cards/services/trades.py`는 카드 유입·유출의 잠금 순서와 예약 수량 검증 패턴을 제공한다.
+- `bandi_cards/routes/cards.py`의 현재 도감은 인벤토리 수량에서 해금 여부를 파생하므로 영구 도감 기록으로 교체해야 한다.
+- `bandi_cards/routes/admin_draws.py`와 `web/src/App.tsx`의 사용자 검색·선택 UI는 플레이어별 인벤토리·도감 관리 흐름의 기존 패턴이다.
 
 **External guidance**
 

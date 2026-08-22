@@ -22,7 +22,15 @@ export type Card = {
   active?: boolean;
 };
 
-export type Collection = { user_id: number; total_yp: number; cards: Card[] };
+export type Collection = {
+  user_id: number;
+  total_yp: number;
+  base_yp?: number;
+  fixed_bonus?: number;
+  percent_bonus?: number;
+  active_sets?: string[];
+  cards: Card[];
+};
 
 export type Catalog = {
   owned_count: number;
@@ -46,6 +54,32 @@ export type TradeRoom = {
   invitee_id: number;
   offer_version: number;
   accepted: Record<string, boolean>;
+  yp_preview?: Record<string, { before: number; after: number; change: number }>;
   offers: Array<{ user_id: number; card_id: string; card_name: string; rarity: number; quantity: number }>;
   requests: Array<{ id: string; requester_id: number; kind: string; card_id?: string; quantity?: number; message?: string }>;
+};
+
+export type SetEffect = {
+  id?: string;
+  target_scope: "set_members" | "selected_cards" | "rarity" | "collection";
+  target_rarity: number | null;
+  target_card_ids: string[];
+  count_mode: "once" | "distinct" | "quantity";
+  bonus_type: "fixed" | "percent";
+  value: number;
+  max_count: number | null;
+};
+
+export type CardSet = {
+  id: string;
+  name: string;
+  active: boolean;
+  member_card_ids: string[];
+  effects: SetEffect[];
+};
+
+export type AdminCollectionState = {
+  user: User;
+  total_yp: number;
+  cards: Array<Card & { quantity: number; reserved_quantity: number; unlocked: boolean }>;
 };

@@ -1,4 +1,4 @@
-from bandi_cards.models import Card, DrawHistory, DrawSetting, DrawWallet, Inventory, User
+from bandi_cards.models import Card, CatalogUnlock, DrawHistory, DrawSetting, DrawWallet, Inventory, User
 from bandi_cards.services.draws import logical_draw_day
 
 
@@ -10,7 +10,7 @@ def test_catalog_lists_owned_and_unowned_cards_with_progress(signed_in):
         missing = Card(name="미보유 카드", rarity=4, yp=400, image_key="cards/missing.webp")
         db.add_all([owned, missing])
         db.flush()
-        db.add(Inventory(user_id=user_id, card_id=owned.id, quantity=2))
+        db.add_all([Inventory(user_id=user_id, card_id=owned.id, quantity=2), CatalogUnlock(user_id=user_id, card_id=owned.id)])
         db.commit()
 
     response = client.get("/api/catalog")

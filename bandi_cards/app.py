@@ -10,8 +10,11 @@ from .config import settings
 from .db import SessionLocal, init_database
 from .routes.accounts import router as accounts_router
 from .routes.admin_draws import router as admin_draws_router
+from .routes.admin_collections import router as admin_collections_router
+from .routes.admin_sets import router as admin_sets_router
 from .routes.auth import router as auth_router
 from .routes.cards import router as cards_router
+from .routes.collections import router as collections_router
 from .routes.draws import router as draws_router
 from .routes.gifts import router as gifts_router
 from .routes.trades import router as trades_router
@@ -34,7 +37,10 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(accounts_router)
     app.include_router(admin_draws_router)
+    app.include_router(admin_collections_router)
+    app.include_router(admin_sets_router)
     app.include_router(cards_router)
+    app.include_router(collections_router)
     app.include_router(draws_router)
     app.include_router(gifts_router)
     app.include_router(trades_router)

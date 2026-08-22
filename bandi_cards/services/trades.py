@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from ..models import Card, Inventory, TradeOffer, TradeRequest, TradeRoom, User, utcnow
 from .notifications import enqueue_notification
+from .inventory import unlock_card
+from .set_effects import effective_yp
 
 
 ACTIVE_STATUSES = {"invited", "negotiating", "reconnecting"}
@@ -198,6 +200,7 @@ def accept_offer(db: Session, room_id: str, user_id: int) -> tuple[TradeRoom, bo
             source.quantity -= offer.quantity
             source.reserved_quantity -= offer.quantity
             target.quantity += offer.quantity
+            unlock_card(db, target_id, offer.card_id)
         room.status = "completed"
         for recipient_id in participants(room):
             recipient = db.get(User, recipient_id)
@@ -221,6 +224,17 @@ def room_payload(db: Session, room: TradeRoom) -> dict:
     requests = db.scalars(
         select(TradeRequest).where(TradeRequest.room_id == room.id).order_by(TradeRequest.created_at.desc()).limit(20)
     ).all()
+    yp_preview = {}
+    offer_models = [offer for offer, _card in offers]
+    for participant_id in participants(room):
+        overrides: dict[str, int] = {}
+        for offer in offer_models:
+            inventory = db.get(Inventory, (participant_id, offer.card_id))
+            current = overrides.get(offer.card_id, inventory.quantity if inventory else 0)
+            overrides[offer.card_id] = current - offer.quantity if offer.user_id == participant_id else current + offer.quantity
+        before = effective_yp(db, participant_id).total_yp
+        after = effective_yp(db, participant_id, quantity_overrides=overrides).total_yp
+        yp_preview[str(participant_id)] = {"before": before, "after": after, "change": after - before}
     return {
         "id": room.id,
         "status": room.status,
@@ -231,6 +245,7 @@ def room_payload(db: Session, room: TradeRoom) -> dict:
             str(room.inviter_id): room.inviter_accepted_version == room.offer_version,
             str(room.invitee_id): room.invitee_accepted_version == room.offer_version,
         },
+        "yp_preview": yp_preview,
         "offers": [
             {"user_id": offer.user_id, "card_id": card.id, "card_name": card.name, "rarity": card.rarity, "quantity": offer.quantity}
             for offer, card in offers

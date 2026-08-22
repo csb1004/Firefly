@@ -11,7 +11,8 @@ from ..models import Card, DrawHistory, FiveStarEvent, Inventory, User
 from ..security import require_csrf_user, require_ready_user
 from ..services.card_assets import asset_store
 from ..services.discord_oauth import avatar_url
-from ..services.draws import collection_yp, draw_ticket_status, perform_draw, user_probability_view
+from ..services.draws import collection_yp, draw_ticket_status, perform_draw, perform_draw_batch, user_probability_view
+from ..services.set_effects import effective_yp, effective_yp_many
 
 
 router = APIRouter(prefix="/api", tags=["draws and collection"])
@@ -63,6 +64,28 @@ def draw(body: DrawBody, user: User = Depends(require_csrf_user), db: Session = 
     }
 
 
+@router.post("/draw/ten")
+def draw_ten(body: DrawBody, user: User = Depends(require_csrf_user), db: Session = Depends(get_db)) -> dict:
+    try:
+        batch = perform_draw_batch(db, user.id, body.idempotency_key, count=10)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "동시에 처리된 뽑기가 있습니다.") from exc
+    quantities = {item.card.id: db.get(Inventory, (user.id, item.card.id)).quantity for item in batch.results}
+    return {
+        "batch_id": batch.batch_id,
+        "cards": [card_result(item.card, quantities[item.card.id]) for item in batch.results],
+        "highest_rarity": max(item.card.rarity for item in batch.results),
+        "four_remaining": batch.four_remaining,
+        "five_remaining": batch.five_remaining,
+        "draws_remaining": batch.draws_remaining,
+        "daily_remaining": batch.daily_remaining,
+        "bonus_tickets": batch.bonus_tickets,
+        "total_yp": effective_yp(db, user.id).total_yp,
+        "repeated": batch.repeated,
+    }
+
+
 @router.get("/probabilities/current")
 def current_probabilities(user: User = Depends(require_ready_user), db: Session = Depends(get_db)) -> dict:
     return user_probability_view(db, user.id)
@@ -88,9 +111,14 @@ def collection(
         .where(Inventory.user_id == target_user_id, Inventory.quantity > 0)
         .order_by(Card.rarity.desc(), Card.name)
     ).all()
+    yp = effective_yp(db, target_user_id)
     return {
         "user_id": target_user_id,
-        "total_yp": collection_yp(db, target_user_id),
+        "total_yp": yp.total_yp,
+        "base_yp": yp.base_yp,
+        "fixed_bonus": int(yp.fixed_bonus),
+        "percent_bonus": float(yp.percent_bonus),
+        "active_sets": list(yp.active_sets),
         "cards": [card_result(card, inventory.quantity) | {"available_quantity": inventory.quantity - inventory.reserved_quantity} for inventory, card in rows],
     }
 
@@ -102,16 +130,10 @@ def rankings(
     _: User = Depends(require_ready_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    yp_sum = func.coalesce(func.sum(Card.yp), 0).label("total_yp")
-    rows = db.execute(
-        select(User, yp_sum)
-        .outerjoin(Inventory, (Inventory.user_id == User.id) & (Inventory.quantity > 0))
-        .outerjoin(Card, Card.id == Inventory.card_id)
-        .group_by(User.id)
-        .order_by(yp_sum.desc(), User.discord_id)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    ).all()
+    users = db.scalars(select(User).order_by(User.discord_id)).all()
+    totals = effective_yp_many(db, [user.id for user in users])
+    ranked = sorted(users, key=lambda item: (-totals[item.id].total_yp, item.discord_id))
+    visible = ranked[(page - 1) * page_size:page * page_size]
     return {
         "page": page,
         "items": [
@@ -124,7 +146,8 @@ def rankings(
                 "avatar_url": avatar_url(user.discord_id, user.avatar_hash),
                 "total_yp": int(total_yp),
             }
-            for index, (user, total_yp) in enumerate(rows)
+            for index, user in enumerate(visible)
+            for total_yp in [totals[user.id].total_yp]
         ],
     }
 

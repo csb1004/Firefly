@@ -21,7 +21,9 @@ The Bandi community needs a collectible-card experience that remains usable acro
 
 - **Global Discord identity.** A Discord user has one account, inventory, pity state, and ranking position across the service; Discord servers are not a product boundary.
 - **Web-first experience.** Drawing, collection management, rankings, gifts, live trades, and administration happen on the website so visual reveals and transactional state have one authoritative surface.
-- **Collection YP.** A card type contributes its YP once while the user owns at least one copy; duplicate quantity does not multiply YP.
+- **Collection YP.** A card type contributes its base YP once while the user owns at least one copy; set effects may additionally count distinct card types or actual copies according to their configured rule.
+- **Permanent catalog discovery.** Acquiring a card unlocks its catalog entry permanently even after the player's inventory reaches zero; inventory, catalog progress, and effective YP remain separate concepts.
+- **Controlled set rules.** Administrators compose set effects from validated conditions, targets, counting modes, fixed or percentage bonuses, and optional caps instead of entering arbitrary formulas.
 - **Full first release.** The initial release is not reduced to drawing and collection; every capability in this document is required before it is considered complete.
 - **Live negotiation.** Trades require both users to be online in the same live room, while gifts transfer immediately without recipient approval.
 - **Current-probability transparency.** Users see their current per-card probabilities and pity progress, but not a public history of probability changes.
@@ -76,13 +78,18 @@ The Bandi community needs a collectible-card experience that remains usable acro
 - R25. Card borders and visual accents must use the card's rarity color.
 - R26. The bottom of each card must show its rarity using one to five luminous star-shaped vector icons.
 - R27. The inventory must stack duplicate cards and show the owned quantity.
-- R28. A card type must contribute its YP exactly once while its owned quantity is at least one.
+- R28. A card type must contribute its base YP exactly once while its owned quantity is at least one.
 - R29. A player's total YP must decrease when they transfer their last copy of a card type.
 - R30. A player's total YP must increase when they receive their first copy of a card type.
 - R31. Draws of 1 through 3 stars must use a short rarity-colored card reveal.
 - R32. A 4-star draw must use a short purple burst reveal distinct from lower rarities.
 - R33. A 5-star draw must use a longer warp-style reveal that transitions to gold before revealing the card.
 - R34. Every reveal must be skippable and must have a reduced-motion alternative with less flashing and movement.
+- R70. Acquiring a card through a draw, gift, trade, or administrator grant must permanently unlock that card in the player's catalog.
+- R71. Reducing a card's inventory quantity to zero must not remove its catalog unlock.
+- R72. A player must be able to discard any available quantity of their own card, including the last copy.
+- R73. A player must not be able to discard copies reserved by an active trade.
+- R74. Discarding cards must immediately recalculate collection YP and active set effects from the remaining inventory.
 
 **Global ranking and 5-star feed**
 
@@ -129,6 +136,29 @@ The Bandi community needs a collectible-card experience that remains usable acro
 - R66. The administrator must be able to configure rarity probabilities and card-specific weights through the administrative UI.
 - R67. Administrative configuration must prevent invalid probability totals and undrawable active pools.
 - R68. Probability changes must retain an internal audit record even though players only see current probabilities.
+- R75. The administrator must be able to search for a registered player and edit each card's current inventory quantity.
+- R76. The administrator must not reduce an inventory quantity below the amount reserved by active trades.
+- R77. The administrator must be able to unlock or lock each catalog entry independently of the player's inventory quantity.
+
+**Ten-draw**
+
+- R78. A player with at least ten available draw tickets must be able to perform a ten-draw that consumes exactly ten tickets atomically.
+- R79. A ten-draw must resolve ten draws in order so every result updates the following result's 4-star and 5-star pity state.
+- R80. A ten-draw must use one reveal based on the highest rarity obtained and then show all ten result cards together.
+- R81. Repeating a completed ten-draw request must return the original ten results without consuming more tickets or changing pity again.
+
+**Set effects**
+
+- R82. The administrator must be able to create, edit, enable, disable, and delete named card sets through a visual rule editor.
+- R83. A set effect must activate only while the player owns at least one current inventory copy of every member card in that set.
+- R84. Catalog unlocks and discarded or transferred copies must not satisfy a set's activation condition.
+- R85. Each set may contain multiple effect rules with a target of set-member cards, selected cards, selected rarities, or the player's whole current collection.
+- R86. Each effect rule must support one-time application, application per distinct qualifying card type, or application per qualifying owned copy.
+- R87. Each effect rule must support either a fixed YP amount or a percentage-point increase and may define a maximum applied count.
+- R88. A count-based percentage effect must add its percentage points linearly by applied count rather than compound them.
+- R89. Effective collection YP must add all applicable fixed bonuses first, sum all applicable percentage points, apply that percentage once to the resulting total, and discard any fractional YP.
+- R90. Duplicate copies must not multiply a card's base YP but may affect a set rule configured to count actual owned copies.
+- R91. Draw results, collection and profile views, gift and trade previews, discard previews, and rankings must use the same effective YP calculation.
 
 ---
 
@@ -169,6 +199,34 @@ The Bandi community needs a collectible-card experience that remains usable acro
   - **Outcome:** Draw pools, inventories, and rankings reflect the selected administrative action without partial updates.
   - **Covered by:** R60-R68
 
+- F6. Card discard
+  - **Trigger:** A player selects a quantity from an owned card and confirms the discard.
+  - **Actors:** A1
+  - **Steps:** The site excludes trade-reserved copies; removes the selected available copies; preserves catalog discovery; recalculates YP and set activation.
+  - **Outcome:** The cards are permanently removed and every derived view reflects the remaining inventory.
+  - **Covered by:** R70-R74, R83-R84, R91
+
+- F7. Ten-draw
+  - **Trigger:** A player with ten available tickets chooses ten-draw.
+  - **Actors:** A1
+  - **Steps:** The site resolves ten ordered pity-aware results in one transaction; consumes ten tickets; plays one highest-rarity reveal; displays all results.
+  - **Outcome:** The player receives ten cards without partial awards or duplicated consumption.
+  - **Covered by:** R78-R81
+
+- F8. Player collection administration
+  - **Trigger:** A3 searches for a registered player in the administrative UI.
+  - **Actors:** A3
+  - **Steps:** The administrator adjusts inventory quantities within reservation limits and independently changes catalog unlock states.
+  - **Outcome:** Inventory, catalog progress, YP, and set activation show the requested state without invalidating active trades.
+  - **Covered by:** R75-R77, R91
+
+- F9. Set-effect administration
+  - **Trigger:** A3 creates or changes a named set and its rules.
+  - **Actors:** A3
+  - **Steps:** The administrator selects member cards; composes targets, counting modes, bonus types, and optional caps; validates and enables the set.
+  - **Outcome:** Qualifying players' effective YP updates consistently on every affected surface.
+  - **Covered by:** R82-R91
+
 ---
 
 ## Acceptance Examples
@@ -185,6 +243,12 @@ The Bandi community needs a collectible-card experience that remains usable acro
 - AE10. **Covers R62, R63.** Given players own a card, when the administrator excludes it from draws, then ownership and YP remain; when the administrator permanently deletes it, then all copies and related YP and feed events disappear.
 - AE11. **Covers R19-R21, R66-R67.** Given an administrator assigns unequal weights within a rarity, when a player views probabilities, then each card shows its resulting current chance and the configuration cannot be activated if its pool is undrawable.
 - AE12. **Covers R31-R34.** Given reduced motion is enabled, when a player draws a 5-star card, then the card still receives a distinct gold reveal without the full warp movement or intense flashing.
+- AE13. **Covers R70-R74.** Given a player owns one unreserved copy of a cataloged card, when they discard it, then inventory becomes zero and YP is recalculated while the catalog entry remains unlocked.
+- AE14. **Covers R73, R76.** Given three of five copies are reserved in a live trade, when the player discards or an administrator attempts to leave fewer than three copies, then the operation is rejected without changing inventory or the trade.
+- AE15. **Covers R78-R81.** Given a player owns ten tickets and is nine draws from the 4-star guarantee, when they perform a ten-draw, then the first result is at least 4 stars, later results use the reset pity state, and retrying the request returns the same ten results.
+- AE16. **Covers R83-R84.** Given a three-card set is active, when the player discards their last copy of one member card, then the set deactivates even though all three catalog entries remain unlocked.
+- AE17. **Covers R86-R90.** Given an active effect grants 5 percentage points per owned 1-star copy with a maximum applied count of 20, when the player owns 30 qualifying copies, then the effective calculation adds 100 percentage points once after all fixed bonuses.
+- AE18. **Covers R85-R91.** Given base collection YP is 1,000, applicable fixed bonuses total 100, and applicable percentage effects total 15 points, then every YP surface displays 1,265.
 
 ---
 
@@ -193,9 +257,12 @@ The Bandi community needs a collectible-card experience that remains usable acro
 - A player can complete every player-facing flow on desktop and mobile without using a Discord command.
 - Concurrent draw attempts cannot grant more than one card within the same KST eligibility window.
 - A completed gift or trade never leaves card quantities, YP totals, or offers partially updated.
-- Current rankings always equal the sum of YP for distinct card types each player presently owns.
+- Current rankings always equal effective collection YP from distinct owned-card base values plus active set effects.
 - Players can distinguish all five rarities by borders and star count without relying on color alone.
 - The administrator can operate the card pool and probabilities without editing application files.
+- The administrator can correct player inventories and catalog unlocks without corrupting active trade reservations.
+- A ten-draw never partially consumes tickets, partially awards cards, or calculates pity out of order.
+- Every page that displays or previews YP uses the same set-aware result.
 - Discord DM failures remain visible to operations but do not break completed site actions.
 
 ---

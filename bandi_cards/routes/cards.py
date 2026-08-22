@@ -12,10 +12,15 @@ from ..db import get_db
 from ..models import (
     AdminAudit,
     Card,
+    CardSet,
+    CardSetMember,
+    CatalogUnlock,
     ImageCleanup,
     Inventory,
     ProbabilityAudit,
     RaritySetting,
+    SetEffect,
+    SetEffectTargetCard,
     TradeOffer,
     TradeRoom,
     User,
@@ -48,11 +53,12 @@ def list_cards(_: User = Depends(require_ready_user), db: Session = Depends(get_
 @router.get("/catalog")
 def card_catalog(user: User = Depends(require_ready_user), db: Session = Depends(get_db)) -> dict:
     rows = db.execute(
-        select(Card, func.coalesce(Inventory.quantity, 0))
+        select(Card, func.coalesce(Inventory.quantity, 0), CatalogUnlock.card_id.is_not(None))
         .outerjoin(Inventory, (Inventory.card_id == Card.id) & (Inventory.user_id == user.id))
+        .outerjoin(CatalogUnlock, (CatalogUnlock.card_id == Card.id) & (CatalogUnlock.user_id == user.id))
         .order_by(Card.rarity.desc(), Card.name)
     ).all()
-    cards = [serialize_card(card) | {"owned": quantity > 0, "quantity": int(quantity)} for card, quantity in rows]
+    cards = [serialize_card(card) | {"owned": bool(unlocked), "quantity": int(quantity)} for card, quantity, unlocked in rows]
     return {
         "owned_count": sum(1 for card in cards if card["owned"]),
         "total_count": len(cards),
@@ -216,6 +222,15 @@ def permanently_delete_card(
     if body.confirm_name != card.name:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "카드 이름이 일치하지 않습니다.")
     room_ids = db.scalars(select(TradeOffer.room_id).where(TradeOffer.card_id == card_id)).all()
+    member_set_ids = db.scalars(select(CardSetMember.set_id).where(CardSetMember.card_id == card_id)).all()
+    target_set_ids = db.scalars(
+        select(SetEffect.set_id)
+        .join(SetEffectTargetCard, SetEffectTargetCard.effect_id == SetEffect.id)
+        .where(SetEffectTargetCard.card_id == card_id)
+    ).all()
+    affected_set_ids = set(member_set_ids) | set(target_set_ids)
+    if affected_set_ids:
+        db.execute(update(CardSet).where(CardSet.id.in_(affected_set_ids)).values(active=False))
     if room_ids:
         offers = db.scalars(select(TradeOffer).where(TradeOffer.room_id.in_(room_ids))).all()
         for offer in offers:

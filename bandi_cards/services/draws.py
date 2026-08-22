@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..models import (
     Card,
     DailyDrawAllowance,
+    DrawBatch,
     DrawHistory,
     DrawSetting,
     DrawState,
@@ -22,6 +23,8 @@ from ..models import (
     utcnow,
 )
 from .probabilities import base_probabilities
+from .inventory import unlock_card
+from .set_effects import effective_yp
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -84,6 +87,18 @@ class DrawResult:
     repeated: bool = False
 
 
+@dataclass(frozen=True)
+class DrawBatchResult:
+    batch_id: str
+    results: tuple[DrawResult, ...]
+    four_remaining: int
+    five_remaining: int
+    draws_remaining: int
+    daily_remaining: int
+    bonus_tickets: int
+    repeated: bool = False
+
+
 def draw_counters(state: DrawState | None) -> tuple[int, int]:
     """Return usable counters even before a user's draw-state row exists."""
     if state is None:
@@ -122,6 +137,109 @@ def draw_ticket_status(db: Session, user_id: int, now: datetime | None = None) -
     }
 
 
+def perform_draw_batch(
+    db: Session,
+    user_id: int,
+    idempotency_key: str,
+    *,
+    count: int,
+    now: datetime | None = None,
+    rng: random.Random | None = None,
+) -> DrawBatchResult:
+    if count not in {1, 10}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "뽑기 수는 1회 또는 10회여야 합니다.")
+    now = now or utcnow()
+    rng = rng or random.SystemRandom()
+    db.scalar(select(User).where(User.id == user_id).with_for_update())
+    existing_batch = db.scalar(select(DrawBatch).where(DrawBatch.user_id == user_id, DrawBatch.idempotency_key == idempotency_key))
+    histories: list[DrawHistory] = []
+    batch_id = existing_batch.id if existing_batch else ""
+    if existing_batch:
+        if existing_batch.requested_count != count:
+            raise HTTPException(status.HTTP_409_CONFLICT, "같은 요청 키가 다른 뽑기 수에 사용되었습니다.")
+        histories = db.scalars(select(DrawHistory).where(DrawHistory.batch_id == existing_batch.id).order_by(DrawHistory.batch_position)).all()
+    elif count == 1:
+        legacy = db.scalar(select(DrawHistory).where(DrawHistory.user_id == user_id, DrawHistory.idempotency_key == idempotency_key))
+        if legacy:
+            histories = [legacy]
+            batch_id = legacy.id
+    if histories:
+        four_count, five_count = draw_counters(db.get(DrawState, user_id))
+        tickets = draw_ticket_status(db, user_id, now)
+        repeated_results = []
+        for history in histories:
+            card = db.get(Card, history.card_id) if history.card_id else None
+            if card is None:
+                raise HTTPException(status.HTTP_410_GONE, "이전에 뽑은 카드가 삭제되었습니다.")
+            repeated_results.append(DrawResult(history, card, 10 - four_count, 90 - five_count, int(tickets["draws_remaining"]), int(tickets["daily_remaining"]), int(tickets["bonus_tickets"]), True))
+        return DrawBatchResult(
+            batch_id, tuple(repeated_results), 10 - four_count, 90 - five_count,
+            int(tickets["draws_remaining"]), int(tickets["daily_remaining"]), int(tickets["bonus_tickets"]), True,
+        )
+
+    draw_day = logical_draw_day(now)
+    tickets = draw_ticket_status(db, user_id, now)
+    if int(tickets["draws_remaining"]) < count:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"{count}회 뽑기에 필요한 뽑기권이 부족합니다.")
+    daily_remaining = int(tickets["daily_remaining"])
+    bonus_needed = max(0, count - daily_remaining)
+    wallet = db.scalar(select(DrawWallet).where(DrawWallet.user_id == user_id).with_for_update())
+    if bonus_needed:
+        if wallet is None or wallet.bonus_tickets < bonus_needed:
+            raise HTTPException(status.HTTP_409_CONFLICT, "사용 가능한 추가 뽑기권이 부족합니다.")
+        wallet.bonus_tickets -= bonus_needed
+
+    state = db.scalar(select(DrawState).where(DrawState.user_id == user_id).with_for_update())
+    if state is None:
+        state = DrawState(user_id=user_id, pulls_since_four_plus=0, pulls_since_five=0)
+        db.add(state)
+        db.flush()
+    batch = DrawBatch(user_id=user_id, requested_count=count, idempotency_key=idempotency_key, created_at=now)
+    db.add(batch)
+    db.flush()
+    configured = base_probabilities(db)
+    results: list[tuple[DrawHistory, Card]] = []
+    for position in range(count):
+        rarity_chances = rarity_probabilities(state.pulls_since_four_plus, state.pulls_since_five, configured)
+        rarities = [1, 2, 3, 4, 5]
+        rarity = weighted_choice(rarities, [rarity_chances[item] for item in rarities], rng)
+        cards = db.scalars(select(Card).where(Card.active.is_(True), Card.rarity == rarity).order_by(Card.id)).all()
+        if not cards:
+            raise HTTPException(status.HTTP_409_CONFLICT, f"활성 {rarity}성 카드가 없습니다.")
+        card = weighted_choice(cards, [float(item.weight) if item.weight is not None else 1.0 for item in cards], rng)
+        inventory = db.scalar(select(Inventory).where(Inventory.user_id == user_id, Inventory.card_id == card.id).with_for_update())
+        if inventory is None:
+            inventory = Inventory(user_id=user_id, card_id=card.id, quantity=0)
+            db.add(inventory)
+        inventory.quantity += 1
+        unlock_card(db, user_id, card.id)
+        if rarity == 5:
+            state.pulls_since_four_plus = 0
+            state.pulls_since_five = 0
+        elif rarity == 4:
+            state.pulls_since_four_plus = 0
+            state.pulls_since_five += 1
+        else:
+            state.pulls_since_four_plus += 1
+            state.pulls_since_five += 1
+        ticket_source = "daily" if position < daily_remaining else "bonus"
+        history = DrawHistory(user_id=user_id, card_id=card.id, card_name=card.name, card_rarity=card.rarity, card_yp=card.yp, draw_day=draw_day, ticket_source=ticket_source, idempotency_key=idempotency_key if count == 1 else f"{batch.id}:{position}", batch_id=batch.id, batch_position=position, drawn_at=now)
+        db.add(history)
+        db.flush()
+        if rarity == 5:
+            db.add(FiveStarEvent(draw_id=history.id, user_id=user_id, card_id=card.id, created_at=now))
+        results.append((history, card))
+    db.commit()
+    tickets = draw_ticket_status(db, user_id, now)
+    four_remaining = 10 - state.pulls_since_four_plus
+    five_remaining = 90 - state.pulls_since_five
+    draw_results = tuple(DrawResult(history, card, four_remaining, five_remaining, int(tickets["draws_remaining"]), int(tickets["daily_remaining"]), int(tickets["bonus_tickets"])) for history, card in results)
+    return DrawBatchResult(
+        batch.id, draw_results, four_remaining, five_remaining,
+        int(tickets["draws_remaining"]), int(tickets["daily_remaining"]), int(tickets["bonus_tickets"]),
+    )
+
+
 def perform_draw(
     db: Session,
     user_id: int,
@@ -130,117 +248,11 @@ def perform_draw(
     now: datetime | None = None,
     rng: random.Random | None = None,
 ) -> DrawResult:
-    now = now or utcnow()
-    rng = rng or random.SystemRandom()
-    existing = db.scalar(
-        select(DrawHistory).where(
-            DrawHistory.user_id == user_id,
-            DrawHistory.idempotency_key == idempotency_key,
-        )
-    )
-    if existing:
-        card = db.get(Card, existing.card_id) if existing.card_id else None
-        if card is None:
-            raise HTTPException(status.HTTP_410_GONE, "이전에 뽑은 카드가 삭제되었습니다.")
-        four_count, five_count = draw_counters(db.get(DrawState, user_id))
-        tickets = draw_ticket_status(db, user_id, now)
-        return DrawResult(
-            existing,
-            card,
-            10 - four_count,
-            90 - five_count,
-            int(tickets["draws_remaining"]),
-            int(tickets["daily_remaining"]),
-            int(tickets["bonus_tickets"]),
-            True,
-        )
-
-    db.scalar(select(User).where(User.id == user_id).with_for_update())
-    draw_day = logical_draw_day(now)
-    tickets = draw_ticket_status(db, user_id, now)
-    if int(tickets["daily_remaining"]) > 0:
-        ticket_source = "daily"
-    elif int(tickets["bonus_tickets"]) > 0:
-        ticket_source = "bonus"
-        wallet = db.scalar(select(DrawWallet).where(DrawWallet.user_id == user_id).with_for_update())
-        if wallet is None or wallet.bonus_tickets <= 0:
-            raise HTTPException(status.HTTP_409_CONFLICT, "사용 가능한 뽑기권이 없습니다.")
-        wallet.bonus_tickets -= 1
-    else:
-        raise HTTPException(status.HTTP_409_CONFLICT, "사용 가능한 뽑기권이 없습니다.")
-
-    state = db.scalar(select(DrawState).where(DrawState.user_id == user_id).with_for_update())
-    if state is None:
-        state = DrawState(user_id=user_id, pulls_since_four_plus=0, pulls_since_five=0)
-        db.add(state)
-        db.flush()
-
-    rarity_chances = rarity_probabilities(
-        state.pulls_since_four_plus,
-        state.pulls_since_five,
-        base_probabilities(db),
-    )
-    rarities = [1, 2, 3, 4, 5]
-    rarity = weighted_choice(rarities, [rarity_chances[item] for item in rarities], rng)
-    cards = db.scalars(select(Card).where(Card.active.is_(True), Card.rarity == rarity).order_by(Card.id)).all()
-    if not cards:
-        raise HTTPException(status.HTTP_409_CONFLICT, f"활성 {rarity}성 카드가 없습니다.")
-    card = weighted_choice(cards, [float(item.weight) if item.weight is not None else 1.0 for item in cards], rng)
-
-    inventory = db.scalar(
-        select(Inventory).where(Inventory.user_id == user_id, Inventory.card_id == card.id).with_for_update()
-    )
-    if inventory is None:
-        inventory = Inventory(user_id=user_id, card_id=card.id, quantity=0)
-        db.add(inventory)
-    inventory.quantity += 1
-
-    if rarity == 5:
-        state.pulls_since_four_plus = 0
-        state.pulls_since_five = 0
-    elif rarity == 4:
-        state.pulls_since_four_plus = 0
-        state.pulls_since_five += 1
-    else:
-        state.pulls_since_four_plus += 1
-        state.pulls_since_five += 1
-
-    history = DrawHistory(
-        user_id=user_id,
-        card_id=card.id,
-        card_name=card.name,
-        card_rarity=card.rarity,
-        card_yp=card.yp,
-        draw_day=draw_day,
-        ticket_source=ticket_source,
-        idempotency_key=idempotency_key,
-        drawn_at=now,
-    )
-    db.add(history)
-    db.flush()
-    if rarity == 5:
-        db.add(FiveStarEvent(draw_id=history.id, user_id=user_id, card_id=card.id, created_at=now))
-    db.commit()
-    tickets = draw_ticket_status(db, user_id, now)
-    return DrawResult(
-        history,
-        card,
-        10 - state.pulls_since_four_plus,
-        90 - state.pulls_since_five,
-        int(tickets["draws_remaining"]),
-        int(tickets["daily_remaining"]),
-        int(tickets["bonus_tickets"]),
-    )
+    return perform_draw_batch(db, user_id, idempotency_key, count=1, now=now, rng=rng).results[0]
 
 
 def collection_yp(db: Session, user_id: int) -> int:
-    value = db.scalar(
-        select(func.coalesce(func.sum(Card.yp), 0))
-        .select_from(Inventory)
-        .join(Card, Card.id == Inventory.card_id)
-        .where(Inventory.user_id == user_id, Inventory.quantity > 0)
-    )
-    return int(value or 0)
+    return effective_yp(db, user_id).total_yp
 
 
 def user_probability_view(db: Session, user_id: int) -> dict:
