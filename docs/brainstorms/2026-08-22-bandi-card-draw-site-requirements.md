@@ -3,7 +3,7 @@ date: 2026-08-22
 topic: bandi-card-draw-site
 ---
 
-# Bandi Card Draw Site Requirements
+# Youngho Gacha Site Requirements
 
 ## Summary
 

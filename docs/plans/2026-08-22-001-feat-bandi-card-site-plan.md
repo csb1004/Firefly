@@ -1,12 +1,12 @@
 ---
-title: "feat: Build Bandi card draw site"
+title: "feat: Build Youngho Gacha site"
 type: feat
 date: 2026-08-22
 origin: docs/brainstorms/2026-08-22-bandi-card-draw-site-requirements.md
 deepened: 2026-08-22
 ---
 
-# feat: Build Bandi card draw site
+# feat: Build Youngho Gacha site
 
 ## Summary
 

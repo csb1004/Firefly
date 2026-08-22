@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Bandi Cards", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Youngho Gacha", version="0.1.0", lifespan=lifespan)
     app.state.session_factory = SessionLocal
     app.include_router(auth_router)
     app.include_router(accounts_router)

@@ -1,4 +1,4 @@
-# MyWife Firefly Bot + Bandi Cards
+# MyWife Firefly Bot + 영호 가챠
 
 Python Discord bot와 Discord 계정 기반 카드 뽑기 사이트가 한 저장소에 들어 있습니다. 사이트는 하루 1회(한국 시간 오전 5시 초기화) 뽑기, 천장, 컬렉션·YP 랭킹, 선물, 실시간 거래, 카드 관리 기능을 제공합니다.
 

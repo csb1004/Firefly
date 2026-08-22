@@ -12,7 +12,7 @@ function navigate(path: string) {
 }
 
 function Login() {
-  return <main className="boot-shell"><div className="brand-mark">✦</div><p className="eyebrow">BANDI COLLECTION</p><h1>반디 카드</h1><p>하루 한 장, Discord 계정에 이어지는 나만의 컬렉션</p><a className="primary-button" href="/api/auth/discord">Discord로 시작하기</a></main>;
+  return <main className="boot-shell"><div className="brand-mark">✦</div><p className="eyebrow">YOUNGHO GACHA</p><h1>영호 가챠</h1><p>하루 한 장, Discord 계정에 이어지는 나만의 컬렉션</p><a className="primary-button" href="/api/auth/discord">Discord로 시작하기</a></main>;
 }
 
 function Warning({ onDone }: { onDone: () => void }) {
@@ -26,7 +26,7 @@ function Warning({ onDone }: { onDone: () => void }) {
 
 function Shell({ me, children, feed, invite }: { me: User; children: React.ReactNode; feed: FeedItem[]; invite?: TradeRoom }) {
   return <div className="app-shell">
-    <header><button className="logo" onClick={() => navigate("/")}><span>✦</span> 반디 카드</button><nav>
+    <header><button className="logo" onClick={() => navigate("/")}><span>✦</span> 영호 가챠</button><nav>
       <button onClick={() => navigate("/")}>뽑기</button><button onClick={() => navigate("/collection")}>컬렉션</button><button onClick={() => navigate("/ranking")}>랭킹</button><button onClick={() => navigate("/search")}>검색</button><button onClick={() => navigate("/settings")}>설정</button>{me.is_admin && <button onClick={() => navigate("/admin")}>관리</button>}
     </nav><button className="avatar-button" onClick={() => navigate(`/profile/${me.id}`)}><img src={me.avatar_url} alt="" />{me.display_name}</button></header>
     {invite && invite.status === "invited" && invite.invitee_id === me.id && <div className="invite-banner"><span>새 거래 초대가 도착했습니다.</span><button onClick={() => navigate(`/trade/${invite.id}`)}>확인</button></div>}

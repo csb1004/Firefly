@@ -1,1 +1,1 @@
-"""Bandi card collection web service."""
+"""Youngho Gacha collection web service."""
