@@ -41,7 +41,7 @@ function Shell({ me, children, feed, invite }: { me: User; children: React.React
 function DrawPage() {
   const [status, setStatus] = useState<DrawStatus>();
   const [probability, setProbability] = useState<any>();
-  const [reveal, setReveal] = useState<Card>();
+  const [reveal, setReveal] = useState<Card[]>([]);
   const [results, setResults] = useState<Card[]>([]);
   const [error, setError] = useState("");
   const load = () => Promise.all([api<any>("/api/draw/status"), api<any>("/api/probabilities/current")]).then(([s, p]) => { setStatus(s); setProbability(p); });
@@ -52,7 +52,7 @@ function DrawPage() {
       const data = await api<any>(count === 10 ? "/api/draw/ten" : "/api/draw", { method: "POST", body: JSON.stringify({ idempotency_key: idempotencyKey(count === 10 ? "draw-ten" : "draw") }) }, true);
       const cards: Card[] = count === 10 ? data.cards : [data.card];
       setResults(cards);
-      setReveal(cards.reduce((highest, card) => card.rarity > highest.rarity ? card : highest));
+      setReveal(cards);
       await load();
     }
     catch (e) { setError((e as Error).message); }
@@ -60,7 +60,7 @@ function DrawPage() {
   return <><section className="hero-panel"><p className="eyebrow">DAILY SIGNAL</p><h1>오늘의 카드</h1><p>일일 뽑기는 오전 5시에 다시 채워집니다.</p><div className="ticket-balance"><span>오늘 남은 횟수 <b>{status?.daily_remaining ?? "–"}</b></span><span>추가 뽑기권 <b>{status?.bonus_tickets ?? "–"}</b></span></div><div className="pity-grid"><div><span>4성 이상 확정까지</span><b>{status?.four_remaining ?? "–"}회</b></div><div><span>5성 확정까지</span><b>{status?.five_remaining ?? "–"}회</b></div></div><div className="draw-actions"><button className="draw-button" disabled={!status?.eligible} onClick={() => draw(1)}>{status?.eligible ? `1회 뽑기 · ${status.draws_remaining}회 남음` : "사용 가능한 뽑기권 없음"}</button><button className="draw-button ten" disabled={(status?.draws_remaining ?? 0) < 10} onClick={() => draw(10)}>10회 뽑기</button></div>{error && <p className="error">{error}</p>}</section>
     <section className="panel"><div className="section-title"><div><p className="eyebrow">LIVE ODDS</p><h2>현재 확률</h2></div></div><div className="odds-row">{probability && Object.entries(probability.rarities).map(([rarity, chance]) => <div className={`odds rarity-${rarity}`} key={rarity}><Stars rarity={Number(rarity)} /><b>{Number(chance).toFixed(4)}%</b></div>)}</div><details><summary>카드별 상세 확률</summary><div className="probability-list">{probability?.cards.map((item: any) => <span key={item.card_id}>{item.name}<b>{item.probability.toFixed(6)}%</b></span>)}</div></details></section>
     {results.length > 0 && <section className="draw-results"><div className="section-title"><div><p className="eyebrow">RESULT</p><h2>{results.length}회 뽑기 결과</h2></div></div><div className="card-grid">{results.map((card, index) => <CardTile card={card} key={`${card.id}-${index}`} onClick={() => navigate(`/card/${card.id}`)}/>)}</div></section>}
-    {reveal && <Reveal card={reveal} onClose={() => setReveal(undefined)} />}</>;
+    {reveal.length > 0 && <Reveal cards={reveal} onClose={() => setReveal([])} />}</>;
 }
 
 function CollectionPage({ userId }: { userId?: number }) {

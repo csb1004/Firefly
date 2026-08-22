@@ -18,7 +18,7 @@ describe("card presentation", () => {
 
   it("lets the player skip a five-star reveal", () => {
     const close = vi.fn();
-    render(<Reveal card={card} onClose={close} />);
+    render(<Reveal cards={[card]} onClose={close} />);
     fireEvent.click(screen.getByRole("button", { name:"건너뛰기" }));
     expect(close).toHaveBeenCalledOnce();
   });
