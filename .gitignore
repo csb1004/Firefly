@@ -12,3 +12,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .gstack/
+.codex-remote-attachments/
+web/node_modules/
+web/dist/
+*.tsbuildinfo
+bandi_cards.db
+data/card-images/

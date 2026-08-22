@@ -1,6 +1,6 @@
-# MyWife Firefly Bot
+# MyWife Firefly Bot + Bandi Cards
 
-Python Discord bot for character chat, local memory, room context, polls, and daily news delivery.
+Python Discord bot와 Discord 계정 기반 카드 뽑기 사이트가 한 저장소에 들어 있습니다. 사이트는 하루 1회(한국 시간 오전 5시 초기화) 뽑기, 천장, 컬렉션·YP 랭킹, 선물, 실시간 거래, 카드 관리 기능을 제공합니다.
 
 The most important runtime assets are the prompt files and memory files. Treat them as behavior-defining data, not disposable cache.
 
@@ -19,6 +19,20 @@ python -m pip install -r requirements.txt
 ```powershell
 python Firefly.py
 ```
+
+카드 사이트를 로컬에서 실행하려면 Node.js 22+도 준비합니다.
+
+```powershell
+python -m pip install -r requirements-web.txt
+Push-Location web
+npm install
+npm run build
+Pop-Location
+python -m alembic upgrade head
+python -m uvicorn bandi_cards.app:app --reload --port 8000
+```
+
+Discord Developer Portal OAuth2 Redirects에는 `.env`의 `DISCORD_REDIRECT_URI`를 정확히 등록해야 합니다. 로그인한 Discord 프로필은 즉시 갱신되고, 반디봇이 이후 사용자명·표시 이름·아바타 변경을 6시간 이내 주기로 다시 동기화합니다.
 
 ## Environment Variables
 
@@ -76,6 +90,13 @@ Optional:
 ```powershell
 python Firefly.py
 ```
+
+카드 사이트도 별도 저장소에 올릴 필요가 없습니다. 기존 반디봇 서비스는 계속 이 저장소의 `master`를 자동 배포하고, 같은 Railway 프로젝트에 이 저장소를 소스로 쓰는 웹 서비스 하나와 PostgreSQL만 추가합니다.
+
+- 웹 서비스: `RAILWAY_DOCKERFILE_PATH=Dockerfile.web`, healthcheck `/api/health`, replica 1개
+- 반디봇 서비스: 기존 설정과 `railpack.json`의 `python Firefly.py` 시작 명령 유지
+
+웹 이미지는 시작할 때 Alembic 마이그레이션을 적용한 뒤 FastAPI를 실행합니다. 두 서비스에는 같은 PostgreSQL `DATABASE_URL`, `CARD_SITE_URL`, `SPECIAL_USER_ID`를 넣습니다. 웹에는 Discord OAuth와 S3 환경 변수도 넣고, 봇에는 기존 `DISCORD_BOT_TOKEN`을 유지합니다. 자세한 절차와 장애 대응은 [운영 가이드](docs/operations/bandi-card-site.md)를 참고하세요.
 
 ## Verification
 

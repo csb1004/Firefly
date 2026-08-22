@@ -98,6 +98,9 @@ SPECIAL_USER_ID = 393724092022390784
 SPECIAL_USER_NAME = "상범"
 SPECIAL_USER_NICKNAME = "상범"
 
+CARD_SITE_URL = os.getenv("CARD_SITE_URL", "").strip().rstrip("/")
+CARD_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./bandi_cards.db").strip()
+
 BOT_DISPLAY_NAME = "반디"
 COMMAND_PREFIX = "/"
 

@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bandi_cards
+      POSTGRES_USER: bandi
+      POSTGRES_PASSWORD: bandi-local-only
+    ports:
+      - "5432:5432"
+    volumes:
+      - bandi-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bandi -d bandi_cards"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  bandi-postgres:

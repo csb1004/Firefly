@@ -4,8 +4,12 @@ import discord
 from discord import app_commands
 
 from firefly.attachments import read_text_attachments
+from firefly.card_notifications import start_card_notification_task
+from firefly.card_housekeeping import start_card_housekeeping_task
 from firefly.commands import handle_mentioned_message, handle_silent_group_memory_update
 from firefly.config import DISCORD_BOT_TOKEN, SPECIAL_USER_ID
+from firefly.discord_profiles import start_profile_sync_task
+from firefly.image_cleanup import start_image_cleanup_task
 from firefly.news import handle_news_command, is_news_command_text, start_daily_news_task
 from firefly.polls import enforce_single_vote, refresh_poll_vote_count, restore_poll_tasks
 from firefly.storage import (
@@ -713,6 +717,10 @@ async def on_ready():
     print(f"로그인됨: {client.user}")
     await restore_poll_tasks(client)
     start_daily_news_task(client)
+    start_card_notification_task(client)
+    start_card_housekeeping_task(client)
+    start_profile_sync_task(client)
+    start_image_cleanup_task(client)
     if not _slash_commands_synced:
         try:
             await tree.sync()
