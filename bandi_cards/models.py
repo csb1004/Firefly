@@ -138,10 +138,41 @@ class DrawState(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class DrawSetting(Base):
+    __tablename__ = "draw_settings"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_draw_settings_singleton"),
+        CheckConstraint("daily_draws >= 0 AND daily_draws <= 100", name="ck_draw_settings_daily_range"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    daily_draws: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class DrawWallet(Base):
+    __tablename__ = "draw_wallets"
+    __table_args__ = (CheckConstraint("bonus_tickets >= 0", name="ck_draw_wallet_bonus_nonnegative"),)
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    bonus_tickets: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class DailyDrawAllowance(Base):
+    __tablename__ = "daily_draw_allowances"
+    __table_args__ = (CheckConstraint("extra_draws >= 0", name="ck_daily_draw_allowance_nonnegative"),)
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    draw_day: Mapped[date] = mapped_column(Date, primary_key=True)
+    extra_draws: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class DrawHistory(Base):
     __tablename__ = "draw_history"
     __table_args__ = (
-        UniqueConstraint("user_id", "draw_day", name="uq_draw_user_day"),
+        CheckConstraint("ticket_source IN ('daily', 'bonus')", name="ck_draw_history_ticket_source"),
         UniqueConstraint("user_id", "idempotency_key", name="uq_draw_user_idempotency"),
     )
 
@@ -152,6 +183,7 @@ class DrawHistory(Base):
     card_rarity: Mapped[int] = mapped_column(Integer)
     card_yp: Mapped[int] = mapped_column(Integer)
     draw_day: Mapped[date] = mapped_column(Date)
+    ticket_source: Mapped[str] = mapped_column(String(16), default="daily")
     idempotency_key: Mapped[str] = mapped_column(String(64))
     drawn_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 

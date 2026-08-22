@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .db import SessionLocal, init_database
 from .routes.accounts import router as accounts_router
+from .routes.admin_draws import router as admin_draws_router
 from .routes.auth import router as auth_router
 from .routes.cards import router as cards_router
 from .routes.draws import router as draws_router
@@ -32,6 +33,7 @@ def create_app() -> FastAPI:
     app.state.session_factory = SessionLocal
     app.include_router(auth_router)
     app.include_router(accounts_router)
+    app.include_router(admin_draws_router)
     app.include_router(cards_router)
     app.include_router(draws_router)
     app.include_router(gifts_router)

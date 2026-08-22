@@ -9,7 +9,18 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Card, DrawHistory, DrawState, FiveStarEvent, Inventory, User, utcnow
+from ..models import (
+    Card,
+    DailyDrawAllowance,
+    DrawHistory,
+    DrawSetting,
+    DrawState,
+    DrawWallet,
+    FiveStarEvent,
+    Inventory,
+    User,
+    utcnow,
+)
 from .probabilities import base_probabilities
 
 
@@ -67,6 +78,9 @@ class DrawResult:
     card: Card
     four_remaining: int
     five_remaining: int
+    draws_remaining: int
+    daily_remaining: int
+    bonus_tickets: int
     repeated: bool = False
 
 
@@ -75,6 +89,37 @@ def draw_counters(state: DrawState | None) -> tuple[int, int]:
     if state is None:
         return 0, 0
     return int(state.pulls_since_four_plus or 0), int(state.pulls_since_five or 0)
+
+
+def daily_draw_limit(db: Session) -> int:
+    setting = db.get(DrawSetting, 1)
+    return int(setting.daily_draws) if setting is not None else 1
+
+
+def draw_ticket_status(db: Session, user_id: int, now: datetime | None = None) -> dict[str, int | bool]:
+    draw_day = logical_draw_day(now)
+    daily_used = int(
+        db.scalar(
+            select(func.count(DrawHistory.id)).where(
+                DrawHistory.user_id == user_id,
+                DrawHistory.draw_day == draw_day,
+                DrawHistory.ticket_source == "daily",
+            )
+        )
+        or 0
+    )
+    allowance = db.get(DailyDrawAllowance, (user_id, draw_day))
+    daily_total = daily_draw_limit(db) + (int(allowance.extra_draws) if allowance else 0)
+    daily_remaining = max(0, daily_total - daily_used)
+    wallet = db.get(DrawWallet, user_id)
+    bonus_tickets = int(wallet.bonus_tickets) if wallet else 0
+    draws_remaining = daily_remaining + bonus_tickets
+    return {
+        "eligible": draws_remaining > 0,
+        "draws_remaining": draws_remaining,
+        "daily_remaining": daily_remaining,
+        "bonus_tickets": bonus_tickets,
+    }
 
 
 def perform_draw(
@@ -98,12 +143,31 @@ def perform_draw(
         if card is None:
             raise HTTPException(status.HTTP_410_GONE, "이전에 뽑은 카드가 삭제되었습니다.")
         four_count, five_count = draw_counters(db.get(DrawState, user_id))
-        return DrawResult(existing, card, 10 - four_count, 90 - five_count, True)
+        tickets = draw_ticket_status(db, user_id, now)
+        return DrawResult(
+            existing,
+            card,
+            10 - four_count,
+            90 - five_count,
+            int(tickets["draws_remaining"]),
+            int(tickets["daily_remaining"]),
+            int(tickets["bonus_tickets"]),
+            True,
+        )
 
     db.scalar(select(User).where(User.id == user_id).with_for_update())
     draw_day = logical_draw_day(now)
-    if db.scalar(select(DrawHistory.id).where(DrawHistory.user_id == user_id, DrawHistory.draw_day == draw_day)):
-        raise HTTPException(status.HTTP_409_CONFLICT, "오늘의 뽑기를 이미 사용했습니다.")
+    tickets = draw_ticket_status(db, user_id, now)
+    if int(tickets["daily_remaining"]) > 0:
+        ticket_source = "daily"
+    elif int(tickets["bonus_tickets"]) > 0:
+        ticket_source = "bonus"
+        wallet = db.scalar(select(DrawWallet).where(DrawWallet.user_id == user_id).with_for_update())
+        if wallet is None or wallet.bonus_tickets <= 0:
+            raise HTTPException(status.HTTP_409_CONFLICT, "사용 가능한 뽑기권이 없습니다.")
+        wallet.bonus_tickets -= 1
+    else:
+        raise HTTPException(status.HTTP_409_CONFLICT, "사용 가능한 뽑기권이 없습니다.")
 
     state = db.scalar(select(DrawState).where(DrawState.user_id == user_id).with_for_update())
     if state is None:
@@ -148,6 +212,7 @@ def perform_draw(
         card_rarity=card.rarity,
         card_yp=card.yp,
         draw_day=draw_day,
+        ticket_source=ticket_source,
         idempotency_key=idempotency_key,
         drawn_at=now,
     )
@@ -156,11 +221,15 @@ def perform_draw(
     if rarity == 5:
         db.add(FiveStarEvent(draw_id=history.id, user_id=user_id, card_id=card.id, created_at=now))
     db.commit()
+    tickets = draw_ticket_status(db, user_id, now)
     return DrawResult(
         history,
         card,
         10 - state.pulls_since_four_plus,
         90 - state.pulls_since_five,
+        int(tickets["draws_remaining"]),
+        int(tickets["daily_remaining"]),
+        int(tickets["bonus_tickets"]),
     )
 
 

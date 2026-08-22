@@ -11,7 +11,7 @@ from ..models import Card, DrawHistory, FiveStarEvent, Inventory, User
 from ..security import require_csrf_user, require_ready_user
 from ..services.card_assets import asset_store
 from ..services.discord_oauth import avatar_url
-from ..services.draws import collection_yp, logical_draw_day, perform_draw, user_probability_view
+from ..services.draws import collection_yp, draw_ticket_status, perform_draw, user_probability_view
 
 
 router = APIRouter(prefix="/api", tags=["draws and collection"])
@@ -36,14 +36,11 @@ class DrawBody(BaseModel):
 
 @router.get("/draw/status")
 def draw_status(user: User = Depends(require_ready_user), db: Session = Depends(get_db)) -> dict:
-    used = db.scalar(
-        select(DrawHistory.id).where(
-            DrawHistory.user_id == user.id,
-            DrawHistory.draw_day == logical_draw_day(),
-        )
-    ) is not None
     probability = user_probability_view(db, user.id)
-    return {"eligible": not used, **{key: probability[key] for key in ("four_remaining", "five_remaining")}}
+    return {
+        **draw_ticket_status(db, user.id),
+        **{key: probability[key] for key in ("four_remaining", "five_remaining")},
+    }
 
 
 @router.post("/draw")
@@ -59,6 +56,9 @@ def draw(body: DrawBody, user: User = Depends(require_csrf_user), db: Session = 
         "card": card_result(result.card, inventory.quantity),
         "four_remaining": result.four_remaining,
         "five_remaining": result.five_remaining,
+        "draws_remaining": result.draws_remaining,
+        "daily_remaining": result.daily_remaining,
+        "bonus_tickets": result.bonus_tickets,
         "repeated": result.repeated,
     }
 

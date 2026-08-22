@@ -22,4 +22,14 @@ describe("card presentation", () => {
     fireEvent.click(screen.getByRole("button", { name:"건너뛰기" }));
     expect(close).toHaveBeenCalledOnce();
   });
+
+  it("opens card details with pointer or keyboard activation", () => {
+    const open = vi.fn();
+    render(<CardTile card={card} onClick={open} />);
+    const tile = screen.getByRole("button", { name:"히메코 카드 상세 보기" });
+    fireEvent.click(tile);
+    fireEvent.keyDown(tile, { key:"Enter" });
+    fireEvent.keyDown(tile, { key:" " });
+    expect(open).toHaveBeenCalledTimes(3);
+  });
 });

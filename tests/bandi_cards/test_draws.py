@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import HTTPException
 
-from bandi_cards.models import Card, DrawState, Inventory, User
+from bandi_cards.models import Card, DailyDrawAllowance, DrawSetting, DrawState, DrawWallet, Inventory, User
 from bandi_cards.services.draws import (
     collection_yp,
     five_star_probability,
@@ -61,7 +61,14 @@ def test_fresh_user_can_load_draw_status_and_card_probabilities(signed_in):
     probabilities = client.get("/api/probabilities/current")
 
     assert status.status_code == 200
-    assert status.json() == {"eligible": True, "four_remaining": 10, "five_remaining": 90}
+    assert status.json() == {
+        "eligible": True,
+        "draws_remaining": 1,
+        "daily_remaining": 1,
+        "bonus_tickets": 0,
+        "four_remaining": 10,
+        "five_remaining": 90,
+    }
     assert probabilities.status_code == 200
     assert {item["card_id"] for item in probabilities.json()["cards"]} == {card.id for card in cards}
 
@@ -72,6 +79,50 @@ def test_fresh_user_can_load_draw_status_and_card_probabilities(signed_in):
     )
     assert drawn.status_code == 200
     assert client.get("/api/draw/status").json()["eligible"] is False
+
+
+def test_daily_limit_allows_multiple_draws_and_bonus_tickets_are_consumed_once(web_db):
+    with web_db() as db:
+        user = User(discord_id="multi-draw-user", username="multi", warning_acknowledged=True)
+        db.add(user)
+        seed_cards(db)
+        db.get(DrawSetting, 1).daily_draws = 2
+        db.add(DrawWallet(user_id=user.id, bonus_tickets=1))
+        db.commit()
+
+        first_day = datetime(2026, 8, 23, 3, tzinfo=timezone.utc)
+        results = [
+            perform_draw(db, user.id, f"multi-draw-{index}", now=first_day, rng=random.Random(index))
+            for index in range(3)
+        ]
+        assert [result.history.ticket_source for result in results] == ["daily", "daily", "bonus"]
+        assert db.get(DrawWallet, user.id).bonus_tickets == 0
+
+        with pytest.raises(HTTPException) as error:
+            perform_draw(db, user.id, "multi-draw-fourth", now=first_day)
+        assert error.value.status_code == 409
+
+        next_day = datetime(2026, 8, 24, 3, tzinfo=timezone.utc)
+        perform_draw(db, user.id, "next-day-one", now=next_day, rng=random.Random(4))
+        perform_draw(db, user.id, "next-day-two", now=next_day, rng=random.Random(5))
+        with pytest.raises(HTTPException):
+            perform_draw(db, user.id, "next-day-no-bonus", now=next_day)
+
+
+def test_daily_allowance_can_restore_draws_without_resetting_pity(web_db):
+    with web_db() as db:
+        user = User(discord_id="reset-user", username="reset", warning_acknowledged=True)
+        db.add(user)
+        seed_cards(db)
+        db.commit()
+        now = datetime(2026, 8, 23, 3, tzinfo=timezone.utc)
+        perform_draw(db, user.id, "before-reset", now=now, rng=random.Random(1))
+        pity_before = db.get(DrawState, user.id).pulls_since_five
+        db.add(DailyDrawAllowance(user_id=user.id, draw_day=logical_draw_day(now), extra_draws=1))
+        db.commit()
+
+        perform_draw(db, user.id, "after-reset", now=now, rng=random.Random(2))
+        assert db.get(DrawState, user.id).pulls_since_five >= pity_before
 
 
 def test_daily_draw_is_idempotent_and_collection_yp_counts_card_once(web_db):

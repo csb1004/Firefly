@@ -24,6 +24,21 @@ export type Card = {
 
 export type Collection = { user_id: number; total_yp: number; cards: Card[] };
 
+export type Catalog = {
+  owned_count: number;
+  total_count: number;
+  cards: Array<Card & { owned: boolean; quantity: number }>;
+};
+
+export type DrawStatus = {
+  eligible: boolean;
+  draws_remaining: number;
+  daily_remaining: number;
+  bonus_tickets: number;
+  four_remaining: number;
+  five_remaining: number;
+};
+
 export type TradeRoom = {
   id: string;
   status: string;

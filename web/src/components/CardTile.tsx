@@ -14,7 +14,14 @@ export function Stars({ rarity }: { rarity: number }) {
 
 export function CardTile({ card, compact = false, onClick }: { card: Card; compact?: boolean; onClick?: () => void }) {
   return (
-    <article className={`card-tile rarity-${card.rarity} ${compact ? "compact" : ""}`} onClick={onClick}>
+    <article
+      className={`card-tile rarity-${card.rarity} ${compact ? "compact" : ""} ${onClick ? "clickable" : ""}`}
+      onClick={onClick}
+      onKeyDown={event => { if (onClick && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onClick(); } }}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={onClick ? `${card.name} 카드 상세 보기` : undefined}
+    >
       <div className="card-art-wrap">
         <img src={card.image_url} alt={`${card.name} 카드`} className="card-art" />
         {card.quantity !== undefined && <span className="quantity">×{card.quantity}</span>}

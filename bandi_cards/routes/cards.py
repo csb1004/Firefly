@@ -45,6 +45,21 @@ def list_cards(_: User = Depends(require_ready_user), db: Session = Depends(get_
     return [serialize_card(card) for card in db.scalars(select(Card).order_by(Card.rarity.desc(), Card.name)).all()]
 
 
+@router.get("/catalog")
+def card_catalog(user: User = Depends(require_ready_user), db: Session = Depends(get_db)) -> dict:
+    rows = db.execute(
+        select(Card, func.coalesce(Inventory.quantity, 0))
+        .outerjoin(Inventory, (Inventory.card_id == Card.id) & (Inventory.user_id == user.id))
+        .order_by(Card.rarity.desc(), Card.name)
+    ).all()
+    cards = [serialize_card(card) | {"owned": quantity > 0, "quantity": int(quantity)} for card, quantity in rows]
+    return {
+        "owned_count": sum(1 for card in cards if card["owned"]),
+        "total_count": len(cards),
+        "cards": cards,
+    }
+
+
 @router.get("/cards/{card_id}")
 def card_detail(card_id: str, _: User = Depends(require_ready_user), db: Session = Depends(get_db)) -> dict:
     card = db.get(Card, card_id)

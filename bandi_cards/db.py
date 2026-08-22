@@ -68,7 +68,7 @@ DEFAULT_RARITY_PROBABILITIES = {
 
 
 def init_database(target_engine: Engine | None = None) -> None:
-    from .models import Base, RaritySetting
+    from .models import Base, DrawSetting, RaritySetting
 
     active_engine = target_engine or engine
     Base.metadata.create_all(active_engine)
@@ -77,4 +77,6 @@ def init_database(target_engine: Engine | None = None) -> None:
         for rarity, probability in DEFAULT_RARITY_PROBABILITIES.items():
             if rarity not in existing:
                 db.add(RaritySetting(rarity=rarity, probability=probability))
+        if db.get(DrawSetting, 1) is None:
+            db.add(DrawSetting(id=1, daily_draws=1))
         db.commit()
