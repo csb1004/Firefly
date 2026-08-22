@@ -70,6 +70,13 @@ class DrawResult:
     repeated: bool = False
 
 
+def draw_counters(state: DrawState | None) -> tuple[int, int]:
+    """Return usable counters even before a user's draw-state row exists."""
+    if state is None:
+        return 0, 0
+    return int(state.pulls_since_four_plus or 0), int(state.pulls_since_five or 0)
+
+
 def perform_draw(
     db: Session,
     user_id: int,
@@ -90,8 +97,8 @@ def perform_draw(
         card = db.get(Card, existing.card_id) if existing.card_id else None
         if card is None:
             raise HTTPException(status.HTTP_410_GONE, "이전에 뽑은 카드가 삭제되었습니다.")
-        state = db.get(DrawState, user_id) or DrawState(user_id=user_id)
-        return DrawResult(existing, card, 10 - state.pulls_since_four_plus, 90 - state.pulls_since_five, True)
+        four_count, five_count = draw_counters(db.get(DrawState, user_id))
+        return DrawResult(existing, card, 10 - four_count, 90 - five_count, True)
 
     db.scalar(select(User).where(User.id == user_id).with_for_update())
     draw_day = logical_draw_day(now)
@@ -100,7 +107,7 @@ def perform_draw(
 
     state = db.scalar(select(DrawState).where(DrawState.user_id == user_id).with_for_update())
     if state is None:
-        state = DrawState(user_id=user_id)
+        state = DrawState(user_id=user_id, pulls_since_four_plus=0, pulls_since_five=0)
         db.add(state)
         db.flush()
 
@@ -168,10 +175,10 @@ def collection_yp(db: Session, user_id: int) -> int:
 
 
 def user_probability_view(db: Session, user_id: int) -> dict:
-    state = db.get(DrawState, user_id) or DrawState(user_id=user_id)
+    four_count, five_count = draw_counters(db.get(DrawState, user_id))
     rarity_chances = rarity_probabilities(
-        state.pulls_since_four_plus,
-        state.pulls_since_five,
+        four_count,
+        five_count,
         base_probabilities(db),
     )
     cards = db.scalars(select(Card).where(Card.active.is_(True)).order_by(Card.rarity, Card.name)).all()
@@ -194,6 +201,6 @@ def user_probability_view(db: Session, user_id: int) -> dict:
     return {
         "rarities": rarity_chances,
         "cards": card_values,
-        "four_remaining": 10 - state.pulls_since_four_plus,
-        "five_remaining": 90 - state.pulls_since_five,
+        "four_remaining": 10 - four_count,
+        "five_remaining": 90 - five_count,
     }

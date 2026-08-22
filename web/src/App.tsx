@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api, idempotencyKey, openRealtime } from "./api";
 import { CardTile, Stars } from "./components/CardTile";
+import { ImageCropper } from "./components/ImageCropper";
 import { Reveal } from "./components/Reveal";
 import type { Card, Collection, TradeRoom, User } from "./types";
 
@@ -21,7 +22,7 @@ function Warning({ onDone }: { onDone: () => void }) {
     try { await api("/api/me/warning", { method: "POST" }, true); onDone(); }
     catch (e) { setError((e as Error).message); }
   }
-  return <main className="center-panel"><div className="brand-mark">!</div><h1>시작하기 전에</h1><p>반디와 공유하는 서버가 없거나 Discord DM을 막아두면 선물·거래 알림을 받지 못할 수 있어요. 사이트 기능과 획득한 카드는 그대로 유지됩니다.</p>{error && <p className="error">{error}</p>}<button className="primary-button" onClick={accept}>확인하고 시작</button></main>;
+  return <main className="center-panel"><div className="brand-mark">!</div><h1 className="welcome-title">시작하기 전에</h1><p>반디와 공유하는 서버가 없거나 Discord DM을 막아두면 선물·거래 알림을 받지 못할 수 있어요. 사이트 기능과 획득한 카드는 그대로 유지됩니다.</p>{error && <p className="error">{error}</p>}<button className="primary-button" onClick={accept}>확인하고 시작</button></main>;
 }
 
 function Shell({ me, children, feed, invite }: { me: User; children: React.ReactNode; feed: FeedItem[]; invite?: TradeRoom }) {
@@ -105,16 +106,42 @@ function TradePage({ me, roomId }: { me: User; roomId: string }) {
 }
 
 function AdminPage() {
-  const [cards, setCards] = useState<Card[]>([]); const [prob, setProb] = useState<Record<string, number>>({ "1":45,"2":30,"3":19.3,"4":5.1,"5":0.6 }); const [message, setMessage] = useState("");
+  const [cards, setCards] = useState<Card[]>([]);
+  const [prob, setProb] = useState<Record<string, number>>({ "1":45,"2":30,"3":19.3,"4":5.1,"5":0.6 });
+  const [message, setMessage] = useState("");
+  const [newImage, setNewImage] = useState<File>();
+  const [cropTarget, setCropTarget] = useState<{ file: File; card?: Card }>();
   const load = () => Promise.all([api<Card[]>("/api/admin/cards"), api<any>("/api/probabilities")]).then(([c,p]) => { setCards(c); setProb(p.rarities); });
   useEffect(() => { load().catch(e => setMessage(e.message)); }, []);
-  async function create(e: FormEvent<HTMLFormElement>) { e.preventDefault(); try { await api("/api/admin/cards", { method: "POST", body: new FormData(e.currentTarget) }, true); e.currentTarget.reset(); setMessage("카드를 추가했습니다."); await load(); } catch (e) { setMessage((e as Error).message); } }
+  async function create(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!newImage) { setMessage("카드 이미지를 선택하고 3:4 영역을 맞춰주세요."); return; }
+    const element = e.currentTarget;
+    const form = new FormData(element);
+    form.set("image", newImage);
+    try {
+      await api("/api/admin/cards", { method: "POST", body: form }, true);
+      element.reset();
+      setNewImage(undefined);
+      setMessage("카드를 추가했습니다. 상세 확률에도 바로 반영됩니다.");
+      await load();
+    } catch (error) { setMessage((error as Error).message); }
+  }
   async function toggle(card: Card) { const form = new FormData(); form.set("name", card.name); form.set("rarity", String(card.rarity)); form.set("yp", String(card.yp)); if(card.weight) form.set("weight", String(card.weight)); form.set("active", String(!card.active)); try { await api(`/api/admin/cards/${card.id}`, { method:"PUT", body:form }, true); await load(); } catch(e) { setMessage((e as Error).message); } }
   async function edit(card: Card) { const name=prompt("카드 이름",card.name);if(!name)return;const rarity=Number(prompt("등급 (1~5)",String(card.rarity)));const yp=Number(prompt("YP",String(card.yp)));const weightText=prompt("가중치 (비우면 동일 가중치)",card.weight?String(card.weight):"");const form=new FormData();form.set("name",name);form.set("rarity",String(rarity));form.set("yp",String(yp));if(weightText)form.set("weight",weightText);form.set("active",String(card.active));try{await api(`/api/admin/cards/${card.id}`,{method:"PUT",body:form},true);await load();}catch(e){setMessage((e as Error).message);} }
-  async function replaceImage(card: Card,file:File) { const form=new FormData();form.set("name",card.name);form.set("rarity",String(card.rarity));form.set("yp",String(card.yp));if(card.weight)form.set("weight",String(card.weight));form.set("active",String(card.active));form.set("image",file);try{await api(`/api/admin/cards/${card.id}`,{method:"PUT",body:form},true);await load();}catch(e){setMessage((e as Error).message);} }
+  async function replaceImage(card: Card,file:File) { const form=new FormData();form.set("name",card.name);form.set("rarity",String(card.rarity));form.set("yp",String(card.yp));if(card.weight)form.set("weight",String(card.weight));form.set("active",String(card.active));form.set("image",file);try{await api(`/api/admin/cards/${card.id}`,{method:"PUT",body:form},true);setMessage(`${card.name} 이미지를 교체했습니다.`);await load();}catch(e){setMessage((e as Error).message);} }
   async function remove(card: Card) { try { const preview = await api<any>(`/api/admin/cards/${card.id}/delete-preview`); const typed = prompt(`영구 삭제: ${preview.affected_players}명, ${preview.total_copies}장, 거래방 ${preview.active_trade_rooms}개 영향\n카드 이름을 입력하세요.`); if (!typed) return; await api(`/api/admin/cards/${card.id}`, { method:"DELETE", body:JSON.stringify({ confirm_name:typed }) }, true); await load(); } catch(e) { setMessage((e as Error).message); } }
   async function saveProb() { try { await api("/api/admin/probabilities", { method:"PUT", body:JSON.stringify({ probabilities:prob }) }, true); setMessage("확률을 저장했습니다."); } catch(e) { setMessage((e as Error).message); } }
-  return <section><p className="eyebrow">SPECIAL USER CONTROL</p><h1>카드 관리</h1>{message && <p className="notice">{message}</p>}<div className="admin-grid"><form className="panel form-grid" onSubmit={create}><h2>새 카드</h2><label>이름<input name="name" required maxLength={100}/></label><label>등급<select name="rarity">{[1,2,3,4,5].map(v=><option key={v} value={v}>{v}성</option>)}</select></label><label>YP<input name="yp" type="number" min="0" required/></label><label>가중치<input name="weight" type="number" min="0.000001" step="any"/></label><label>이미지<input name="image" type="file" accept="image/png,image/jpeg,image/webp" required/></label><input type="hidden" name="active" value="true"/><button className="primary-button">카드 추가</button></form><div className="panel"><h2>등급 확률</h2>{[1,2,3,4,5].map(r => <label className="prob-input" key={r}><Stars rarity={r}/><input type="number" step="0.0001" value={prob[String(r)] ?? 0} onChange={e => setProb({...prob,[String(r)]:Number(e.target.value)})}/><span>%</span></label>)}<button onClick={saveProb}>확률 저장</button></div></div><div className="admin-card-list">{cards.map(card => <div key={card.id}><CardTile card={card} compact/><div><button onClick={()=>edit(card)}>정보 수정</button><button onClick={()=>toggle(card)}>{card.active ? "뽑기 제외" : "다시 활성화"}</button></div><div><label className="file-button">이미지 교체<input type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={e=>e.target.files?.[0]&&replaceImage(card,e.target.files[0])}/></label><button className="danger" onClick={()=>remove(card)}>영구 삭제</button></div></div>)}</div></section>;
+  function finishCrop(file: File) {
+    const target = cropTarget;
+    setCropTarget(undefined);
+    if (target?.card) void replaceImage(target.card, file);
+    else setNewImage(file);
+  }
+  return <>
+    <section><p className="eyebrow">SPECIAL USER CONTROL</p><h1>카드 관리</h1>{message && <p className="notice">{message}</p>}<div className="admin-grid"><form className="panel form-grid" onSubmit={create}><h2>새 카드</h2><label>이름<input name="name" required maxLength={100}/></label><label>등급<select name="rarity">{[1,2,3,4,5].map(v=><option key={v} value={v}>{v}성</option>)}</select></label><label>YP<input name="yp" type="number" min="0" required/></label><label>가중치<input name="weight" type="number" min="0.000001" step="any"/></label><label>이미지<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file=event.target.files?.[0]; if(file)setCropTarget({file}); event.target.value=""; }}/><small className={newImage ? "image-ready" : ""}>{newImage ? `✓ 3:4 자르기 완료 · ${newImage.name}` : "선택 후 확대·이동하여 3:4로 자릅니다."}</small></label><input type="hidden" name="active" value="true"/><button className="primary-button">카드 추가</button></form><div className="panel"><h2>등급 확률</h2>{[1,2,3,4,5].map(r => <label className="prob-input" key={r}><Stars rarity={r}/><input type="number" step="0.0001" value={prob[String(r)] ?? 0} onChange={e => setProb({...prob,[String(r)]:Number(e.target.value)})}/><span>%</span></label>)}<button onClick={saveProb}>확률 저장</button></div></div><div className="admin-card-list">{cards.map(card => <div key={card.id}><CardTile card={card} compact/><div><button onClick={()=>edit(card)}>정보 수정</button><button onClick={()=>toggle(card)}>{card.active ? "뽑기 제외" : "다시 활성화"}</button></div><div><label className="file-button">이미지 교체<input type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={event=>{const file=event.target.files?.[0];if(file)setCropTarget({file,card});event.target.value="";}}/></label><button className="danger" onClick={()=>remove(card)}>영구 삭제</button></div></div>)}</div></section>
+    {cropTarget && <ImageCropper file={cropTarget.file} onCancel={()=>setCropTarget(undefined)} onConfirm={finishCrop}/>}
+  </>;
 }
 
 export default function App() {

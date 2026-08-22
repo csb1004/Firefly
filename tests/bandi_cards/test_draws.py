@@ -51,6 +51,29 @@ def test_soft_pity_preserves_lower_rarity_ratios():
     assert sum(chances.values()) == pytest.approx(100)
 
 
+def test_fresh_user_can_load_draw_status_and_card_probabilities(signed_in):
+    client, factory, _user_id, csrf = signed_in
+    client.post("/api/me/warning", headers={"X-CSRF-Token": csrf})
+    with factory() as db:
+        cards = seed_cards(db)
+
+    status = client.get("/api/draw/status")
+    probabilities = client.get("/api/probabilities/current")
+
+    assert status.status_code == 200
+    assert status.json() == {"eligible": True, "four_remaining": 10, "five_remaining": 90}
+    assert probabilities.status_code == 200
+    assert {item["card_id"] for item in probabilities.json()["cards"]} == {card.id for card in cards}
+
+    drawn = client.post(
+        "/api/draw",
+        json={"idempotency_key": "fresh-user-draw"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert drawn.status_code == 200
+    assert client.get("/api/draw/status").json()["eligible"] is False
+
+
 def test_daily_draw_is_idempotent_and_collection_yp_counts_card_once(web_db):
     with web_db() as db:
         user = User(discord_id="draw-user", username="draw", warning_acknowledged=True)
