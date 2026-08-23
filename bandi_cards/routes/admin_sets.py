@@ -36,6 +36,10 @@ class SetBody(BaseModel):
     effects: list[EffectBody] = Field(min_length=1)
 
 
+def resolve_rarity(scope: str, rarity: int | None) -> int | None:
+    return (rarity if rarity is not None else 1) if scope == "rarity" else None
+
+
 def serialize_set(db: Session, card_set: CardSet) -> dict:
     member_ids = db.scalars(select(CardSetMember.card_id).where(CardSetMember.set_id == card_set.id).order_by(CardSetMember.card_id)).all()
     effects = db.scalars(select(SetEffect).where(SetEffect.set_id == card_set.id).order_by(SetEffect.position, SetEffect.id)).all()
@@ -74,7 +78,6 @@ def validate_body(db: Session, body: SetBody, *, exclude_id: str | None = None) 
     all_ids = set(body.member_card_ids)
     for effect in body.effects:
         bonus_scope = effect.bonus_target_scope if effect.bonus_target_scope is not None else effect.target_scope
-        bonus_rarity = effect.bonus_target_rarity if effect.bonus_target_scope is not None else effect.target_rarity
         bonus_card_ids = effect.bonus_target_card_ids if effect.bonus_target_scope is not None else effect.target_card_ids
         count_card_ids = effect.target_card_ids if effect.target_scope == "selected_cards" else []
         resolved_bonus_card_ids = bonus_card_ids if bonus_scope == "selected_cards" else []
@@ -84,14 +87,10 @@ def validate_body(db: Session, body: SetBody, *, exclude_id: str | None = None) 
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "지원하지 않는 YP 증가 대상입니다.")
         if effect.count_mode not in {"once", "distinct", "quantity"} or effect.bonus_type not in {"fixed", "percent"}:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "지원하지 않는 효과 계산 방식입니다.")
-        if effect.target_scope == "rarity" and effect.target_rarity is None:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "성급 대상을 선택하세요.")
         if effect.target_scope == "selected_cards" and not effect.target_card_ids:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "적용 횟수를 계산할 카드를 선택하세요.")
         if len(count_card_ids) != len(set(count_card_ids)):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "적용 횟수 대상 카드가 중복되었습니다.")
-        if bonus_scope == "rarity" and bonus_rarity is None:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "YP가 증가할 성급을 선택하세요.")
         if bonus_scope == "selected_cards" and not bonus_card_ids:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "YP가 증가할 카드를 선택하세요.")
         if len(resolved_bonus_card_ids) != len(set(resolved_bonus_card_ids)):
@@ -121,9 +120,13 @@ def replace_set(db: Session, card_set: CardSet, body: SetBody) -> None:
     db.add_all([CardSetMember(set_id=card_set.id, card_id=card_id) for card_id in body.member_card_ids])
     for position, item in enumerate(body.effects):
         bonus_scope = item.bonus_target_scope if item.bonus_target_scope is not None else item.target_scope
-        bonus_rarity = item.bonus_target_rarity if item.bonus_target_scope is not None else item.target_rarity
+        target_rarity = resolve_rarity(item.target_scope, item.target_rarity)
+        bonus_rarity = resolve_rarity(
+            bonus_scope,
+            item.bonus_target_rarity if item.bonus_target_scope is not None else item.target_rarity,
+        )
         bonus_card_ids = item.bonus_target_card_ids if item.bonus_target_scope is not None else item.target_card_ids
-        effect = SetEffect(set_id=card_set.id, target_scope=item.target_scope, target_rarity=item.target_rarity if item.target_scope == "rarity" else None, bonus_target_scope=bonus_scope, bonus_target_rarity=bonus_rarity if bonus_scope == "rarity" else None, count_mode=item.count_mode, bonus_type=item.bonus_type, value=item.value, max_count=item.max_count, position=position)
+        effect = SetEffect(set_id=card_set.id, target_scope=item.target_scope, target_rarity=target_rarity, bonus_target_scope=bonus_scope, bonus_target_rarity=bonus_rarity, count_mode=item.count_mode, bonus_type=item.bonus_type, value=item.value, max_count=item.max_count, position=position)
         db.add(effect)
         db.flush()
         if item.target_scope == "selected_cards":

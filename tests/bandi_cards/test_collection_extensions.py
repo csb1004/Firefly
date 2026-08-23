@@ -157,6 +157,40 @@ def test_admin_can_create_configurable_set(admin_signed_in):
     assert client.get("/api/admin/sets").json()[0]["name"] == "관리 세트"
 
 
+def test_admin_normalizes_visible_default_rarity(admin_signed_in):
+    client, factory, _admin_id, csrf = admin_signed_in
+    with factory() as db:
+        card = Card(name="기본 성급 카드", rarity=1, yp=10, image_key="cards/default-rarity.webp")
+        db.add(card)
+        db.commit()
+        card_id = card.id
+
+    response = client.post(
+        "/api/admin/sets",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "name": "기본 성급 세트",
+            "active": True,
+            "member_card_ids": [card_id],
+            "effects": [{
+                "target_scope": "set_members",
+                "target_rarity": None,
+                "target_card_ids": [],
+                "bonus_target_scope": "rarity",
+                "bonus_target_rarity": None,
+                "bonus_target_card_ids": [],
+                "count_mode": "quantity",
+                "bonus_type": "percent",
+                "value": 10,
+                "max_count": None,
+            }],
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["effects"][0]["bonus_target_rarity"] == 1
+
+
 def test_admin_rejects_duplicate_effect_target_cards(admin_signed_in):
     client, factory, _admin_id, csrf = admin_signed_in
     with factory() as db:

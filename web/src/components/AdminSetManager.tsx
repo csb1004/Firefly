@@ -37,7 +37,15 @@ export function AdminSetManager({ cards }: { cards: Card[] }) {
   async function save() {
     try {
       const path = draft.id ? `/api/admin/sets/${draft.id}` : "/api/admin/sets";
-      await api(path, { method: draft.id ? "PUT" : "POST", body: JSON.stringify(draft) }, true);
+      const body = {
+        ...draft,
+        effects: draft.effects.map(effect => ({
+          ...effect,
+          target_rarity: effect.target_scope === "rarity" ? effect.target_rarity ?? 1 : null,
+          bonus_target_rarity: effect.bonus_target_scope === "rarity" ? effect.bonus_target_rarity ?? 1 : null,
+        })),
+      };
+      await api(path, { method: draft.id ? "PUT" : "POST", body: JSON.stringify(body) }, true);
       setMessage("세트 효과를 저장했습니다."); setDraft(blankSet()); await load();
     } catch (error) { setMessage((error as Error).message); }
   }
