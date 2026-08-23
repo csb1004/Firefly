@@ -28,6 +28,7 @@ export type Collection = {
   base_yp?: number;
   fixed_bonus?: number;
   percent_bonus?: number;
+  percent_yp?: number;
   active_sets?: string[];
   cards: Card[];
 };
@@ -64,6 +65,9 @@ export type SetEffect = {
   target_scope: "set_members" | "selected_cards" | "rarity" | "collection";
   target_rarity: number | null;
   target_card_ids: string[];
+  bonus_target_scope: "set_members" | "selected_cards" | "rarity" | "collection";
+  bonus_target_rarity: number | null;
+  bonus_target_card_ids: string[];
   count_mode: "once" | "distinct" | "quantity";
   bonus_type: "fixed" | "percent";
   value: number;
@@ -85,8 +89,9 @@ export type SetDefinition = {
   owned_member_count: number;
   required_member_count: number;
   member_cards: Array<Pick<Card, "id" | "name" | "rarity">>;
-  effects: Array<Omit<SetEffect, "target_card_ids"> & {
+  effects: Array<Omit<SetEffect, "target_card_ids" | "bonus_target_card_ids"> & {
     target_cards: Array<Pick<Card, "id" | "name" | "rarity">>;
+    bonus_target_cards: Array<Pick<Card, "id" | "name" | "rarity">>;
   }>;
 };
 

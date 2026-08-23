@@ -15,6 +15,9 @@ const activeSet: SetDefinition = {
     target_scope: "rarity",
     target_rarity: 1,
     target_cards: [],
+    bonus_target_scope: "set_members",
+    bonus_target_rarity: null,
+    bonus_target_cards: [],
     count_mode: "quantity",
     bonus_type: "fixed",
     value: 50,
@@ -24,7 +27,7 @@ const activeSet: SetDefinition = {
 
 describe("set effect information", () => {
   it("turns a configurable effect into a readable Korean summary", () => {
-    expect(describeSetEffect(activeSet.effects[0])).toBe("1성 카드 1장당 YP 50 증가 · 최대 3회");
+    expect(describeSetEffect(activeSet.effects[0])).toBe("1성 카드 1장당, 세트 구성 카드의 YP가 50 증가 · 최대 3회");
   });
 
   it("describes a one-time whole-collection effect without repeating ownership", () => {
@@ -32,11 +35,13 @@ describe("set effect information", () => {
       ...activeSet.effects[0],
       target_scope: "collection",
       target_rarity: null,
+      bonus_target_scope: "collection",
+      bonus_target_rarity: null,
       count_mode: "once",
       bonus_type: "percent",
       value: 20,
       max_count: null,
-    })).toBe("세트 완성 시 보유 중인 모든 카드의 최종 YP 20% 증가");
+    })).toBe("보유 카드가 있을 때, 보유 중인 모든 카드의 최종 YP가 20% 증가");
   });
 
   it("shows only completed sets in the inventory information dialog", () => {

@@ -118,6 +118,7 @@ def collection(
         "base_yp": yp.base_yp,
         "fixed_bonus": int(yp.fixed_bonus),
         "percent_bonus": float(yp.percent_bonus),
+        "percent_yp": float(yp.percent_yp),
         "active_sets": list(yp.active_sets),
         "cards": [card_result(card, inventory.quantity) | {"available_quantity": inventory.quantity - inventory.reserved_quantity} for inventory, card in rows],
     }

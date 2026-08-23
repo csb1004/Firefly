@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import AdminAudit, Card, CardSet, CardSetMember, SetEffect, SetEffectTargetCard, User
+from ..models import AdminAudit, Card, CardSet, CardSetMember, SetEffect, SetEffectBonusTargetCard, SetEffectTargetCard, User
 from ..security import require_admin, require_admin_csrf
 
 
@@ -20,6 +20,9 @@ class EffectBody(BaseModel):
     target_scope: str
     target_rarity: int | None = Field(default=None, ge=1, le=5)
     target_card_ids: list[str] = Field(default_factory=list)
+    bonus_target_scope: str | None = None
+    bonus_target_rarity: int | None = Field(default=None, ge=1, le=5)
+    bonus_target_card_ids: list[str] = Field(default_factory=list)
     count_mode: str
     bonus_type: str
     value: Decimal = Field(ge=0)
@@ -37,9 +40,13 @@ def serialize_set(db: Session, card_set: CardSet) -> dict:
     member_ids = db.scalars(select(CardSetMember.card_id).where(CardSetMember.set_id == card_set.id).order_by(CardSetMember.card_id)).all()
     effects = db.scalars(select(SetEffect).where(SetEffect.set_id == card_set.id).order_by(SetEffect.position, SetEffect.id)).all()
     target_rows = db.execute(select(SetEffectTargetCard.effect_id, SetEffectTargetCard.card_id).where(SetEffectTargetCard.effect_id.in_([effect.id for effect in effects]))).all() if effects else []
+    bonus_target_rows = db.execute(select(SetEffectBonusTargetCard.effect_id, SetEffectBonusTargetCard.card_id).where(SetEffectBonusTargetCard.effect_id.in_([effect.id for effect in effects]))).all() if effects else []
     targets: dict[str, list[str]] = {effect.id: [] for effect in effects}
+    bonus_targets: dict[str, list[str]] = {effect.id: [] for effect in effects}
     for effect_id, card_id in target_rows:
         targets[effect_id].append(card_id)
+    for effect_id, card_id in bonus_target_rows:
+        bonus_targets[effect_id].append(card_id)
     return {
         "id": card_set.id,
         "name": card_set.name,
@@ -50,6 +57,9 @@ def serialize_set(db: Session, card_set: CardSet) -> dict:
             "target_scope": effect.target_scope,
             "target_rarity": effect.target_rarity,
             "target_card_ids": targets[effect.id],
+            "bonus_target_scope": effect.bonus_target_scope if effect.bonus_target_scope is not None else effect.target_scope,
+            "bonus_target_rarity": effect.bonus_target_rarity if effect.bonus_target_scope is not None else effect.target_rarity,
+            "bonus_target_card_ids": bonus_targets[effect.id] if effect.bonus_target_scope is not None else targets[effect.id],
             "count_mode": effect.count_mode,
             "bonus_type": effect.bonus_type,
             "value": float(effect.value),
@@ -63,17 +73,33 @@ def validate_body(db: Session, body: SetBody, *, exclude_id: str | None = None) 
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "세트 구성 카드가 중복되었습니다.")
     all_ids = set(body.member_card_ids)
     for effect in body.effects:
+        bonus_scope = effect.bonus_target_scope if effect.bonus_target_scope is not None else effect.target_scope
+        bonus_rarity = effect.bonus_target_rarity if effect.bonus_target_scope is not None else effect.target_rarity
+        bonus_card_ids = effect.bonus_target_card_ids if effect.bonus_target_scope is not None else effect.target_card_ids
+        count_card_ids = effect.target_card_ids if effect.target_scope == "selected_cards" else []
+        resolved_bonus_card_ids = bonus_card_ids if bonus_scope == "selected_cards" else []
         if effect.target_scope not in {"set_members", "selected_cards", "rarity", "collection"}:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "지원하지 않는 효과 대상입니다.")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "지원하지 않는 적용 횟수 대상입니다.")
+        if bonus_scope not in {"set_members", "selected_cards", "rarity", "collection"}:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "지원하지 않는 YP 증가 대상입니다.")
         if effect.count_mode not in {"once", "distinct", "quantity"} or effect.bonus_type not in {"fixed", "percent"}:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "지원하지 않는 효과 계산 방식입니다.")
         if effect.target_scope == "rarity" and effect.target_rarity is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "성급 대상을 선택하세요.")
         if effect.target_scope == "selected_cards" and not effect.target_card_ids:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "효과 대상 카드를 선택하세요.")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "적용 횟수를 계산할 카드를 선택하세요.")
+        if len(count_card_ids) != len(set(count_card_ids)):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "적용 횟수 대상 카드가 중복되었습니다.")
+        if bonus_scope == "rarity" and bonus_rarity is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "YP가 증가할 성급을 선택하세요.")
+        if bonus_scope == "selected_cards" and not bonus_card_ids:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "YP가 증가할 카드를 선택하세요.")
+        if len(resolved_bonus_card_ids) != len(set(resolved_bonus_card_ids)):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "YP 증가 대상 카드가 중복되었습니다.")
         if effect.bonus_type == "fixed" and effect.value != effect.value.to_integral_value():
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "고정 YP는 정수여야 합니다.")
-        all_ids.update(effect.target_card_ids)
+        all_ids.update(count_card_ids)
+        all_ids.update(resolved_bonus_card_ids)
     existing_ids = set(db.scalars(select(Card.id).where(Card.id.in_(all_ids))).all())
     if existing_ids != all_ids:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "존재하지 않는 카드가 포함되어 있습니다.")
@@ -87,16 +113,23 @@ def replace_set(db: Session, card_set: CardSet, body: SetBody) -> None:
     old_effect_ids = db.scalars(select(SetEffect.id).where(SetEffect.set_id == card_set.id)).all()
     if old_effect_ids:
         db.execute(delete(SetEffectTargetCard).where(SetEffectTargetCard.effect_id.in_(old_effect_ids)))
+        db.execute(delete(SetEffectBonusTargetCard).where(SetEffectBonusTargetCard.effect_id.in_(old_effect_ids)))
     db.execute(delete(SetEffect).where(SetEffect.set_id == card_set.id))
     db.flush()
     card_set.name = body.name.strip()
     card_set.active = body.active
     db.add_all([CardSetMember(set_id=card_set.id, card_id=card_id) for card_id in body.member_card_ids])
     for position, item in enumerate(body.effects):
-        effect = SetEffect(set_id=card_set.id, target_scope=item.target_scope, target_rarity=item.target_rarity if item.target_scope == "rarity" else None, count_mode=item.count_mode, bonus_type=item.bonus_type, value=item.value, max_count=item.max_count, position=position)
+        bonus_scope = item.bonus_target_scope if item.bonus_target_scope is not None else item.target_scope
+        bonus_rarity = item.bonus_target_rarity if item.bonus_target_scope is not None else item.target_rarity
+        bonus_card_ids = item.bonus_target_card_ids if item.bonus_target_scope is not None else item.target_card_ids
+        effect = SetEffect(set_id=card_set.id, target_scope=item.target_scope, target_rarity=item.target_rarity if item.target_scope == "rarity" else None, bonus_target_scope=bonus_scope, bonus_target_rarity=bonus_rarity if bonus_scope == "rarity" else None, count_mode=item.count_mode, bonus_type=item.bonus_type, value=item.value, max_count=item.max_count, position=position)
         db.add(effect)
         db.flush()
-        db.add_all([SetEffectTargetCard(effect_id=effect.id, card_id=card_id) for card_id in item.target_card_ids])
+        if item.target_scope == "selected_cards":
+            db.add_all([SetEffectTargetCard(effect_id=effect.id, card_id=card_id) for card_id in item.target_card_ids])
+        if bonus_scope == "selected_cards":
+            db.add_all([SetEffectBonusTargetCard(effect_id=effect.id, card_id=card_id) for card_id in bonus_card_ids])
 
 
 @router.get("")

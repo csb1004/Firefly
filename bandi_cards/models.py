@@ -138,17 +138,24 @@ class SetEffect(Base):
             "target_scope IN ('set_members', 'selected_cards', 'rarity', 'collection')",
             name="ck_set_effect_target_scope",
         ),
+        CheckConstraint(
+            "bonus_target_scope IS NULL OR bonus_target_scope IN ('set_members', 'selected_cards', 'rarity', 'collection')",
+            name="ck_set_effect_bonus_target_scope",
+        ),
         CheckConstraint("count_mode IN ('once', 'distinct', 'quantity')", name="ck_set_effect_count_mode"),
         CheckConstraint("bonus_type IN ('fixed', 'percent')", name="ck_set_effect_bonus_type"),
         CheckConstraint("value >= 0", name="ck_set_effect_value"),
         CheckConstraint("max_count IS NULL OR max_count > 0", name="ck_set_effect_max_count"),
         CheckConstraint("target_rarity IS NULL OR (target_rarity >= 1 AND target_rarity <= 5)", name="ck_set_effect_rarity"),
+        CheckConstraint("bonus_target_rarity IS NULL OR (bonus_target_rarity >= 1 AND bonus_target_rarity <= 5)", name="ck_set_effect_bonus_rarity"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_string)
     set_id: Mapped[str] = mapped_column(ForeignKey("card_sets.id", ondelete="CASCADE"), index=True)
     target_scope: Mapped[str] = mapped_column(String(24))
     target_rarity: Mapped[int | None] = mapped_column(Integer)
+    bonus_target_scope: Mapped[str | None] = mapped_column(String(24))
+    bonus_target_rarity: Mapped[int | None] = mapped_column(Integer)
     count_mode: Mapped[str] = mapped_column(String(16))
     bonus_type: Mapped[str] = mapped_column(String(16))
     value: Mapped[float] = mapped_column(Numeric(12, 4))
@@ -158,6 +165,13 @@ class SetEffect(Base):
 
 class SetEffectTargetCard(Base):
     __tablename__ = "set_effect_target_cards"
+
+    effect_id: Mapped[str] = mapped_column(ForeignKey("set_effects.id", ondelete="CASCADE"), primary_key=True)
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True)
+
+
+class SetEffectBonusTargetCard(Base):
+    __tablename__ = "set_effect_bonus_target_cards"
 
     effect_id: Mapped[str] = mapped_column(ForeignKey("set_effects.id", ondelete="CASCADE"), primary_key=True)
     card_id: Mapped[str] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True)

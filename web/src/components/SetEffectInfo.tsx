@@ -3,24 +3,27 @@ import type { SetDefinition } from "../types";
 import { Stars } from "./CardTile";
 
 export function describeSetEffect(effect: SetDefinition["effects"][number]) {
-  let target: string;
-  if (effect.target_scope === "set_members") target = "세트 구성 카드";
-  else if (effect.target_scope === "selected_cards") target = effect.target_cards.map(card => card.name).join(" · ");
-  else if (effect.target_scope === "rarity") target = `${effect.target_rarity}성 카드`;
-  else target = "보유 중인 모든 카드";
+  function targetLabel(scope: typeof effect.target_scope, rarity: number | null, cards: typeof effect.target_cards) {
+    if (scope === "set_members") return "세트 구성 카드";
+    if (scope === "selected_cards") return cards.map(card => card.name).join(" · ") || "선택한 카드";
+    if (scope === "rarity") return `${rarity}성 카드`;
+    return "보유 중인 모든 카드";
+  }
+  const countTarget = targetLabel(effect.target_scope, effect.target_rarity, effect.target_cards);
+  const bonusTarget = targetLabel(effect.bonus_target_scope, effect.bonus_target_rarity, effect.bonus_target_cards);
 
   let condition: string;
   if (effect.count_mode === "once") {
     if (effect.target_scope === "set_members") condition = "세트 완성 시";
-    else if (effect.target_scope === "collection") condition = "세트 완성 시 보유 중인 모든 카드의";
-    else condition = `${target} 보유 시`;
+    else if (effect.target_scope === "collection") condition = "보유 카드가 있을 때";
+    else condition = `${countTarget} 보유 시`;
   }
-  else if (effect.count_mode === "distinct") condition = `${target} 종류당`;
-  else condition = `${target} 1장당`;
+  else if (effect.count_mode === "distinct") condition = `${countTarget} 종류당`;
+  else condition = `${countTarget} 1장당`;
 
   const value = Number(effect.value).toLocaleString("ko-KR", { maximumFractionDigits: 4 });
-  const bonus = effect.bonus_type === "fixed" ? `YP ${value} 증가` : `최종 YP ${value}% 증가`;
-  return `${condition} ${bonus}${effect.max_count ? ` · 최대 ${effect.max_count}회` : ""}`;
+  const bonus = effect.bonus_type === "fixed" ? `${bonusTarget}의 YP가 ${value} 증가` : `${bonusTarget}의 최종 YP가 ${value}% 증가`;
+  return `${condition}, ${bonus}${effect.max_count ? ` · 최대 ${effect.max_count}회` : ""}`;
 }
 
 export function SetEffectList({ sets, progress = false }: { sets: SetDefinition[]; progress?: boolean }) {

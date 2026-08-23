@@ -138,6 +138,9 @@ def test_admin_can_create_configurable_set(admin_signed_in):
                 "target_scope": "rarity",
                 "target_rarity": 1,
                 "target_card_ids": [],
+                "bonus_target_scope": "selected_cards",
+                "bonus_target_rarity": None,
+                "bonus_target_card_ids": [ids[1]],
                 "count_mode": "quantity",
                 "bonus_type": "fixed",
                 "value": 50,
@@ -146,5 +149,42 @@ def test_admin_can_create_configurable_set(admin_signed_in):
         },
     )
     assert response.status_code == 201
-    assert response.json()["effects"][0]["value"] == 50
+    effect = response.json()["effects"][0]
+    assert effect["value"] == 50
+    assert effect["target_scope"] == "rarity"
+    assert effect["bonus_target_scope"] == "selected_cards"
+    assert effect["bonus_target_card_ids"] == [ids[1]]
     assert client.get("/api/admin/sets").json()[0]["name"] == "관리 세트"
+
+
+def test_admin_rejects_duplicate_effect_target_cards(admin_signed_in):
+    client, factory, _admin_id, csrf = admin_signed_in
+    with factory() as db:
+        card = Card(name="중복 대상 카드", rarity=3, yp=30, image_key="cards/duplicate-target.webp")
+        db.add(card)
+        db.commit()
+        card_id = card.id
+
+    response = client.post(
+        "/api/admin/sets",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "name": "중복 대상 세트",
+            "active": True,
+            "member_card_ids": [card_id],
+            "effects": [{
+                "target_scope": "selected_cards",
+                "target_rarity": None,
+                "target_card_ids": [card_id, card_id],
+                "bonus_target_scope": "selected_cards",
+                "bonus_target_rarity": None,
+                "bonus_target_card_ids": [card_id],
+                "count_mode": "distinct",
+                "bonus_type": "fixed",
+                "value": 10,
+                "max_count": None,
+            }],
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "적용 횟수 대상 카드가 중복되었습니다."

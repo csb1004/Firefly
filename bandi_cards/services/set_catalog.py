@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Card, CardSet, CardSetMember, Inventory, SetEffect, SetEffectTargetCard
+from ..models import Card, CardSet, CardSetMember, Inventory, SetEffect, SetEffectBonusTargetCard, SetEffectTargetCard
 
 
 def user_set_definitions(db: Session, user_id: int) -> list[dict]:
@@ -32,6 +32,12 @@ def user_set_definitions(db: Session, user_id: int) -> list[dict]:
         .where(SetEffectTargetCard.effect_id.in_(effect_ids))
         .order_by(SetEffectTargetCard.effect_id, Card.rarity.desc(), Card.name)
     ).all() if effect_ids else []
+    bonus_target_rows = db.execute(
+        select(SetEffectBonusTargetCard, Card)
+        .join(Card, Card.id == SetEffectBonusTargetCard.card_id)
+        .where(SetEffectBonusTargetCard.effect_id.in_(effect_ids))
+        .order_by(SetEffectBonusTargetCard.effect_id, Card.rarity.desc(), Card.name)
+    ).all() if effect_ids else []
     owned_ids = set(db.scalars(
         select(Inventory.card_id).where(Inventory.user_id == user_id, Inventory.quantity > 0)
     ).all())
@@ -43,8 +49,11 @@ def user_set_definitions(db: Session, user_id: int) -> list[dict]:
     for effect in effects:
         effects_by_set[effect.set_id].append(effect)
     targets_by_effect: dict[str, list[dict]] = {effect_id: [] for effect_id in effect_ids}
+    bonus_targets_by_effect: dict[str, list[dict]] = {effect_id: [] for effect_id in effect_ids}
     for target, card in target_rows:
         targets_by_effect[target.effect_id].append({"id": card.id, "name": card.name, "rarity": card.rarity})
+    for target, card in bonus_target_rows:
+        bonus_targets_by_effect[target.effect_id].append({"id": card.id, "name": card.name, "rarity": card.rarity})
 
     result = []
     for card_set in card_sets:
@@ -62,6 +71,9 @@ def user_set_definitions(db: Session, user_id: int) -> list[dict]:
                 "target_scope": effect.target_scope,
                 "target_rarity": effect.target_rarity,
                 "target_cards": targets_by_effect[effect.id],
+                "bonus_target_scope": effect.bonus_target_scope if effect.bonus_target_scope is not None else effect.target_scope,
+                "bonus_target_rarity": effect.bonus_target_rarity if effect.bonus_target_scope is not None else effect.target_rarity,
+                "bonus_target_cards": bonus_targets_by_effect[effect.id] if effect.bonus_target_scope is not None else targets_by_effect[effect.id],
                 "count_mode": effect.count_mode,
                 "bonus_type": effect.bonus_type,
                 "value": float(effect.value),

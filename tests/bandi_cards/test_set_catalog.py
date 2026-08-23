@@ -41,6 +41,8 @@ def test_user_set_catalog_describes_effects_and_inventory_completion(admin_signe
     assert payload["completed"] is True
     assert payload["member_cards"] == [{"id": member_id, "name": "세트 구성", "rarity": 5}]
     assert payload["effects"][0]["target_cards"][0]["name"] == "효과 대상"
+    assert payload["effects"][0]["bonus_target_scope"] == "selected_cards"
+    assert payload["effects"][0]["bonus_target_cards"][0]["name"] == "효과 대상"
     assert payload["effects"][0]["value"] == 50
 
 
