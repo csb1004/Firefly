@@ -5,7 +5,7 @@ import { ImageCropper } from "./components/ImageCropper";
 import { Reveal, sortCardsByRarity } from "./components/Reveal";
 import { AdminCollectionManager } from "./components/AdminCollectionManager";
 import { AdminSetManager } from "./components/AdminSetManager";
-import { ActiveSetModal, SetEffectList } from "./components/SetEffectInfo";
+import { ActiveSetModal, ActiveSetSummary, SetEffectList } from "./components/SetEffectInfo";
 import { DiscardControls } from "./components/DiscardControls";
 import { AdminCardControls, type CardEditValues } from "./components/AdminCardControls";
 import type { Card, Catalog, Collection, DrawStatus, SetDefinition, TradeRoom, User } from "./types";
@@ -79,12 +79,21 @@ function CollectionPage({ userId }: { userId?: number }) {
 function CatalogPage() {
   const [catalog, setCatalog] = useState<Catalog>();
   const [sets, setSets] = useState<SetDefinition[]>([]);
+  const [activeSetNames, setActiveSetNames] = useState<string[]>([]);
   const [rarity, setRarity] = useState(0);
   const [error, setError] = useState("");
-  useEffect(() => { Promise.all([api<Catalog>("/api/catalog"), api<SetDefinition[]>("/api/sets")]).then(([nextCatalog, nextSets]) => { setCatalog(nextCatalog); setSets(nextSets); }).catch(e => setError(e.message)); }, []);
+  useEffect(() => { Promise.all([api<Catalog>("/api/catalog"), api<SetDefinition[]>("/api/sets"), api<Collection>("/api/collection/me")]).then(([nextCatalog, nextSets, collection]) => { setCatalog(nextCatalog); setSets(nextSets); setActiveSetNames(collection.active_sets ?? []); }).catch(e => setError(e.message)); }, []);
   const cards = catalog?.cards.filter(card => !rarity || card.rarity === rarity) ?? [];
   const percent = catalog?.total_count ? Math.round(catalog.owned_count / catalog.total_count * 100) : 0;
-  return <section><div className="catalog-head"><div><p className="eyebrow">CARD INDEX</p><h1>도감</h1><p>획득한 카드와 아직 만나지 못한 카드를 한눈에 확인하세요.</p></div><div className="catalog-progress"><strong>{catalog?.owned_count ?? 0}<small> / {catalog?.total_count ?? 0}</small></strong><span>수집률 {percent}%</span><i style={{width:`${percent}%`}} /></div></div><section className="catalog-sets prominent"><div className="section-title"><div><p className="eyebrow">SET ARCHIVE</p><h2>세트 효과 <small>{sets.length}</small></h2><p>세트 판정은 도감 해금이 아닌 현재 인벤토리 보유 카드 기준입니다.</p></div></div>{sets.length ? <SetEffectList sets={sets} progress/> : <div className="empty">현재 적용 가능한 세트 효과가 없습니다.</div>}</section><div className="rarity-filters"><button className={rarity===0?"active":""} onClick={()=>setRarity(0)}>전체</button>{[1,2,3,4,5].map(value=><button className={`${rarity===value?"active":""} rarity-${value}`} onClick={()=>setRarity(value)} key={value}><Stars rarity={value}/></button>)}</div>{error&&<p className="error">{error}</p>}<div className="catalog-grid">{cards.map(card=><div className={`catalog-entry ${card.owned?"owned":"locked"}`} key={card.id}><CardTile card={card.owned?card:{...card,quantity:undefined}} onClick={()=>navigate(`/card/${card.id}`)}/><span className="catalog-state">{card.owned?`보유 ×${card.quantity}`:"미획득"}</span></div>)}</div>{catalog && cards.length===0&&<div className="empty">이 등급에는 카드가 없습니다.</div>}</section>;
+  return <section><div className="catalog-head"><div><p className="eyebrow">CARD INDEX</p><h1>도감</h1><p>획득한 카드와 아직 만나지 못한 카드를 한눈에 확인하세요.</p></div><div className="catalog-progress"><strong>{catalog?.owned_count ?? 0}<small> / {catalog?.total_count ?? 0}</small></strong><span>수집률 {percent}%</span><i style={{width:`${percent}%`}} /></div></div><ActiveSetSummary sets={sets} activeSetNames={activeSetNames} onOpen={()=>navigate("/sets")}/><div className="rarity-filters"><button className={rarity===0?"active":""} onClick={()=>setRarity(0)}>전체</button>{[1,2,3,4,5].map(value=><button className={`${rarity===value?"active":""} rarity-${value}`} onClick={()=>setRarity(value)} key={value}><Stars rarity={value}/></button>)}</div>{error&&<p className="error">{error}</p>}<div className="catalog-grid">{cards.map(card=><div className={`catalog-entry ${card.owned?"owned":"locked"}`} key={card.id}><CardTile card={card.owned?card:{...card,quantity:undefined}} onClick={()=>navigate(`/card/${card.id}`)}/><span className="catalog-state">{card.owned?`보유 ×${card.quantity}`:"미획득"}</span></div>)}</div>{catalog && cards.length===0&&<div className="empty">이 등급에는 카드가 없습니다.</div>}</section>;
+}
+
+function SetArchivePage() {
+  const [sets, setSets] = useState<SetDefinition[]>([]);
+  const [activeSetNames, setActiveSetNames] = useState<string[]>([]);
+  const [error, setError] = useState("");
+  useEffect(() => { Promise.all([api<SetDefinition[]>("/api/sets"), api<Collection>("/api/collection/me")]).then(([nextSets, collection]) => { setSets(nextSets); setActiveSetNames(collection.active_sets ?? []); }).catch(e => setError(e.message)); }, []);
+  return <section className="set-archive-page"><div className="set-archive-head"><div><p className="eyebrow">SET ARCHIVE</p><h1>세트 효과 <small>{sets.length}</small></h1><p>진행도와 구성 카드, 적용 효과를 한눈에 확인하세요. 세트 판정은 현재 인벤토리 보유 카드 기준입니다.</p></div><button onClick={()=>navigate("/catalog")}>← 도감으로</button></div>{error&&<p className="error">{error}</p>}{sets.length?<SetEffectList sets={sets} progress activeSetNames={activeSetNames}/>:<div className="empty">현재 등록된 세트 효과가 없습니다.</div>}</section>;
 }
 
 function RankingPage() {
@@ -239,6 +248,6 @@ export default function App() {
   if (me === null) return <Login/>;
   if (!me.warning_acknowledged) return <Warning onDone={refresh}/>;
   let page: React.ReactNode = <DrawPage/>;
-  if(path==="/collection") page=<CollectionPage/>; else if(path==="/catalog") page=<CatalogPage/>; else if(path==="/ranking") page=<RankingPage/>; else if(path==="/search") page=<SearchPage/>; else if(path==="/settings") page=<SettingsPage me={me} refresh={refresh}/>; else if(path==="/five-stars") page=<FiveStarHistoryPage/>; else if(path==="/admin" && me.is_admin) page=<AdminPage/>; else if(path.startsWith("/profile/")) page=<ProfilePage me={me} userId={Number(path.split("/").pop())}/>; else if(path.startsWith("/trade/")) page=<TradePage me={me} roomId={path.split("/").pop()!}/>; else if(path.startsWith("/card/")) page=<CardDetailPage cardId={path.split("/").pop()!}/>;
+  if(path==="/collection") page=<CollectionPage/>; else if(path==="/catalog") page=<CatalogPage/>; else if(path==="/sets") page=<SetArchivePage/>; else if(path==="/ranking") page=<RankingPage/>; else if(path==="/search") page=<SearchPage/>; else if(path==="/settings") page=<SettingsPage me={me} refresh={refresh}/>; else if(path==="/five-stars") page=<FiveStarHistoryPage/>; else if(path==="/admin" && me.is_admin) page=<AdminPage/>; else if(path.startsWith("/profile/")) page=<ProfilePage me={me} userId={Number(path.split("/").pop())}/>; else if(path.startsWith("/trade/")) page=<TradePage me={me} roomId={path.split("/").pop()!}/>; else if(path.startsWith("/card/")) page=<CardDetailPage cardId={path.split("/").pop()!}/>;
   return <Shell me={me} feed={feed} invite={invite}>{page}</Shell>;
 }

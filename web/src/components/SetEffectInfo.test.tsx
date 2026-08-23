@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SetDefinition } from "../types";
-import { ActiveSetModal, describeSetEffect } from "./SetEffectInfo";
+import { ActiveSetModal, ActiveSetSummary, describeSetEffect, SetEffectList } from "./SetEffectInfo";
 
 const activeSet: SetDefinition = {
   id: "set-1",
@@ -26,6 +26,8 @@ const activeSet: SetDefinition = {
 };
 
 describe("set effect information", () => {
+  afterEach(cleanup);
+
   it("turns a configurable effect into a readable Korean summary", () => {
     expect(describeSetEffect(activeSet.effects[0])).toBe("1성 카드 1장당, 세트 구성 카드의 YP가 50 증가 · 최대 3회");
   });
@@ -53,5 +55,26 @@ describe("set effect information", () => {
     expect(screen.getByText("부분 적용 세트")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("shows only active sets in the compact catalog summary and opens the archive", () => {
+    const open = vi.fn();
+    const partialSet = {...activeSet, id: "set-2", name: "부분 적용 세트", completed: false};
+    render(<ActiveSetSummary sets={[activeSet, partialSet]} activeSetNames={[partialSet.name]} onOpen={open}/>);
+
+    expect(screen.getByRole("button", { name: "전체 세트 효과 보기" })).toHaveTextContent("1개 적용 중");
+    expect(screen.getByRole("button", { name: "전체 세트 효과 보기" })).toHaveTextContent("부분 적용 세트");
+    expect(screen.queryByText("별빛 세트")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "전체 세트 효과 보기" }));
+    expect(open).toHaveBeenCalledOnce();
+  });
+
+  it("marks a partially completed set as active when one of its effects is running", () => {
+    const partialSet = {...activeSet, id: "set-2", name: "부분 적용 세트", completed: false, owned_member_count: 1, required_member_count: 3};
+    render(<SetEffectList sets={[partialSet]} progress activeSetNames={[partialSet.name]}/>);
+
+    expect(screen.getByText("적용 중")).toBeInTheDocument();
+    expect(screen.queryByText("1/3")).not.toBeInTheDocument();
   });
 });
