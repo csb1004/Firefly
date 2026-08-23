@@ -78,6 +78,18 @@ export type CardSet = {
   effects: SetEffect[];
 };
 
+export type SetDefinition = {
+  id: string;
+  name: string;
+  completed: boolean;
+  owned_member_count: number;
+  required_member_count: number;
+  member_cards: Array<Pick<Card, "id" | "name" | "rarity">>;
+  effects: Array<Omit<SetEffect, "target_card_ids"> & {
+    target_cards: Array<Pick<Card, "id" | "name" | "rarity">>;
+  }>;
+};
+
 export type AdminCollectionState = {
   user: User;
   total_yp: number;

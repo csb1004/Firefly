@@ -17,6 +17,7 @@ from .routes.cards import router as cards_router
 from .routes.collections import router as collections_router
 from .routes.draws import router as draws_router
 from .routes.gifts import router as gifts_router
+from .routes.sets import router as sets_router
 from .routes.trades import router as trades_router
 from .services.trades import cancel_all_active_rooms
 
@@ -43,6 +44,7 @@ def create_app() -> FastAPI:
     app.include_router(collections_router)
     app.include_router(draws_router)
     app.include_router(gifts_router)
+    app.include_router(sets_router)
     app.include_router(trades_router)
 
     @app.get("/api/health", tags=["system"])

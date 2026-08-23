@@ -5,7 +5,8 @@ import { ImageCropper } from "./components/ImageCropper";
 import { Reveal } from "./components/Reveal";
 import { AdminCollectionManager } from "./components/AdminCollectionManager";
 import { AdminSetManager } from "./components/AdminSetManager";
-import type { Card, Catalog, Collection, DrawStatus, TradeRoom, User } from "./types";
+import { ActiveSetModal, SetEffectList } from "./components/SetEffectInfo";
+import type { Card, Catalog, Collection, DrawStatus, SetDefinition, TradeRoom, User } from "./types";
 
 type FeedItem = { id: string; drawn_at: string; user_id: number; username: string; display_name: string; card_id: string; card_name: string };
 
@@ -65,9 +66,11 @@ function DrawPage() {
 
 function CollectionPage({ userId }: { userId?: number }) {
   const [data, setData] = useState<Collection>();
+  const [sets, setSets] = useState<SetDefinition[]>([]);
+  const [showSetInfo, setShowSetInfo] = useState(false);
   const [error, setError] = useState("");
   const load = () => api<Collection>(userId ? `/api/users/${userId}/collection` : "/api/collection/me").then(setData).catch(e => setError(e.message));
-  useEffect(() => { load(); }, [userId]);
+  useEffect(() => { load(); if (!userId) api<SetDefinition[]>("/api/sets").then(setSets).catch(e => setError(e.message)); }, [userId]);
   async function discard(card: Card) {
     const quantity = Number(prompt(`${card.name} 버릴 수량 (거래 예약분 제외 최대 ${card.available_quantity})`, "1"));
     if (!Number.isInteger(quantity) || quantity < 1) return;
@@ -78,17 +81,18 @@ function CollectionPage({ userId }: { userId?: number }) {
       await load();
     } catch (e) { setError((e as Error).message); }
   }
-  return <section><div className="section-title"><div><p className="eyebrow">ARCHIVE</p><h1>컬렉션</h1></div><strong className="yp-total">{data?.total_yp.toLocaleString() ?? 0} YP</strong></div>{data?.base_yp !== undefined && <div className="yp-breakdown"><span>기본 {data.base_yp.toLocaleString()}</span><span>고정 +{data.fixed_bonus?.toLocaleString()}</span><span>최종 +{data.percent_bonus}%</span>{data.active_sets?.map(name => <b key={name}>✦ {name}</b>)}</div>}{error && <p className="error">{error}</p>}<div className="card-grid">{data?.cards.map(card => <div className="collection-card" key={card.id}><CardTile card={card} onClick={() => navigate(`/card/${card.id}`)}/>{!userId && <button className="discard-button" onClick={() => discard(card)} disabled={(card.available_quantity ?? 0) < 1}>카드 버리기</button>}</div>)}</div>{data?.cards.length === 0 && <div className="empty">아직 보유한 카드가 없습니다. 도감 해금 기록은 유지됩니다.</div>}</section>;
+  return <section><div className="section-title"><div><p className="eyebrow">ARCHIVE</p><h1>컬렉션</h1></div><div className="collection-summary-actions"><strong className="yp-total">{data?.total_yp.toLocaleString() ?? 0} YP</strong>{!userId && <button className="set-info-button" aria-label="적용 중인 세트 효과 정보" onClick={() => setShowSetInfo(true)}>i</button>}</div></div>{data?.base_yp !== undefined && <div className="yp-breakdown"><span>기본 {data.base_yp.toLocaleString()}</span><span>고정 +{data.fixed_bonus?.toLocaleString()}</span><span>최종 +{data.percent_bonus}%</span>{data.active_sets?.map(name => <b key={name}>✦ {name}</b>)}</div>}{error && <p className="error">{error}</p>}<div className="card-grid">{data?.cards.map(card => <div className="collection-card" key={card.id}><CardTile card={card} onClick={() => navigate(`/card/${card.id}`)}/>{!userId && <button className="discard-button" onClick={() => discard(card)} disabled={(card.available_quantity ?? 0) < 1}>카드 버리기</button>}</div>)}</div>{data?.cards.length === 0 && <div className="empty">아직 보유한 카드가 없습니다. 도감 해금 기록은 유지됩니다.</div>}{showSetInfo && <ActiveSetModal sets={sets} totalYp={data?.total_yp ?? 0} onClose={() => setShowSetInfo(false)}/>}</section>;
 }
 
 function CatalogPage() {
   const [catalog, setCatalog] = useState<Catalog>();
+  const [sets, setSets] = useState<SetDefinition[]>([]);
   const [rarity, setRarity] = useState(0);
   const [error, setError] = useState("");
-  useEffect(() => { api<Catalog>("/api/catalog").then(setCatalog).catch(e => setError(e.message)); }, []);
+  useEffect(() => { Promise.all([api<Catalog>("/api/catalog"), api<SetDefinition[]>("/api/sets")]).then(([nextCatalog, nextSets]) => { setCatalog(nextCatalog); setSets(nextSets); }).catch(e => setError(e.message)); }, []);
   const cards = catalog?.cards.filter(card => !rarity || card.rarity === rarity) ?? [];
   const percent = catalog?.total_count ? Math.round(catalog.owned_count / catalog.total_count * 100) : 0;
-  return <section><div className="catalog-head"><div><p className="eyebrow">CARD INDEX</p><h1>도감</h1><p>획득한 카드와 아직 만나지 못한 카드를 한눈에 확인하세요.</p></div><div className="catalog-progress"><strong>{catalog?.owned_count ?? 0}<small> / {catalog?.total_count ?? 0}</small></strong><span>수집률 {percent}%</span><i style={{width:`${percent}%`}} /></div></div><div className="rarity-filters"><button className={rarity===0?"active":""} onClick={()=>setRarity(0)}>전체</button>{[1,2,3,4,5].map(value=><button className={`${rarity===value?"active":""} rarity-${value}`} onClick={()=>setRarity(value)} key={value}><Stars rarity={value}/></button>)}</div>{error&&<p className="error">{error}</p>}<div className="catalog-grid">{cards.map(card=><div className={`catalog-entry ${card.owned?"owned":"locked"}`} key={card.id}><CardTile card={card.owned?card:{...card,quantity:undefined}} onClick={()=>navigate(`/card/${card.id}`)}/><span className="catalog-state">{card.owned?`보유 ×${card.quantity}`:"미획득"}</span></div>)}</div>{catalog && cards.length===0&&<div className="empty">이 등급에는 카드가 없습니다.</div>}</section>;
+  return <section><div className="catalog-head"><div><p className="eyebrow">CARD INDEX</p><h1>도감</h1><p>획득한 카드와 아직 만나지 못한 카드를 한눈에 확인하세요.</p></div><div className="catalog-progress"><strong>{catalog?.owned_count ?? 0}<small> / {catalog?.total_count ?? 0}</small></strong><span>수집률 {percent}%</span><i style={{width:`${percent}%`}} /></div></div><div className="rarity-filters"><button className={rarity===0?"active":""} onClick={()=>setRarity(0)}>전체</button>{[1,2,3,4,5].map(value=><button className={`${rarity===value?"active":""} rarity-${value}`} onClick={()=>setRarity(value)} key={value}><Stars rarity={value}/></button>)}</div>{error&&<p className="error">{error}</p>}<div className="catalog-grid">{cards.map(card=><div className={`catalog-entry ${card.owned?"owned":"locked"}`} key={card.id}><CardTile card={card.owned?card:{...card,quantity:undefined}} onClick={()=>navigate(`/card/${card.id}`)}/><span className="catalog-state">{card.owned?`보유 ×${card.quantity}`:"미획득"}</span></div>)}</div>{catalog && cards.length===0&&<div className="empty">이 등급에는 카드가 없습니다.</div>}<section className="catalog-sets"><div className="section-title"><div><p className="eyebrow">SET ARCHIVE</p><h2>세트 효과</h2><p>세트 판정은 도감 해금이 아닌 현재 인벤토리 보유 카드 기준입니다.</p></div></div>{sets.length ? <SetEffectList sets={sets} progress/> : <div className="empty">등록된 세트 효과가 없습니다.</div>}</section></section>;
 }
 
 function RankingPage() {
