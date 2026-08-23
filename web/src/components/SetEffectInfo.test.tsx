@@ -42,7 +42,7 @@ describe("set effect information", () => {
   afterEach(cleanup);
 
   it("turns a configurable effect into a readable Korean summary", () => {
-    expect(describeSetEffect(activeSet.effects[0], 1)).toBe("세트 완성 후, 보유 중인 1성 카드 1장당, 보유 중인 세트 구성 카드의 YP가 50 증가 · 최대 3회 적용");
+    expect(describeSetEffect(activeSet.effects[0], activeSet.member_cards)).toBe("세트 완성 후, 보유 중인 1성 카드 1장당, 보유 중인 별빛 카드의 YP가 50 증가 · 최대 3회 적용");
   });
 
   it("describes a one-time whole-collection effect without repeating ownership", () => {
@@ -70,7 +70,7 @@ describe("set effect information", () => {
       bonus_type: "percent",
       value: 5,
       max_count: null,
-    }, 1)).toBe("세트 구성 카드 보유 시, 보유 중인 세트 구성 카드의 최종 YP가 5% 증가");
+    }, activeSet.member_cards)).toBe("별빛 카드 보유 시, 보유 중인 별빛 카드의 최종 YP가 5% 증가");
   });
 
   it("uses plural wording for a set with multiple cards", () => {
@@ -84,7 +84,11 @@ describe("set effect information", () => {
       bonus_type: "percent",
       value: 5,
       max_count: null,
-    }, 3)).toBe("보유 중인 세트 구성 카드 종류당, 보유 중인 세트 구성 카드 각각의 최종 YP가 5% 증가");
+    }, [
+      ...activeSet.member_cards,
+      { id: "card-2", name: "달빛 카드", rarity: 4 },
+      { id: "card-3", name: "햇빛 카드", rarity: 3 },
+    ])).toBe("보유 중인 세트 구성 카드 종류당, 보유 중인 세트 구성 카드 각각의 최종 YP가 5% 증가");
   });
 
   it("lists selected card names with commas and adjusts singular and plural wording", () => {

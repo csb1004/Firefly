@@ -2,13 +2,16 @@ import { useEffect } from "react";
 import type { SetDefinition } from "../types";
 import { Stars } from "./CardTile";
 
-export function describeSetEffect(effect: SetDefinition["effects"][number], setMemberCount = 2) {
+export function describeSetEffect(effect: SetDefinition["effects"][number], setMembers: SetDefinition["member_cards"] = []) {
+  const singleSetMember = setMembers.length === 1 ? setMembers[0].name : null;
+  const setMemberLabel = singleSetMember ?? "세트 구성 카드";
+
   function selectedCardLabel(cards: typeof effect.target_cards) {
     return cards.map(card => card.name).join(", ") || "선택한 카드";
   }
 
   function countTargetLabel() {
-    if (effect.target_scope === "set_members") return "보유 중인 세트 구성 카드";
+    if (effect.target_scope === "set_members") return `보유 중인 ${setMemberLabel}`;
     if (effect.target_scope === "selected_cards") return effect.target_cards.length === 1
       ? `보유 중인 ${selectedCardLabel(effect.target_cards)}`
       : `${selectedCardLabel(effect.target_cards)} 중 보유 카드`;
@@ -17,7 +20,7 @@ export function describeSetEffect(effect: SetDefinition["effects"][number], setM
   }
 
   function bonusTarget() {
-    if (effect.bonus_target_scope === "set_members") return { label: "보유 중인 세트 구성 카드", plural: setMemberCount !== 1 };
+    if (effect.bonus_target_scope === "set_members") return { label: `보유 중인 ${setMemberLabel}`, plural: !singleSetMember };
     if (effect.bonus_target_scope === "selected_cards") return {
       label: effect.bonus_target_cards.length === 1
         ? `보유 중인 ${selectedCardLabel(effect.bonus_target_cards)}`
@@ -38,7 +41,7 @@ export function describeSetEffect(effect: SetDefinition["effects"][number], setM
     }
   }
   else if (effect.count_mode === "distinct") {
-    if (effect.target_scope === "set_members" && setMemberCount === 1) condition = "세트 구성 카드 보유 시";
+    if (effect.target_scope === "set_members" && singleSetMember) condition = `${singleSetMember} 보유 시`;
     else if (effect.target_scope === "selected_cards" && effect.target_cards.length === 1) condition = `${selectedCardLabel(effect.target_cards)} 보유 시`;
     else if (effect.target_scope === "selected_cards") condition = `${selectedCardLabel(effect.target_cards)} 중 보유한 카드 종류당`;
     else condition = `${countTargetLabel()} 종류당`;
@@ -79,7 +82,7 @@ export function SetEffectList({ sets, progress = false, activeSetNames }: { sets
         <span className={`set-effect-gain ${bonus.total > 0 ? "positive" : "zero"}`}><small>세트 효과</small><strong>+{formatYp(bonus.total)} YP</strong></span>
       </div></header>
       <div className="set-members">{cardSet.member_cards.map(card => <span className={`rarity-${card.rarity}`} key={card.id}><b>{card.name}</b><Stars rarity={card.rarity}/></span>)}</div>
-      <ul>{cardSet.effects.map((effect, index) => <li key={effect.id ?? index}>{describeSetEffect(effect, cardSet.member_cards.length)}</li>)}</ul>
+      <ul>{cardSet.effects.map((effect, index) => <li key={effect.id ?? index}>{describeSetEffect(effect, cardSet.member_cards)}</li>)}</ul>
       <SetBonusDetails bonus={bonus}/>
     </article>;
   })}</div>;
