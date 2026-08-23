@@ -27,6 +27,18 @@ describe("set effect information", () => {
     expect(describeSetEffect(activeSet.effects[0])).toBe("1성 카드 1장당 YP 50 증가 · 최대 3회");
   });
 
+  it("describes a one-time whole-collection effect without repeating ownership", () => {
+    expect(describeSetEffect({
+      ...activeSet.effects[0],
+      target_scope: "collection",
+      target_rarity: null,
+      count_mode: "once",
+      bonus_type: "percent",
+      value: 20,
+      max_count: null,
+    })).toBe("세트 완성 시 보유 중인 모든 카드의 최종 YP 20% 증가");
+  });
+
   it("shows only completed sets in the inventory information dialog", () => {
     const close = vi.fn();
     render(<ActiveSetModal sets={[activeSet, {...activeSet, id: "set-2", name: "미완성 세트", completed: false}]} totalYp={1250} onClose={close}/>);

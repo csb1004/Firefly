@@ -10,7 +10,11 @@ export function describeSetEffect(effect: SetDefinition["effects"][number]) {
   else target = "보유 중인 모든 카드";
 
   let condition: string;
-  if (effect.count_mode === "once") condition = effect.target_scope === "set_members" ? "세트 완성 시" : `${target} 보유 시`;
+  if (effect.count_mode === "once") {
+    if (effect.target_scope === "set_members") condition = "세트 완성 시";
+    else if (effect.target_scope === "collection") condition = "세트 완성 시 보유 중인 모든 카드의";
+    else condition = `${target} 보유 시`;
+  }
   else if (effect.count_mode === "distinct") condition = `${target} 종류당`;
   else condition = `${target} 1장당`;
 
