@@ -125,7 +125,7 @@ def test_daily_allowance_can_restore_draws_without_resetting_pity(web_db):
         assert db.get(DrawState, user.id).pulls_since_five >= pity_before
 
 
-def test_daily_draw_is_idempotent_and_collection_yp_counts_card_once(web_db):
+def test_daily_draw_is_idempotent_and_collection_yp_counts_every_copy(web_db):
     with web_db() as db:
         user = User(discord_id="draw-user", username="draw", warning_acknowledged=True)
         db.add(user)
@@ -151,7 +151,7 @@ def test_daily_draw_is_idempotent_and_collection_yp_counts_card_once(web_db):
         assert inventory.quantity == 1
         inventory.quantity = 5
         db.commit()
-        assert collection_yp(db, user.id) == first.card.yp
+        assert collection_yp(db, user.id) == first.card.yp * 5
 
         with pytest.raises(HTTPException) as error:
             perform_draw(

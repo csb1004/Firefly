@@ -17,14 +17,15 @@ def gift_setup(db):
     return sender, receiver, card
 
 
-def test_gift_preview_shows_last_copy_yp_effect(web_db):
+def test_gift_preview_shows_yp_effect_for_every_transferred_copy(web_db):
     with web_db() as db:
         sender, receiver, card = gift_setup(db)
         partial = preview_gift(db, sender.id, receiver.id, card.id, 4)
-        assert partial.sender_yp_change == 0
-        assert partial.receiver_yp_change == 400
+        assert partial.sender_yp_change == -1600
+        assert partial.receiver_yp_change == 1600
         last = preview_gift(db, sender.id, receiver.id, card.id, 5)
-        assert last.sender_yp_change == -400
+        assert last.sender_yp_change == -2000
+        assert last.receiver_yp_change == 2000
 
 
 def test_gift_transfers_once_and_creates_outbox_in_same_commit(web_db):
@@ -35,7 +36,7 @@ def test_gift_transfers_once_and_creates_outbox_in_same_commit(web_db):
         assert db.get(Inventory, (sender.id, card.id)).quantity == 1
         assert db.get(Inventory, (receiver.id, card.id)).quantity == 4
         assert collection_yp(db, sender.id) == 400
-        assert collection_yp(db, receiver.id) == 400
+        assert collection_yp(db, receiver.id) == 1600
         assert db.query(NotificationOutbox).count() == 1
 
         same, same_preview, repeated = send_gift(db, sender.id, receiver.id, card.id, 4, "gift-idempotency")

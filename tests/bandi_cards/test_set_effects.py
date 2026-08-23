@@ -2,6 +2,27 @@ from bandi_cards.models import Card, CardSet, CardSetMember, Inventory, SetEffec
 from bandi_cards.services.set_effects import effective_yp
 
 
+def test_base_yp_counts_every_copy_while_set_activates_once(web_db):
+    with web_db() as db:
+        user = User(discord_id="copy-user", username="copies", warning_acknowledged=True)
+        card = Card(name="중복 카드", rarity=4, yp=100, image_key="cards/copies.webp")
+        card_set = CardSet(name="중복되지 않는 세트", active=True)
+        db.add_all([user, card, card_set])
+        db.flush()
+        db.add_all([
+            Inventory(user_id=user.id, card_id=card.id, quantity=3),
+            CardSetMember(set_id=card_set.id, card_id=card.id),
+            SetEffect(set_id=card_set.id, target_scope="collection", count_mode="once", bonus_type="fixed", value=50),
+        ])
+        db.commit()
+
+        result = effective_yp(db, user.id)
+        assert result.base_yp == 300
+        assert result.fixed_bonus == 50
+        assert result.total_yp == 350
+        assert result.active_sets == ("중복되지 않는 세트",)
+
+
 def test_fixed_then_linear_percent_effects_use_inventory_counts(web_db):
     with web_db() as db:
         user = User(discord_id="set-user", username="set", warning_acknowledged=True)

@@ -25,7 +25,7 @@ def _evaluate(
     effects: dict[str, list[SetEffect]],
     targets: dict[str, set[str]],
 ) -> YPBreakdown:
-    base = sum(card.yp for card, quantity in owned.values() if quantity > 0)
+    base = sum(card.yp * quantity for card, quantity in owned.values() if quantity > 0)
     fixed = Decimal(0)
     percent = Decimal(0)
     active_names: list[str] = []
