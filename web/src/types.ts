@@ -48,6 +48,29 @@ export type DrawStatus = {
   five_remaining: number;
 };
 
+export type DrawHistoryItem = {
+  id: string;
+  draw_number: number;
+  drawn_at: string;
+  draw_day: string;
+  ticket_source: "daily" | "bonus";
+  batch_id: string | null;
+  batch_position: number | null;
+  card_id: string | null;
+  card_name: string;
+  card_rarity: number;
+  card_yp: number;
+  image_url: string | null;
+};
+
+export type DrawHistoryResponse = {
+  page: number;
+  page_size: number;
+  total: number;
+  summary: { total_draws: number; four_remaining: number; five_remaining: number };
+  items: DrawHistoryItem[];
+};
+
 export type TradeRoom = {
   id: string;
   status: string;

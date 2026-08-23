@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -72,11 +72,16 @@ def init_database(target_engine: Engine | None = None) -> None:
 
     active_engine = target_engine or engine
     Base.metadata.create_all(active_engine)
+    if active_engine.dialect.name == "sqlite":
+        columns = {column["name"] for column in inspect(active_engine).get_columns("draw_settings")}
+        if "new_user_bonus_tickets" not in columns:
+            with active_engine.begin() as connection:
+                connection.execute(text("ALTER TABLE draw_settings ADD COLUMN new_user_bonus_tickets INTEGER NOT NULL DEFAULT 0"))
     with Session(active_engine) as db:
         existing = set(db.scalars(select(RaritySetting.rarity)).all())
         for rarity, probability in DEFAULT_RARITY_PROBABILITIES.items():
             if rarity not in existing:
                 db.add(RaritySetting(rarity=rarity, probability=probability))
         if db.get(DrawSetting, 1) is None:
-            db.add(DrawSetting(id=1, daily_draws=1))
+            db.add(DrawSetting(id=1, daily_draws=1, new_user_bonus_tickets=0))
         db.commit()

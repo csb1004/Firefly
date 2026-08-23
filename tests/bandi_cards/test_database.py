@@ -29,6 +29,7 @@ def test_default_rarity_probabilities_are_seeded(db: Session):
     actual = {row.rarity: float(row.probability) for row in db.query(RaritySetting).all()}
     assert actual == DEFAULT_RARITY_PROBABILITIES
     assert db.get(DrawSetting, 1).daily_draws == 1
+    assert db.get(DrawSetting, 1).new_user_bonus_tickets == 0
 
 
 def test_inventory_rejects_reserved_quantity_above_quantity(db: Session):

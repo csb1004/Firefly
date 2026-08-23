@@ -111,6 +111,11 @@ def daily_draw_limit(db: Session) -> int:
     return int(setting.daily_draws) if setting is not None else 1
 
 
+def new_user_bonus_limit(db: Session) -> int:
+    setting = db.get(DrawSetting, 1)
+    return int(setting.new_user_bonus_tickets) if setting is not None else 0
+
+
 def draw_ticket_status(db: Session, user_id: int, now: datetime | None = None) -> dict[str, int | bool]:
     draw_day = logical_draw_day(now)
     daily_used = int(

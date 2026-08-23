@@ -7,11 +7,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import Card, DrawHistory, FiveStarEvent, Inventory, User
+from ..models import Card, DrawHistory, DrawState, FiveStarEvent, Inventory, User
 from ..security import require_csrf_user, require_ready_user
 from ..services.card_assets import asset_store
 from ..services.discord_oauth import avatar_url
-from ..services.draws import collection_yp, draw_ticket_status, perform_draw, perform_draw_batch, user_probability_view
+from ..services.draws import collection_yp, draw_counters, draw_ticket_status, perform_draw, perform_draw_batch, user_probability_view
 from ..services.set_effects import effective_yp, effective_yp_many
 
 
@@ -41,6 +41,49 @@ def draw_status(user: User = Depends(require_ready_user), db: Session = Depends(
     return {
         **draw_ticket_status(db, user.id),
         **{key: probability[key] for key in ("four_remaining", "five_remaining")},
+    }
+
+
+@router.get("/draw/history")
+def draw_history(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    user: User = Depends(require_ready_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    total = int(db.scalar(select(func.count(DrawHistory.id)).where(DrawHistory.user_id == user.id)) or 0)
+    offset = (page - 1) * page_size
+    rows = db.execute(
+        select(DrawHistory, Card)
+        .outerjoin(Card, Card.id == DrawHistory.card_id)
+        .where(DrawHistory.user_id == user.id)
+        .order_by(DrawHistory.drawn_at.desc(), DrawHistory.batch_position.desc(), DrawHistory.id.desc())
+        .offset(offset)
+        .limit(page_size)
+    ).all()
+    four_count, five_count = draw_counters(db.get(DrawState, user.id))
+    return {
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "summary": {"total_draws": total, "four_remaining": 10 - four_count, "five_remaining": 90 - five_count},
+        "items": [
+            {
+                "id": history.id,
+                "draw_number": total - offset - index,
+                "drawn_at": history.drawn_at.isoformat(),
+                "draw_day": history.draw_day.isoformat(),
+                "ticket_source": history.ticket_source,
+                "batch_id": history.batch_id,
+                "batch_position": history.batch_position,
+                "card_id": history.card_id,
+                "card_name": history.card_name,
+                "card_rarity": history.card_rarity,
+                "card_yp": history.card_yp,
+                "image_url": asset_store.url(card.image_key) if card is not None else None,
+            }
+            for index, (history, card) in enumerate(rows)
+        ],
     }
 
 

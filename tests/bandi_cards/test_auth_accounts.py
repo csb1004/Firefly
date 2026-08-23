@@ -1,7 +1,9 @@
 from datetime import timedelta
 
-from bandi_cards.models import User, WebSession, utcnow
+from bandi_cards.models import DrawSetting, DrawWallet, OAuthAttempt, User, WebSession, utcnow
 from bandi_cards.security import SESSION_COOKIE, random_token, token_hash
+from bandi_cards.services.discord_oauth import DiscordProfile
+from bandi_cards.services.draws import draw_ticket_status
 
 
 def test_first_login_warning_blocks_search_until_acknowledged(signed_in):
@@ -78,3 +80,41 @@ def test_csrf_token_is_stable_across_tabs_for_the_same_session(signed_in):
     second = client.post("/api/auth/csrf").json()["csrf_token"]
     assert first == second == csrf
     assert client.post("/api/me/warning", headers={"X-CSRF-Token": first}).status_code == 204
+
+
+def test_first_discord_login_gets_current_daily_allowance_and_one_time_bonus(web_client, web_db, monkeypatch):
+    async def fake_exchange(_code, _verifier):
+        return DiscordProfile(id="new-discord-user", username="newbie", global_name="신규 사용자", avatar=None)
+
+    monkeypatch.setattr("bandi_cards.routes.auth.exchange_code", fake_exchange)
+    with web_db() as db:
+        setting = db.get(DrawSetting, 1)
+        setting.daily_draws = 4
+        setting.new_user_bonus_tickets = 6
+        db.add(OAuthAttempt(state_hash=token_hash("first-state"), verifier="verifier", expires_at=utcnow() + timedelta(minutes=5)))
+        db.commit()
+
+    response = web_client.get(
+        "/api/auth/discord/callback",
+        params={"code": "code", "state": "first-state"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 307
+
+    with web_db() as db:
+        user = db.query(User).filter_by(discord_id="new-discord-user").one()
+        status = draw_ticket_status(db, user.id)
+        assert status["daily_remaining"] == 4
+        assert status["bonus_tickets"] == 6
+        assert status["draws_remaining"] == 10
+        db.add(OAuthAttempt(state_hash=token_hash("second-state"), verifier="verifier", expires_at=utcnow() + timedelta(minutes=5)))
+        db.commit()
+
+    web_client.get(
+        "/api/auth/discord/callback",
+        params={"code": "code", "state": "second-state"},
+        follow_redirects=False,
+    )
+    with web_db() as db:
+        user = db.query(User).filter_by(discord_id="new-discord-user").one()
+        assert db.get(DrawWallet, user.id).bonus_tickets == 6

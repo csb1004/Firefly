@@ -233,10 +233,12 @@ class DrawSetting(Base):
     __table_args__ = (
         CheckConstraint("id = 1", name="ck_draw_settings_singleton"),
         CheckConstraint("daily_draws >= 0 AND daily_draws <= 100", name="ck_draw_settings_daily_range"),
+        CheckConstraint("new_user_bonus_tickets >= 0 AND new_user_bonus_tickets <= 10000", name="ck_draw_settings_new_user_bonus_range"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     daily_draws: Mapped[int] = mapped_column(Integer, default=1)
+    new_user_bonus_tickets: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 

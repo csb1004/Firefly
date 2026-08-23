@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import AdminAudit, DailyDrawAllowance, DrawHistory, DrawSetting, DrawWallet, User
 from ..security import require_admin, require_admin_csrf
-from ..services.draws import daily_draw_limit, draw_ticket_status, logical_draw_day
+from ..services.draws import daily_draw_limit, draw_ticket_status, logical_draw_day, new_user_bonus_limit
 from .accounts import public_user
 
 
@@ -19,6 +19,7 @@ router = APIRouter(prefix="/api/admin", tags=["draw administration"])
 
 class DailyDrawsBody(BaseModel):
     daily_draws: int = Field(ge=0, le=100)
+    new_user_bonus_tickets: int | None = Field(default=None, ge=0, le=10_000)
 
 
 class GrantTicketsBody(BaseModel):
@@ -31,7 +32,7 @@ def ticket_view(db: Session, user: User) -> dict:
 
 @router.get("/draw-settings")
 def get_draw_settings(_: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict:
-    return {"daily_draws": daily_draw_limit(db)}
+    return {"daily_draws": daily_draw_limit(db), "new_user_bonus_tickets": new_user_bonus_limit(db)}
 
 
 @router.put("/draw-settings")
@@ -42,22 +43,25 @@ def update_draw_settings(
 ) -> dict:
     setting = db.scalar(select(DrawSetting).where(DrawSetting.id == 1).with_for_update())
     before = daily_draw_limit(db)
+    before_new_user_bonus = new_user_bonus_limit(db)
+    new_user_bonus = body.new_user_bonus_tickets if body.new_user_bonus_tickets is not None else before_new_user_bonus
     if setting is None:
-        setting = DrawSetting(id=1, daily_draws=body.daily_draws)
+        setting = DrawSetting(id=1, daily_draws=body.daily_draws, new_user_bonus_tickets=new_user_bonus)
         db.add(setting)
     else:
         setting.daily_draws = body.daily_draws
+        setting.new_user_bonus_tickets = new_user_bonus
     db.add(
         AdminAudit(
             admin_id=admin.id,
-            action="draw.daily_limit.update",
+            action="draw.settings.update",
             target_type="draw_setting",
             target_id="1",
-            details_json=json.dumps({"before": before, "after": body.daily_draws}),
+            details_json=json.dumps({"daily_draws": {"before": before, "after": body.daily_draws}, "new_user_bonus_tickets": {"before": before_new_user_bonus, "after": new_user_bonus}}),
         )
     )
     db.commit()
-    return {"daily_draws": body.daily_draws}
+    return {"daily_draws": body.daily_draws, "new_user_bonus_tickets": new_user_bonus}
 
 
 @router.get("/users/{user_id}/draw-tickets")

@@ -49,10 +49,11 @@ def test_admin_configures_daily_draws_grants_tickets_and_resets_today(admin_sign
     configured = client.put(
         "/api/admin/draw-settings",
         headers={"X-CSRF-Token": csrf},
-        json={"daily_draws": 3},
+        json={"daily_draws": 3, "new_user_bonus_tickets": 7},
     )
     assert configured.status_code == 200
     assert configured.json()["daily_draws"] == 3
+    assert configured.json()["new_user_bonus_tickets"] == 7
 
     granted = client.post(
         f"/api/admin/users/{target_id}/draw-tickets/grant",
@@ -80,6 +81,7 @@ def test_admin_configures_daily_draws_grants_tickets_and_resets_today(admin_sign
 
     with factory() as db:
         assert db.get(DrawSetting, 1).daily_draws == 3
+        assert db.get(DrawSetting, 1).new_user_bonus_tickets == 7
         assert db.get(DrawWallet, target_id).bonus_tickets == 5
 
 

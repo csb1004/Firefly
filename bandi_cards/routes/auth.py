@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import get_db
-from ..models import OAuthAttempt, User, WebSession, WebSocketTicket, as_utc, utcnow
+from ..models import DrawWallet, OAuthAttempt, User, WebSession, WebSocketTicket, as_utc, utcnow
 from ..security import (
     ABSOLUTE_TIMEOUT,
     SESSION_COOKIE,
@@ -23,6 +23,7 @@ from ..security import (
     token_hash,
 )
 from ..services.discord_oauth import authorization_url, avatar_url, exchange_code
+from ..services.draws import new_user_bonus_limit
 
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
@@ -78,6 +79,7 @@ async def discord_callback(
     user = db.scalar(select(User).where(User.discord_id == profile.id))
     now = utcnow()
     if user is None:
+        newcomer_bonus = new_user_bonus_limit(db)
         user = User(
             discord_id=profile.id,
             username=profile.username,
@@ -88,6 +90,8 @@ async def discord_callback(
         )
         db.add(user)
         db.flush()
+        if newcomer_bonus:
+            db.add(DrawWallet(user_id=user.id, bonus_tickets=newcomer_bonus))
     else:
         user.username = profile.username
         user.global_name = profile.global_name
