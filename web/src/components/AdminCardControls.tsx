@@ -1,0 +1,19 @@
+import { useEffect, useState } from "react";
+import { api } from "../api";
+import type { Card } from "../types";
+
+export type CardEditValues = { name: string; rarity: number; yp: number; weight: string };
+
+type DeletePreview = { affected_players: number; total_copies: number; active_trade_rooms: number };
+
+export function AdminCardControls({ card, open, onToggle, onSave, onToggleActive, onImage, onRemoved, onError }: { card: Card; open: boolean; onToggle: () => void; onSave: (values: CardEditValues) => Promise<void>; onToggleActive: () => Promise<void>; onImage: (file: File) => void; onRemoved: () => Promise<void>; onError: (message: string) => void }) {
+  const [values, setValues] = useState<CardEditValues>({ name: card.name, rarity: card.rarity, yp: card.yp, weight: card.weight ? String(card.weight) : "" });
+  const [busy, setBusy] = useState(false);
+  const [deletePreview, setDeletePreview] = useState<DeletePreview>();
+  const [deleteName, setDeleteName] = useState("");
+  useEffect(() => { setValues({ name: card.name, rarity: card.rarity, yp: card.yp, weight: card.weight ? String(card.weight) : "" }); }, [card]);
+  async function run(action: () => Promise<void>) { setBusy(true); try { await action(); } finally { setBusy(false); } }
+  async function beginDelete() { setBusy(true); try { setDeletePreview(await api<DeletePreview>(`/api/admin/cards/${card.id}/delete-preview`)); } catch (error) { onError((error as Error).message); } finally { setBusy(false); } }
+  async function remove() { setBusy(true); try { await api(`/api/admin/cards/${card.id}`, { method: "DELETE", body: JSON.stringify({ confirm_name: deleteName }) }, true); await onRemoved(); } catch (error) { onError((error as Error).message); } finally { setBusy(false); } }
+  return <><button className="admin-card-manage-toggle" aria-expanded={open} onClick={() => { setDeletePreview(undefined); setDeleteName(""); onToggle(); }}>{open ? "닫기" : "관리"}</button>{open && <div className="admin-card-inline-editor"><label>이름<input value={values.name} maxLength={100} onChange={event => setValues({...values, name: event.target.value})}/></label><div className="admin-card-fields"><label>등급<select value={values.rarity} onChange={event => setValues({...values, rarity: Number(event.target.value)})}>{[1,2,3,4,5].map(rarity => <option value={rarity} key={rarity}>{rarity}성</option>)}</select></label><label>YP<input type="number" min="0" value={values.yp} onChange={event => setValues({...values, yp: Number(event.target.value)})}/></label><label>가중치<input type="number" min="0.000001" step="any" placeholder="동일" value={values.weight} onChange={event => setValues({...values, weight: event.target.value})}/></label></div><button disabled={busy || !values.name.trim()} onClick={() => run(() => onSave(values))}>정보 저장</button><div className="admin-card-secondary-actions"><label className="file-button">이미지 교체<input type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={event => { const file=event.target.files?.[0]; if (file) onImage(file); event.target.value=""; }}/></label><button disabled={busy} onClick={() => run(onToggleActive)}>{card.active ? "뽑기 제외" : "다시 활성화"}</button><button className="danger" disabled={busy} onClick={beginDelete}>영구 삭제</button></div>{deletePreview && <div className="inline-delete-confirm"><p>플레이어 {deletePreview.affected_players}명 · {deletePreview.total_copies}장 · 활성 거래방 {deletePreview.active_trade_rooms}개에 영향을 줍니다.</p><label>확인을 위해 카드 이름 입력<input value={deleteName} onChange={event => setDeleteName(event.target.value)} placeholder={card.name}/></label><div><button onClick={() => { setDeletePreview(undefined); setDeleteName(""); }}>취소</button><button className="danger" disabled={busy || deleteName !== card.name} onClick={remove}>영구 삭제 확정</button></div></div>}</div>}</>;
+}
