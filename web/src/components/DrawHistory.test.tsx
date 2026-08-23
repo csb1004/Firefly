@@ -23,6 +23,19 @@ const response = {
     card_rarity: 5,
     card_yp: 500,
     image_url: "/card.webp",
+  }, {
+    id: "draw-2",
+    draw_number: 50,
+    drawn_at: "2026-08-23T00:00:00+00:00",
+    draw_day: "2026-08-23",
+    ticket_source: "daily" as const,
+    batch_id: null,
+    batch_position: null,
+    card_id: "card-2",
+    card_name: "출석 카드",
+    card_rarity: 3,
+    card_yp: 300,
+    image_url: "/daily-card.webp",
   }],
 };
 
@@ -33,13 +46,14 @@ describe("DrawHistoryPage", () => {
     vi.mocked(api).mockResolvedValue(response);
   });
 
-  it("shows lifetime draw numbers, pity summary, and batch position", async () => {
+  it("shows lifetime draw numbers, pity summary, and ticket sources only", async () => {
     render(<DrawHistoryPage onCard={vi.fn()}/>);
 
     expect(await screen.findByText("#51")).toBeInTheDocument();
     expect(screen.getByText("황금 카드")).toBeInTheDocument();
-    expect(screen.getByText("10회 뽑기 · 4번째")).toBeInTheDocument();
     expect(screen.getByText("추가 뽑기권")).toBeInTheDocument();
+    expect(screen.getByText("출석 뽑기권")).toBeInTheDocument();
+    expect(screen.queryByText(/10회 뽑기|1회 뽑기|번째/)).not.toBeInTheDocument();
     expect(screen.getByText("39회")).toBeInTheDocument();
   });
 

@@ -22,7 +22,7 @@ export function DrawHistoryPage({ onCard }: { onCard: (cardId: string) => void }
       <strong className="draw-history-number">#{item.draw_number}</strong>
       <div className="draw-history-art">{item.image_url?<img src={item.image_url} alt=""/>:<span>이미지 없음</span>}</div>
       <div className="draw-history-card"><button disabled={!item.card_id} aria-label={`${item.card_name} 상세 보기`} onClick={()=>item.card_id&&onCard(item.card_id)}>{item.card_name}</button><Stars rarity={item.card_rarity}/><small>{item.card_yp.toLocaleString()} YP</small></div>
-      <div className="draw-history-source"><b>{item.batch_id ? `10회 뽑기 · ${(item.batch_position ?? 0) + 1}번째` : "1회 뽑기"}</b><small>{item.ticket_source === "daily" ? "매일 기본 지급" : "추가 뽑기권"}</small></div>
+      <div className="draw-history-source"><b>{item.ticket_source === "daily" ? "출석 뽑기권" : "추가 뽑기권"}</b></div>
       <time>{new Date(item.drawn_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</time>
     </article>)}</div>
     {data&&data.items.length===0&&<div className="empty">아직 뽑기 기록이 없습니다.</div>}
