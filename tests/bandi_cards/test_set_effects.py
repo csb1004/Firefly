@@ -83,6 +83,44 @@ def test_count_target_and_bonus_target_are_independent(web_db):
         assert result.total_yp == 900
 
 
+def test_distinct_effect_applies_before_the_set_is_complete(web_db):
+    with web_db() as db:
+        user = User(discord_id="partial-set-user", username="partial", warning_acknowledged=True)
+        owned_member = Card(name="보유한 세트 카드", rarity=3, yp=100, image_key="cards/owned-member.webp")
+        missing_member = Card(name="없는 세트 카드", rarity=3, yp=200, image_key="cards/missing-member.webp")
+        card_set = CardSet(name="부분 적용 세트", active=True)
+        db.add_all([user, owned_member, missing_member, card_set])
+        db.flush()
+        db.add_all([
+            Inventory(user_id=user.id, card_id=owned_member.id, quantity=1),
+            CardSetMember(set_id=card_set.id, card_id=owned_member.id),
+            CardSetMember(set_id=card_set.id, card_id=missing_member.id),
+            SetEffect(
+                set_id=card_set.id,
+                target_scope="set_members",
+                count_mode="distinct",
+                bonus_target_scope="set_members",
+                bonus_type="fixed",
+                value=50,
+            ),
+            SetEffect(
+                set_id=card_set.id,
+                target_scope="set_members",
+                count_mode="once",
+                bonus_target_scope="set_members",
+                bonus_type="fixed",
+                value=500,
+            ),
+        ])
+        db.commit()
+
+        result = effective_yp(db, user.id)
+        assert result.base_yp == 100
+        assert result.fixed_bonus == 50
+        assert result.total_yp == 150
+        assert result.active_sets == ("부분 적용 세트",)
+
+
 def test_set_deactivates_when_last_member_copy_is_missing(web_db):
     with web_db() as db:
         user = User(discord_id="missing-member", username="missing", warning_acknowledged=True)

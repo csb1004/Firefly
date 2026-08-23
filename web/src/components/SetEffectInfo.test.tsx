@@ -44,12 +44,13 @@ describe("set effect information", () => {
     })).toBe("보유 카드가 있을 때, 보유 중인 모든 카드의 최종 YP가 20% 증가");
   });
 
-  it("shows only completed sets in the inventory information dialog", () => {
+  it("shows the sets reported as active even when a distinct effect is partially unlocked", () => {
     const close = vi.fn();
-    render(<ActiveSetModal sets={[activeSet, {...activeSet, id: "set-2", name: "미완성 세트", completed: false}]} totalYp={1250} onClose={close}/>);
+    const partialSet = {...activeSet, id: "set-2", name: "부분 적용 세트", completed: false};
+    render(<ActiveSetModal sets={[activeSet, partialSet]} activeSetNames={[partialSet.name]} totalYp={1250} onClose={close}/>);
     expect(screen.getByRole("dialog", { name: "적용 중인 세트 효과" })).toBeInTheDocument();
-    expect(screen.getByText("별빛 세트")).toBeInTheDocument();
-    expect(screen.queryByText("미완성 세트")).not.toBeInTheDocument();
+    expect(screen.queryByText("별빛 세트")).not.toBeInTheDocument();
+    expect(screen.getByText("부분 적용 세트")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(close).toHaveBeenCalledOnce();
   });

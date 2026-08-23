@@ -50,10 +50,13 @@ def _evaluate(
 
     for card_set in sets:
         required = members.get(card_set.id, set())
-        if not required or not required.issubset(owned_ids):
+        if not required:
             continue
-        active_names.append(card_set.name)
+        completed = required.issubset(owned_ids)
+        set_is_active = False
         for effect in effects.get(card_set.id, []):
+            if effect.count_mode != "distinct" and not completed:
+                continue
             candidate_ids = matching_ids(effect.target_scope, effect.target_rarity, targets.get(effect.id, set()), required)
             qualifying = [owned[card_id] for card_id in candidate_ids if card_id in owned and owned[card_id][1] > 0]
             if effect.count_mode == "once":
@@ -70,6 +73,9 @@ def _evaluate(
             matched_bonus_ids = matching_ids(bonus_scope, bonus_rarity, selected_bonus_ids, required) & owned_ids
             if count and matched_bonus_ids:
                 active_effects.append((effect, count, matched_bonus_ids))
+                set_is_active = True
+        if set_is_active:
+            active_names.append(card_set.name)
 
     for effect, count, matched_bonus_ids in active_effects:
         if effect.bonus_type != "fixed":

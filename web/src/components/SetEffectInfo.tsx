@@ -30,8 +30,9 @@ export function SetEffectList({ sets, progress = false }: { sets: SetDefinition[
   return <div className="set-effect-cards">{sets.map(cardSet => <article className={`set-effect-card ${cardSet.completed ? "completed" : "incomplete"}`} key={cardSet.id}><header><div><p className="eyebrow">SET EFFECT</p><h3>{cardSet.name}</h3></div>{progress && <span>{cardSet.completed ? "적용 중" : `${cardSet.owned_member_count}/${cardSet.required_member_count}`}</span>}</header><div className="set-members">{cardSet.member_cards.map(card => <span className={`rarity-${card.rarity}`} key={card.id}><b>{card.name}</b><Stars rarity={card.rarity}/></span>)}</div><ul>{cardSet.effects.map((effect, index) => <li key={effect.id ?? index}>{describeSetEffect(effect)}</li>)}</ul></article>)}</div>;
 }
 
-export function ActiveSetModal({ sets, totalYp, onClose }: { sets: SetDefinition[]; totalYp: number; onClose: () => void }) {
-  const activeSets = sets.filter(cardSet => cardSet.completed);
+export function ActiveSetModal({ sets, activeSetNames, totalYp, onClose }: { sets: SetDefinition[]; activeSetNames: string[]; totalYp: number; onClose: () => void }) {
+  const activeNames = new Set(activeSetNames);
+  const activeSets = sets.filter(cardSet => activeNames.has(cardSet.name));
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     addEventListener("keydown", closeOnEscape);
