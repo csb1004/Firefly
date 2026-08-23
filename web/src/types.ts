@@ -112,6 +112,19 @@ export type SetDefinition = {
   owned_member_count: number;
   required_member_count: number;
   member_cards: Array<Pick<Card, "id" | "name" | "rarity">>;
+  yp_bonus: {
+    total: number;
+    cards: Array<{
+      card_id: string;
+      card_name: string;
+      rarity: number;
+      quantity: number;
+      base_yp: number;
+      fixed_bonus: number;
+      percent_bonus: number;
+      total_bonus: number;
+    }>;
+  };
   effects: Array<Omit<SetEffect, "target_card_ids" | "bonus_target_card_ids"> & {
     target_cards: Array<Pick<Card, "id" | "name" | "rarity">>;
     bonus_target_cards: Array<Pick<Card, "id" | "name" | "rarity">>;

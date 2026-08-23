@@ -27,12 +27,14 @@ def test_user_set_catalog_describes_effects_and_inventory_completion(admin_signe
         db.add_all([
             CardSetMember(set_id=card_set.id, card_id=member.id),
             Inventory(user_id=user_id, card_id=member.id, quantity=1),
+            Inventory(user_id=user_id, card_id=target.id, quantity=2),
             effect,
         ])
         db.flush()
         db.add(SetEffectTargetCard(effect_id=effect.id, card_id=target.id))
         db.commit()
         member_id = member.id
+        target_id = target.id
 
     response = client.get("/api/sets")
     assert response.status_code == 200
@@ -44,6 +46,19 @@ def test_user_set_catalog_describes_effects_and_inventory_completion(admin_signe
     assert payload["effects"][0]["bonus_target_scope"] == "selected_cards"
     assert payload["effects"][0]["bonus_target_cards"][0]["name"] == "효과 대상"
     assert payload["effects"][0]["value"] == 50
+    assert payload["yp_bonus"] == {
+        "total": 200.0,
+        "cards": [{
+            "card_id": target_id,
+            "card_name": "효과 대상",
+            "rarity": 1,
+            "quantity": 2,
+            "base_yp": 20,
+            "fixed_bonus": 200.0,
+            "percent_bonus": 0.0,
+            "total_bonus": 200.0,
+        }],
+    }
 
 
 def test_user_set_catalog_hides_inactive_sets(admin_signed_in):

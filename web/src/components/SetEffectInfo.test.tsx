@@ -10,6 +10,19 @@ const activeSet: SetDefinition = {
   owned_member_count: 1,
   required_member_count: 1,
   member_cards: [{ id: "card-1", name: "별빛 카드", rarity: 5 }],
+  yp_bonus: {
+    total: 150,
+    cards: [{
+      card_id: "card-1",
+      card_name: "별빛 카드",
+      rarity: 5,
+      quantity: 2,
+      base_yp: 1000,
+      fixed_bonus: 100,
+      percent_bonus: 50,
+      total_bonus: 150,
+    }],
+  },
   effects: [{
     id: "effect-1",
     target_scope: "rarity",
@@ -90,5 +103,22 @@ describe("set effect information", () => {
 
     expect(screen.getByText("적용 중")).toBeInTheDocument();
     expect(screen.queryByText("1/3")).not.toBeInTheDocument();
+  });
+
+  it("shows the set YP gain and expands a per-card breakdown", () => {
+    render(<SetEffectList sets={[activeSet]} progress activeSetNames={[activeSet.name]}/>);
+
+    expect(screen.getByText("+150 YP")).toBeInTheDocument();
+    const details = screen.getByText("자세히").closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+
+    fireEvent.click(screen.getByText("자세히"));
+    expect(details).toHaveAttribute("open");
+    expect(details).toHaveTextContent("별빛 카드");
+    expect(details).toHaveTextContent("보유 2장");
+    expect(details).toHaveTextContent("기본 1,000 YP");
+    expect(details).toHaveTextContent("고정 +100");
+    expect(details).toHaveTextContent("% 효과 +50");
+    expect(details).toHaveTextContent("총 +150 YP");
   });
 });

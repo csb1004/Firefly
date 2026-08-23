@@ -10,6 +10,32 @@ from ..models import Card, CardSet, CardSetMember, Inventory, SetEffect, SetEffe
 
 
 @dataclass(frozen=True)
+class CardYPBonus:
+    card_id: str
+    card_name: str
+    rarity: int
+    quantity: int
+    base_yp: int
+    fixed_bonus: Decimal
+    percent_bonus: Decimal
+
+    @property
+    def total_bonus(self) -> Decimal:
+        return self.fixed_bonus + self.percent_bonus
+
+
+@dataclass(frozen=True)
+class SetYPBonus:
+    set_id: str
+    set_name: str
+    cards: tuple[CardYPBonus, ...]
+
+    @property
+    def total_bonus(self) -> Decimal:
+        return sum((card.total_bonus for card in self.cards), Decimal(0))
+
+
+@dataclass(frozen=True)
 class YPBreakdown:
     base_yp: int
     fixed_bonus: Decimal
@@ -17,6 +43,7 @@ class YPBreakdown:
     percent_yp: Decimal
     total_yp: int
     active_sets: tuple[str, ...]
+    set_bonuses: tuple[SetYPBonus, ...]
 
 
 def _evaluate(
@@ -33,7 +60,8 @@ def _evaluate(
     percent = Decimal(0)
     percent_yp = Decimal(0)
     active_names: list[str] = []
-    active_effects: list[tuple[SetEffect, int, set[str]]] = []
+    active_effects: list[tuple[CardSet, SetEffect, int, set[str]]] = []
+    bonuses_by_set: dict[str, dict[str, list[Decimal]]] = {}
     owned_ids = {card_id for card_id, (_card, quantity) in owned.items() if quantity > 0}
 
     def matching_ids(scope: str, rarity: int | None, selected: set[str], set_members: set[str]) -> set[str]:
@@ -72,12 +100,12 @@ def _evaluate(
             selected_bonus_ids = bonus_targets.get(effect.id, set()) if effect.bonus_target_scope is not None else targets.get(effect.id, set())
             matched_bonus_ids = matching_ids(bonus_scope, bonus_rarity, selected_bonus_ids, required) & owned_ids
             if count and matched_bonus_ids:
-                active_effects.append((effect, count, matched_bonus_ids))
+                active_effects.append((card_set, effect, count, matched_bonus_ids))
                 set_is_active = True
         if set_is_active:
             active_names.append(card_set.name)
 
-    for effect, count, matched_bonus_ids in active_effects:
+    for card_set, effect, count, matched_bonus_ids in active_effects:
         if effect.bonus_type != "fixed":
             continue
         amount = Decimal(effect.value) * count
@@ -86,16 +114,37 @@ def _evaluate(
             gain = amount * quantity
             card_totals[card_id] += gain
             fixed += gain
+            bonuses_by_set.setdefault(card_set.id, {}).setdefault(card_id, [Decimal(0), Decimal(0)])[0] += gain
 
-    for effect, count, matched_bonus_ids in active_effects:
+    for card_set, effect, count, matched_bonus_ids in active_effects:
         if effect.bonus_type != "percent":
             continue
         amount = Decimal(effect.value) * count
         percent += amount
-        percent_yp += sum(card_totals[card_id] * amount / Decimal(100) for card_id in matched_bonus_ids)
+        for card_id in matched_bonus_ids:
+            gain = card_totals[card_id] * amount / Decimal(100)
+            percent_yp += gain
+            bonuses_by_set.setdefault(card_set.id, {}).setdefault(card_id, [Decimal(0), Decimal(0)])[1] += gain
 
     total = (Decimal(base) + fixed + percent_yp).to_integral_value(rounding=ROUND_FLOOR)
-    return YPBreakdown(base, fixed, percent, percent_yp, int(total), tuple(active_names))
+    set_bonuses = []
+    for card_set in sets:
+        card_bonuses = [
+            CardYPBonus(
+                card_id=card_id,
+                card_name=owned[card_id][0].name,
+                rarity=owned[card_id][0].rarity,
+                quantity=owned[card_id][1],
+                base_yp=owned[card_id][0].yp * owned[card_id][1],
+                fixed_bonus=bonuses[0],
+                percent_bonus=bonuses[1],
+            )
+            for card_id, bonuses in bonuses_by_set.get(card_set.id, {}).items()
+        ]
+        if card_bonuses:
+            card_bonuses.sort(key=lambda item: (-item.total_bonus, item.card_name))
+            set_bonuses.append(SetYPBonus(card_set.id, card_set.name, tuple(card_bonuses)))
+    return YPBreakdown(base, fixed, percent, percent_yp, int(total), tuple(active_names), tuple(set_bonuses))
 
 
 def effective_yp_many(

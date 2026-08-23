@@ -41,9 +41,37 @@ export function describeSetEffect(effect: SetDefinition["effects"][number]) {
   return `${condition}, ${bonus}${effect.max_count ? ` · 최대 ${effect.max_count}회 적용` : ""}`;
 }
 
+function formatYp(value: number) {
+  return Number(value).toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+}
+
+function SetBonusDetails({ bonus }: { bonus: SetDefinition["yp_bonus"] }) {
+  if (!bonus.cards.length) return null;
+  return <details className="set-bonus-details">
+    <summary><span>자세히</span><small>{bonus.cards.length}종</small></summary>
+    <div className="set-bonus-card-list">{bonus.cards.map(card => <div className="set-bonus-card" key={card.card_id}>
+      <div className="set-bonus-card-head"><span className={`rarity-${card.rarity}`}><b>{card.card_name}</b><Stars rarity={card.rarity}/></span><small>보유 {card.quantity}장</small></div>
+      <div className="set-bonus-card-values"><span>기본 <b>{formatYp(card.base_yp)} YP</b></span><span>이 세트 적용 <b>{formatYp(card.base_yp + card.total_bonus)} YP</b></span></div>
+      <p>{card.fixed_bonus > 0 && <span>고정 +{formatYp(card.fixed_bonus)}</span>}{card.percent_bonus > 0 && <span>% 효과 +{formatYp(card.percent_bonus)}</span>}<strong>총 +{formatYp(card.total_bonus)} YP</strong></p>
+    </div>)}</div>
+  </details>;
+}
+
 export function SetEffectList({ sets, progress = false, activeSetNames }: { sets: SetDefinition[]; progress?: boolean; activeSetNames?: string[] }) {
   const activeNames = activeSetNames ? new Set(activeSetNames) : null;
-  return <div className="set-effect-cards">{sets.map(cardSet => { const active = activeNames ? activeNames.has(cardSet.name) : cardSet.completed; return <article className={`set-effect-card ${active ? "completed" : "incomplete"}`} key={cardSet.id}><header><div><p className="eyebrow">SET EFFECT</p><h3>{cardSet.name}</h3></div>{progress && <span>{active ? "적용 중" : `${cardSet.owned_member_count}/${cardSet.required_member_count}`}</span>}</header><div className="set-members">{cardSet.member_cards.map(card => <span className={`rarity-${card.rarity}`} key={card.id}><b>{card.name}</b><Stars rarity={card.rarity}/></span>)}</div><ul>{cardSet.effects.map((effect, index) => <li key={effect.id ?? index}>{describeSetEffect(effect)}</li>)}</ul></article>; })}</div>;
+  return <div className="set-effect-cards">{sets.map(cardSet => {
+    const active = activeNames ? activeNames.has(cardSet.name) : cardSet.completed;
+    const bonus = cardSet.yp_bonus ?? { total: 0, cards: [] };
+    return <article className={`set-effect-card ${active ? "completed" : "incomplete"}`} key={cardSet.id}>
+      <header><div><p className="eyebrow">SET EFFECT</p><h3>{cardSet.name}</h3></div><div className="set-effect-status">
+        {progress && <span className="set-status-badge">{active ? "적용 중" : `${cardSet.owned_member_count}/${cardSet.required_member_count}`}</span>}
+        <span className={`set-effect-gain ${bonus.total > 0 ? "positive" : "zero"}`}><small>세트 효과</small><strong>+{formatYp(bonus.total)} YP</strong></span>
+      </div></header>
+      <div className="set-members">{cardSet.member_cards.map(card => <span className={`rarity-${card.rarity}`} key={card.id}><b>{card.name}</b><Stars rarity={card.rarity}/></span>)}</div>
+      <ul>{cardSet.effects.map((effect, index) => <li key={effect.id ?? index}>{describeSetEffect(effect)}</li>)}</ul>
+      <SetBonusDetails bonus={bonus}/>
+    </article>;
+  })}</div>;
 }
 
 export function ActiveSetSummary({ sets, activeSetNames, onOpen }: { sets: SetDefinition[]; activeSetNames: string[]; onOpen: () => void }) {

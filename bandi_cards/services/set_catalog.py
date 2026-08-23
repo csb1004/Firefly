@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Card, CardSet, CardSetMember, Inventory, SetEffect, SetEffectBonusTargetCard, SetEffectTargetCard
+from .set_effects import effective_yp
 
 
 def user_set_definitions(db: Session, user_id: int) -> list[dict]:
@@ -41,6 +42,8 @@ def user_set_definitions(db: Session, user_id: int) -> list[dict]:
     owned_ids = set(db.scalars(
         select(Inventory.card_id).where(Inventory.user_id == user_id, Inventory.quantity > 0)
     ).all())
+    yp = effective_yp(db, user_id)
+    bonuses_by_set = {bonus.set_id: bonus for bonus in yp.set_bonuses}
 
     members_by_set: dict[str, list[dict]] = {set_id: [] for set_id in set_ids}
     for member, card in member_rows:
@@ -59,6 +62,7 @@ def user_set_definitions(db: Session, user_id: int) -> list[dict]:
     for card_set in card_sets:
         members = members_by_set[card_set.id]
         owned_count = sum(member["id"] in owned_ids for member in members)
+        set_bonus = bonuses_by_set.get(card_set.id)
         result.append({
             "id": card_set.id,
             "name": card_set.name,
@@ -79,5 +83,18 @@ def user_set_definitions(db: Session, user_id: int) -> list[dict]:
                 "value": float(effect.value),
                 "max_count": effect.max_count,
             } for effect in effects_by_set[card_set.id]],
+            "yp_bonus": {
+                "total": float(set_bonus.total_bonus) if set_bonus else 0.0,
+                "cards": [{
+                    "card_id": card.card_id,
+                    "card_name": card.card_name,
+                    "rarity": card.rarity,
+                    "quantity": card.quantity,
+                    "base_yp": card.base_yp,
+                    "fixed_bonus": float(card.fixed_bonus),
+                    "percent_bonus": float(card.percent_bonus),
+                    "total_bonus": float(card.total_bonus),
+                } for card in set_bonus.cards] if set_bonus else [],
+            },
         })
     return result

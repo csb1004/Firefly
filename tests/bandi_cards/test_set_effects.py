@@ -47,6 +47,15 @@ def test_percent_effect_only_increases_qualifying_card_yp(web_db):
         assert result.percent_yp == 450
         assert result.total_yp == 4550
         assert result.active_sets == ("효과 세트",)
+        assert len(result.set_bonuses) == 1
+        set_bonus = result.set_bonuses[0]
+        assert set_bonus.set_id == card_set.id
+        assert set_bonus.set_name == "효과 세트"
+        assert set_bonus.total_bonus == 550
+        assert [(card.card_name, card.quantity, card.base_yp, card.fixed_bonus, card.percent_bonus, card.total_bonus) for card in set_bonus.cards] == [
+            ("1성 카드", 30, 3000, 0, 450, 450),
+            ("구성 카드", 1, 1000, 100, 0, 100),
+        ]
 
 
 def test_count_target_and_bonus_target_are_independent(web_db):
@@ -81,6 +90,32 @@ def test_count_target_and_bonus_target_are_independent(web_db):
         assert result.percent_bonus == 100
         assert result.percent_yp == 300
         assert result.total_yp == 900
+
+
+def test_bonus_breakdown_attributes_cross_set_fixed_and_percent_gains(web_db):
+    with web_db() as db:
+        user = User(discord_id="breakdown-user", username="breakdown", warning_acknowledged=True)
+        card = Card(name="공통 카드", rarity=5, yp=1000, image_key="cards/shared.webp")
+        fixed_set = CardSet(name="고정 세트", active=True)
+        percent_set = CardSet(name="퍼센트 세트", active=True)
+        db.add_all([user, card, fixed_set, percent_set])
+        db.flush()
+        db.add_all([
+            Inventory(user_id=user.id, card_id=card.id, quantity=1),
+            CardSetMember(set_id=fixed_set.id, card_id=card.id),
+            CardSetMember(set_id=percent_set.id, card_id=card.id),
+            SetEffect(set_id=fixed_set.id, target_scope="set_members", count_mode="once", bonus_type="fixed", value=100),
+            SetEffect(set_id=percent_set.id, target_scope="set_members", count_mode="once", bonus_type="percent", value=10),
+        ])
+        db.commit()
+
+        result = effective_yp(db, user.id)
+        assert result.total_yp == 1210
+        assert [(bonus.set_name, bonus.total_bonus) for bonus in result.set_bonuses] == [
+            ("고정 세트", 100),
+            ("퍼센트 세트", 110),
+        ]
+        assert sum((bonus.total_bonus for bonus in result.set_bonuses), 0) == result.fixed_bonus + result.percent_yp
 
 
 def test_distinct_effect_applies_before_the_set_is_complete(web_db):
