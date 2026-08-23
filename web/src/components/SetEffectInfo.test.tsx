@@ -42,7 +42,7 @@ describe("set effect information", () => {
   afterEach(cleanup);
 
   it("turns a configurable effect into a readable Korean summary", () => {
-    expect(describeSetEffect(activeSet.effects[0])).toBe("세트 완성 후, 보유 중인 1성 카드 1장당, 보유 중인 세트 구성 카드 각각의 YP가 50 증가 · 최대 3회 적용");
+    expect(describeSetEffect(activeSet.effects[0], 1)).toBe("세트 완성 후, 보유 중인 1성 카드 1장당, 보유 중인 세트 구성 카드의 YP가 50 증가 · 최대 3회 적용");
   });
 
   it("describes a one-time whole-collection effect without repeating ownership", () => {
@@ -59,7 +59,7 @@ describe("set effect information", () => {
     })).toBe("세트 완성 시, 보유 중인 모든 카드 각각의 최종 YP가 20% 증가");
   });
 
-  it("makes distinct set-member counting explicit without implying set completion", () => {
+  it("uses singular wording for a one-card set", () => {
     expect(describeSetEffect({
       ...activeSet.effects[0],
       target_scope: "set_members",
@@ -70,7 +70,42 @@ describe("set effect information", () => {
       bonus_type: "percent",
       value: 5,
       max_count: null,
-    })).toBe("보유 중인 세트 구성 카드 종류당, 보유 중인 세트 구성 카드 각각의 최종 YP가 5% 증가");
+    }, 1)).toBe("세트 구성 카드 보유 시, 보유 중인 세트 구성 카드의 최종 YP가 5% 증가");
+  });
+
+  it("uses plural wording for a set with multiple cards", () => {
+    expect(describeSetEffect({
+      ...activeSet.effects[0],
+      target_scope: "set_members",
+      target_rarity: null,
+      bonus_target_scope: "set_members",
+      bonus_target_rarity: null,
+      count_mode: "distinct",
+      bonus_type: "percent",
+      value: 5,
+      max_count: null,
+    }, 3)).toBe("보유 중인 세트 구성 카드 종류당, 보유 중인 세트 구성 카드 각각의 최종 YP가 5% 증가");
+  });
+
+  it("lists selected card names with commas and adjusts singular and plural wording", () => {
+    const selectedCards = [
+      { id: "selected-1", name: "영호 감자", rarity: 3 },
+      { id: "selected-2", name: "영호 상어", rarity: 4 },
+    ];
+    const effect = {
+      ...activeSet.effects[0],
+      target_scope: "selected_cards" as const,
+      target_cards: selectedCards,
+      bonus_target_scope: "selected_cards" as const,
+      bonus_target_cards: selectedCards,
+      count_mode: "distinct" as const,
+      max_count: null,
+    };
+
+    expect(describeSetEffect(effect)).toBe("영호 감자, 영호 상어 중 보유한 카드 종류당, 영호 감자, 영호 상어 중 보유 카드 각각의 YP가 50 증가");
+    expect(describeSetEffect({...effect, count_mode: "once"})).toBe("세트 완성 후, 영호 감자, 영호 상어 중 한 장 이상 보유하면, 영호 감자, 영호 상어 중 보유 카드 각각의 YP가 50 증가");
+    expect(describeSetEffect({...effect, target_cards: selectedCards.slice(0, 1), bonus_target_cards: selectedCards.slice(0, 1)}))
+      .toBe("영호 감자 보유 시, 보유 중인 영호 감자의 YP가 50 증가");
   });
 
   it("shows the sets reported as active even when a distinct effect is partially unlocked", () => {

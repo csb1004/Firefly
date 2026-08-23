@@ -2,42 +2,53 @@ import { useEffect } from "react";
 import type { SetDefinition } from "../types";
 import { Stars } from "./CardTile";
 
-export function describeSetEffect(effect: SetDefinition["effects"][number]) {
+export function describeSetEffect(effect: SetDefinition["effects"][number], setMemberCount = 2) {
   function selectedCardLabel(cards: typeof effect.target_cards) {
-    const names = cards.map(card => card.name).join(" · ");
-    return names ? `선택한 카드(${names})` : "선택한 카드";
+    return cards.map(card => card.name).join(", ") || "선택한 카드";
   }
 
   function countTargetLabel() {
     if (effect.target_scope === "set_members") return "보유 중인 세트 구성 카드";
-    if (effect.target_scope === "selected_cards") return `보유 중인 ${selectedCardLabel(effect.target_cards)}`;
+    if (effect.target_scope === "selected_cards") return effect.target_cards.length === 1
+      ? `보유 중인 ${selectedCardLabel(effect.target_cards)}`
+      : `${selectedCardLabel(effect.target_cards)} 중 보유 카드`;
     if (effect.target_scope === "rarity") return `보유 중인 ${effect.target_rarity}성 카드`;
     return "보유 카드";
   }
 
-  function bonusTargetLabel() {
-    if (effect.bonus_target_scope === "set_members") return "보유 중인 세트 구성 카드";
-    if (effect.bonus_target_scope === "selected_cards") return `${selectedCardLabel(effect.bonus_target_cards)} 중 보유 카드`;
-    if (effect.bonus_target_scope === "rarity") return `보유 중인 ${effect.bonus_target_rarity}성 카드`;
-    return "보유 중인 모든 카드";
+  function bonusTarget() {
+    if (effect.bonus_target_scope === "set_members") return { label: "보유 중인 세트 구성 카드", plural: setMemberCount !== 1 };
+    if (effect.bonus_target_scope === "selected_cards") return {
+      label: effect.bonus_target_cards.length === 1
+        ? `보유 중인 ${selectedCardLabel(effect.bonus_target_cards)}`
+        : `${selectedCardLabel(effect.bonus_target_cards)} 중 보유 카드`,
+      plural: effect.bonus_target_cards.length !== 1,
+    };
+    if (effect.bonus_target_scope === "rarity") return { label: `보유 중인 ${effect.bonus_target_rarity}성 카드`, plural: true };
+    return { label: "보유 중인 모든 카드", plural: true };
   }
 
   let condition: string;
   if (effect.count_mode === "once") {
     if (effect.target_scope === "set_members" || effect.target_scope === "collection") condition = "세트 완성 시";
     else {
-      const target = effect.target_scope === "rarity"
-        ? `${effect.target_rarity}성 카드`
-        : selectedCardLabel(effect.target_cards);
-      condition = `세트 완성 후, ${target}를 1장 이상 보유하면`;
+      if (effect.target_scope === "rarity") condition = `세트 완성 후, ${effect.target_rarity}성 카드를 1장 이상 보유하면`;
+      else if (effect.target_cards.length === 1) condition = `세트 완성 후, ${selectedCardLabel(effect.target_cards)}를 1장 이상 보유하면`;
+      else condition = `세트 완성 후, ${selectedCardLabel(effect.target_cards)} 중 한 장 이상 보유하면`;
     }
   }
-  else if (effect.count_mode === "distinct") condition = `${countTargetLabel()} 종류당`;
+  else if (effect.count_mode === "distinct") {
+    if (effect.target_scope === "set_members" && setMemberCount === 1) condition = "세트 구성 카드 보유 시";
+    else if (effect.target_scope === "selected_cards" && effect.target_cards.length === 1) condition = `${selectedCardLabel(effect.target_cards)} 보유 시`;
+    else if (effect.target_scope === "selected_cards") condition = `${selectedCardLabel(effect.target_cards)} 중 보유한 카드 종류당`;
+    else condition = `${countTargetLabel()} 종류당`;
+  }
   else condition = `세트 완성 후, ${countTargetLabel()} 1장당`;
 
   const value = Number(effect.value).toLocaleString("ko-KR", { maximumFractionDigits: 4 });
-  const bonusTarget = bonusTargetLabel();
-  const bonus = effect.bonus_type === "fixed" ? `${bonusTarget} 각각의 YP가 ${value} 증가` : `${bonusTarget} 각각의 최종 YP가 ${value}% 증가`;
+  const target = bonusTarget();
+  const possessive = target.plural ? " 각각의" : "의";
+  const bonus = effect.bonus_type === "fixed" ? `${target.label}${possessive} YP가 ${value} 증가` : `${target.label}${possessive} 최종 YP가 ${value}% 증가`;
   return `${condition}, ${bonus}${effect.max_count ? ` · 최대 ${effect.max_count}회 적용` : ""}`;
 }
 
@@ -68,7 +79,7 @@ export function SetEffectList({ sets, progress = false, activeSetNames }: { sets
         <span className={`set-effect-gain ${bonus.total > 0 ? "positive" : "zero"}`}><small>세트 효과</small><strong>+{formatYp(bonus.total)} YP</strong></span>
       </div></header>
       <div className="set-members">{cardSet.member_cards.map(card => <span className={`rarity-${card.rarity}`} key={card.id}><b>{card.name}</b><Stars rarity={card.rarity}/></span>)}</div>
-      <ul>{cardSet.effects.map((effect, index) => <li key={effect.id ?? index}>{describeSetEffect(effect)}</li>)}</ul>
+      <ul>{cardSet.effects.map((effect, index) => <li key={effect.id ?? index}>{describeSetEffect(effect, cardSet.member_cards.length)}</li>)}</ul>
       <SetBonusDetails bonus={bonus}/>
     </article>;
   })}</div>;
