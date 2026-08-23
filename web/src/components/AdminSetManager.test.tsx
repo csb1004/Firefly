@@ -28,8 +28,8 @@ describe("AdminSetManager", () => {
 
     fireEvent.change(screen.getByLabelText("세트 이름"), { target: { value: "수량 세트" } });
     fireEvent.click(screen.getByText("테스트 카드").closest("label")!.querySelector("input")!);
-    fireEvent.change(screen.getByLabelText("적용 횟수 대상"), { target: { value: "rarity" } });
-    fireEvent.change(screen.getByLabelText("적용 횟수"), { target: { value: "quantity" } });
+    fireEvent.change(screen.getByLabelText("횟수 계산 대상"), { target: { value: "rarity" } });
+    fireEvent.change(screen.getByLabelText("횟수 계산 방식"), { target: { value: "quantity" } });
     fireEvent.change(screen.getByLabelText("YP 증가 대상"), { target: { value: "rarity" } });
     expect(screen.getByLabelText("횟수 대상 성급")).toHaveValue("1");
     expect(screen.getByLabelText("YP 증가 대상 성급")).toHaveValue("1");
@@ -59,11 +59,11 @@ describe("AdminSetManager", () => {
     }
 
     for (let index = 0; index < 5; index += 1) {
-      fireEvent.change(screen.getAllByLabelText("적용 횟수")[index], { target: { value: "quantity" } });
+      fireEvent.change(screen.getAllByLabelText("횟수 계산 방식")[index], { target: { value: "quantity" } });
       fireEvent.change(screen.getAllByLabelText("YP 증가 대상")[index], { target: { value: "rarity" } });
       fireEvent.change(screen.getAllByLabelText("YP 증가 대상 성급")[index], { target: { value: String(index + 1) } });
-      fireEvent.change(screen.getAllByLabelText("보너스")[index], { target: { value: "percent" } });
-      fireEvent.change(screen.getAllByLabelText("수치")[index], { target: { value: String((index + 1) * 10) } });
+      fireEvent.change(screen.getAllByLabelText("YP 증가 방식")[index], { target: { value: "percent" } });
+      fireEvent.change(screen.getAllByLabelText("증가 수치")[index], { target: { value: String((index + 1) * 10) } });
     }
 
     fireEvent.click(screen.getByRole("button", { name: "세트 저장" }));
