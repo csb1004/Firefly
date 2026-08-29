@@ -189,6 +189,16 @@ async def nickname_slash(interaction: discord.Interaction, nickname: str):
     await _run_text_command_slash(interaction, f"/호칭 {nickname}", ephemeral=True)
 
 
+@tree.command(name="가챠", description="영호 가챠 사이트 주소를 보여줘요.")
+async def gacha_slash(interaction: discord.Interaction):
+    await _run_text_command_slash(interaction, "/가챠")
+
+
+@tree.command(name="랭킹", description="영호 가챠 상위 10명과 내 YP 순위를 보여줘요.")
+async def ranking_slash(interaction: discord.Interaction):
+    await _run_text_command_slash(interaction, "/랭킹")
+
+
 @tree.command(name="프로필", description="유저의 프로필 이미지, 이름, 호감도를 보여줘요.")
 @app_commands.rename(target="유저")
 @app_commands.describe(target="확인할 유저. 비워두면 내 프로필을 보여줘요.")

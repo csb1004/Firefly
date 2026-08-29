@@ -25,6 +25,8 @@ def test_special_help_keeps_poll_help_short():
 def test_help_lists_profile_dice_team_and_adapter_commands():
     text = _field_text(create_help_embed())
 
+    assert "/가챠" in text
+    assert "/랭킹" in text
     assert "/프로필 [@유저]" in text
     assert "/주사위 [시작] [끝]" in text
     assert "/팀나누기" in text

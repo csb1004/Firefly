@@ -10,10 +10,6 @@ from types import SimpleNamespace
 import discord
 
 from .affection import change_user_affection, set_user_affection
-from .admin_status import build_admin_status_text
-from .bandi_tts import BandiVoiceError, generate_bandi_voice, purge_runpod_queue
-from .bandi_voice_plan import BandiVoicePlanError, format_emotion_summary, parse_bandi_voice_command
-from .bandi_voice_preprocess import plan_bandi_voice_request
 from .ai import (
     generate_reply,
     generate_silent_auto_command,
@@ -21,6 +17,11 @@ from .ai import (
     plan_tool_use,
     summarize_conversation,
 )
+from .admin_status import build_admin_status_text
+from .bandi_tts import BandiVoiceError, generate_bandi_voice, purge_runpod_queue
+from .bandi_voice_plan import BandiVoicePlanError, format_emotion_summary, parse_bandi_voice_command
+from .bandi_voice_preprocess import plan_bandi_voice_request
+from .card_commands import create_gacha_embed, create_ranking_embed
 from .brain import (
     BRAIN_KEYWORDS_KEY,
     LONG_TERM_MEMORY_KEY,
@@ -1490,6 +1491,20 @@ async def handle_mentioned_message(
 
     if is_news_command_text(user_text):
         await handle_news_command(message, user_text, client)
+        return
+
+    if matches_command(user_text, "/가챠"):
+        await message.channel.send(embed=create_gacha_embed())
+        return
+
+    if matches_command(user_text, "/랭킹"):
+        try:
+            embed = await asyncio.to_thread(create_ranking_embed, str(message.author.id))
+        except Exception as exc:
+            print("Card ranking command error:", exc)
+            await message.channel.send("…지금은 영호 가챠 랭킹을 불러오지 못했어. 잠시 뒤 다시 시도해줘.")
+            return
+        await message.channel.send(embed=embed)
         return
 
     if matches_command(user_text, "/프로필"):
