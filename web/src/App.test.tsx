@@ -71,6 +71,12 @@ const resetResult = {
   audit_id: "audit-1",
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(next => { resolve = next; });
+  return { promise, resolve };
+}
+
 class FakeSocket extends EventTarget {
   close = vi.fn();
 }
@@ -166,6 +172,34 @@ describe("season reset realtime behavior", () => {
     await waitFor(() => expect(countApiCalls("/api/feed/five-stars")).toBe(2));
     expect(replaceSpy).not.toHaveBeenCalled();
     expect(pushSpy).not.toHaveBeenCalled();
+  });
+
+  it("ignores an initial five-star feed response that resolves after the season reset refresh", async () => {
+    const initialFeed = deferred<{ items: typeof oldFeed[] }>();
+    const baseApi = vi.mocked(api).getMockImplementation()!;
+    let currentFeedCall = 0;
+    vi.mocked(api).mockImplementation((path, options, csrf) => {
+      if (path === "/api/feed/five-stars") {
+        currentFeedCall += 1;
+        feedCalls += 1;
+        return currentFeedCall === 1 ? initialFeed.promise : Promise.resolve({ items: [] });
+      }
+      return baseApi(path, options, csrf);
+    });
+
+    const realtimeHandler = await startAt("/");
+    await waitFor(() => expect(currentFeedCall).toBe(1));
+
+    act(() => realtimeHandler({ type: "season.reset" }));
+    await waitFor(() => expect(currentFeedCall).toBe(2));
+    expect(await screen.findByText("새 시즌이 시작되었습니다.")).toBeInTheDocument();
+
+    await act(async () => {
+      initialFeed.resolve({ items: [oldFeed] });
+      await initialFeed.promise;
+    });
+
+    expect(screen.queryByText("이전 시즌 5성")).not.toBeInTheDocument();
   });
 
   it.each(["websocket-first", "admin-result-first"])(

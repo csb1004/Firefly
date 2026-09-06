@@ -217,7 +217,14 @@ export default function App() {
   const [seasonEpoch, setSeasonEpoch] = useState(0);
   const [resetNotice, setResetNotice] = useState("");
   const lastSeasonResetAt = useRef(0);
+  const feedRequestGeneration = useRef(0);
   const refresh = () => api<User>("/api/auth/me").then(setMe).catch(() => setMe(null));
+  const loadFeed = () => {
+    const generation = ++feedRequestGeneration.current;
+    return api<{ items: FeedItem[] }>("/api/feed/five-stars").then(data => {
+      if (generation === feedRequestGeneration.current) setFeed(data.items);
+    });
+  };
   const applySeasonReset = (result?: SeasonResetResult) => {
     const now = Date.now();
     const lastReset = lastSeasonResetAt.current;
@@ -228,17 +235,18 @@ export default function App() {
       : alreadyApplied ? current : "새 시즌이 시작되었습니다.");
     if (alreadyApplied) return;
     setInvite(undefined);
+    feedRequestGeneration.current += 1;
     setFeed([]);
     if (location.pathname !== "/") history.replaceState({}, "", "/");
     setPath("/");
     setSeasonEpoch(value => value + 1);
     void refresh();
-    void api<{ items: FeedItem[] }>("/api/feed/five-stars").then(data => setFeed(data.items)).catch(() => {});
+    void loadFeed().catch(() => {});
   };
   useEffect(() => { const handler=()=>setPath(location.pathname); addEventListener("popstate",handler); refresh(); return()=>removeEventListener("popstate",handler); }, []);
   useEffect(() => {
     if (!me?.warning_acknowledged) return;
-    api<any>("/api/feed/five-stars").then(data => setFeed(data.items)).catch(() => {});
+    void loadFeed().catch(() => {});
     let socket: WebSocket | undefined;
     let retryTimer: number | undefined;
     let stopped = false;
