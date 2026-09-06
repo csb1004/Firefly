@@ -30,6 +30,7 @@ from bandi_cards.models import (
     OAuthAttempt,
     ProbabilityAudit,
     RaritySetting,
+    SeasonResetReceipt,
     SetEffect,
     SetEffectBonusTargetCard,
     SetEffectTargetCard,
@@ -350,11 +351,12 @@ def _snapshot_models(factory, models=tuple(mapper.class_ for mapper in Base.regi
 
 def test_reset_deletes_only_season_data_and_reissues_configured_bonus(web_db):
     seeded = _seed_season_data(web_db)
+    operation_id = "season-reset-service-0001"
     preserved_before = _snapshot_models(web_db, PRESERVED_MODELS)
 
     with web_db() as db:
         preview = preview_season_reset(db)
-        result = execute_season_reset(db, seeded.admin_id)
+        result = execute_season_reset(db, seeded.admin_id, operation_id)
         db.commit()
 
     assert preview["delete_counts"] == {
@@ -402,13 +404,96 @@ def test_reset_deletes_only_season_data_and_reissues_configured_bonus(web_db):
         assert audit.action == "season.reset"
         assert audit.admin_id == seeded.admin_id
         assert audit.target_type == "season"
-        assert audit.target_id == result["completed_at"]
+        assert audit.target_id == operation_id
         assert audit.id == result["audit_id"]
         assert json.loads(audit.details_json) == {
+            "operation_id": operation_id,
             "delete_counts": result["delete_counts"],
             "grant": result["grant"],
             "preserved": result["preserved"],
+            "result": result,
         }
+
+
+def test_retry_with_same_operation_id_replays_result_without_deleting_new_season_data(web_db):
+    seeded = _seed_season_data(web_db)
+    operation_id = "season-reset-retry-0001"
+
+    with web_db() as db:
+        first = execute_season_reset(db, seeded.admin_id, operation_id)
+        db.commit()
+
+    with web_db() as db:
+        db.add(
+            Inventory(
+                user_id=seeded.admin_id,
+                card_id=seeded.card_ids[0],
+                quantity=2,
+                reserved_quantity=0,
+            )
+        )
+        db.commit()
+
+    with web_db() as db:
+        replay = execute_season_reset(db, seeded.admin_id, operation_id)
+        db.commit()
+
+    assert replay == {**first, "replayed": True}
+    with web_db() as db:
+        inventory = db.scalar(
+            select(Inventory).where(
+                Inventory.user_id == seeded.admin_id,
+                Inventory.card_id == seeded.card_ids[0],
+            )
+        )
+        assert inventory is not None
+        assert inventory.quantity == 2
+        assert db.scalar(select(func.count()).select_from(AdminAudit)) == 1
+
+
+def test_different_operation_id_starts_a_new_reset(web_db):
+    seeded = _seed_season_data(web_db)
+
+    with web_db() as db:
+        first = execute_season_reset(db, seeded.admin_id, "season-reset-first-0001")
+        db.commit()
+    with web_db() as db:
+        db.add(
+            Inventory(
+                user_id=seeded.admin_id,
+                card_id=seeded.card_ids[0],
+                quantity=1,
+                reserved_quantity=0,
+            )
+        )
+        db.commit()
+    with web_db() as db:
+        second = execute_season_reset(db, seeded.admin_id, "season-reset-second-0001")
+        db.commit()
+
+    with web_db() as db:
+        db.add(
+            Inventory(
+                user_id=seeded.admin_id,
+                card_id=seeded.card_ids[0],
+                quantity=4,
+                reserved_quantity=0,
+            )
+        )
+        db.commit()
+    with web_db() as db:
+        replayed_first = execute_season_reset(db, seeded.admin_id, "season-reset-first-0001")
+        db.commit()
+
+    assert second["audit_id"] != first["audit_id"]
+    assert second["delete_counts"]["inventory"] == 1
+    assert replayed_first == {**first, "replayed": True}
+    with web_db() as db:
+        inventory = db.scalar(select(Inventory))
+        assert inventory is not None
+        assert inventory.quantity == 4
+        assert db.scalar(select(func.count()).select_from(AdminAudit)) == 1
+        assert db.scalar(select(func.count()).select_from(SeasonResetReceipt)) == 2
 
 
 def test_preview_is_read_only_and_reports_preserved_configuration(web_db):

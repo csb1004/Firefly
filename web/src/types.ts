@@ -172,4 +172,6 @@ export type SeasonResetResult = Omit<SeasonResetPreview, "grant"> & {
   };
   completed_at: string;
   audit_id: string;
+  operation_id: string;
+  replayed: boolean;
 };

@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -28,12 +28,13 @@ RESET_BROADCAST_TIMEOUT_SECONDS = 3.0
 
 class SeasonResetBody(BaseModel):
     confirmation: str
+    operation_id: str = Field(min_length=8, max_length=64)
 
 
-def _commit_reset(factory, admin_id: int) -> dict:
+def _commit_reset(factory, admin_id: int, operation_id: str) -> dict:
     with factory() as db:
         try:
-            result = execute_season_reset(db, admin_id)
+            result = execute_season_reset(db, admin_id, operation_id)
             db.commit()
             return result
         except Exception:
@@ -41,8 +42,10 @@ def _commit_reset(factory, admin_id: int) -> dict:
             raise
 
 
-async def _complete_reset_transaction(factory, admin_id: int) -> dict:
-    operation = asyncio.create_task(asyncio.to_thread(_commit_reset, factory, admin_id))
+async def _complete_reset_transaction(factory, admin_id: int, operation_id: str) -> dict:
+    operation = asyncio.create_task(
+        asyncio.to_thread(_commit_reset, factory, admin_id, operation_id)
+    )
     while not operation.done():
         try:
             await asyncio.shield(operation)
@@ -77,17 +80,21 @@ async def reset_season(
             result = await _complete_reset_transaction(
                 request.app.state.session_factory,
                 admin.id,
+                body.operation_id,
             )
     except (SeasonResetAlreadyRunning, SeasonResetLockUnavailable) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, "시즌 초기화가 이미 진행 중입니다.") from exc
     except SeasonResetConfigurationInvalid as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
-    try:
-        await asyncio.wait_for(
-            manager.broadcast_all({"type": "season.reset"}),
-            timeout=RESET_BROADCAST_TIMEOUT_SECONDS,
-        )
-    except Exception:
-        logger.exception("Season reset broadcast failed")
+    if not result["replayed"]:
+        try:
+            await asyncio.wait_for(
+                manager.broadcast_all(
+                    {"type": "season.reset", "operation_id": body.operation_id}
+                ),
+                timeout=RESET_BROADCAST_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            logger.exception("Season reset broadcast failed")
     return result

@@ -2,6 +2,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, openRealtime } from "./api";
 import App from "./App";
+import { SEASON_RESET_OPERATION_STORAGE_KEY } from "./seasonResetOperation";
 
 vi.mock("./api", () => ({
   api: vi.fn(),
@@ -69,6 +70,8 @@ const resetResult = {
   grant: { granted_users: 2, tickets_per_user: 7, total_tickets: 14 },
   completed_at: "2026-09-06T00:00:00+00:00",
   audit_id: "audit-1",
+  operation_id: "season-reset-test-operation",
+  replayed: false,
 };
 
 function deferred<T>() {
@@ -129,6 +132,7 @@ describe("season reset realtime behavior", () => {
     vi.mocked(api).mockReset();
     vi.mocked(openRealtime).mockReset();
     vi.mocked(openRealtime).mockResolvedValue(socket as unknown as WebSocket);
+    localStorage.clear();
     installApiMocks();
     replaceSpy = vi.spyOn(history, "replaceState");
     pushSpy = vi.spyOn(history, "pushState");
@@ -154,6 +158,18 @@ describe("season reset realtime behavior", () => {
     await waitFor(() => expect(countApiCalls("/api/draw/status")).toBe(1));
     expect(replaceSpy).toHaveBeenCalledTimes(1);
     expect(pushSpy).not.toHaveBeenCalled();
+  });
+
+  it("clears the matching pending reset operation when its realtime completion arrives", async () => {
+    localStorage.setItem(SEASON_RESET_OPERATION_STORAGE_KEY, "season-reset-pending-operation");
+    const realtimeHandler = await startAt("/");
+
+    act(() => realtimeHandler({
+      type: "season.reset",
+      operation_id: "season-reset-pending-operation",
+    }));
+
+    expect(localStorage.getItem(SEASON_RESET_OPERATION_STORAGE_KEY)).toBeNull();
   });
 
   it("remounts the current draw page and clears stale invite and feed state", async () => {
@@ -226,4 +242,16 @@ describe("season reset realtime behavior", () => {
       expect(pushSpy).not.toHaveBeenCalled();
     },
   );
+
+  it("labels a replayed receipt as a previous completion instead of a new reset", async () => {
+    localStorage.setItem(SEASON_RESET_OPERATION_STORAGE_KEY, resetResult.operation_id);
+    await startAt("/admin");
+    await waitFor(() => expect(adminHarness.complete).toBeTypeOf("function"));
+
+    act(() => adminHarness.complete!({ ...resetResult, replayed: true }));
+
+    expect(await screen.findByText(/이전 시즌 초기화 완료 결과를 확인했습니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/시즌 초기화 완료 · 2명에게/)).not.toBeInTheDocument();
+    expect(localStorage.getItem(SEASON_RESET_OPERATION_STORAGE_KEY)).toBeNull();
+  });
 });

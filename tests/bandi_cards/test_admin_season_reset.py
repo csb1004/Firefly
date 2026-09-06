@@ -34,6 +34,9 @@ from bandi_cards.services.season_reset import CONFIRMATION_TEXT
 from bandi_cards.services.trades import accept_invite, accept_offer, create_trade, set_offer
 
 
+RESET_OPERATION_ID = "season-reset-api-test-0001"
+
+
 GUARDED_ROUTES = {
     ("POST", "/api/auth/websocket-ticket"),
     ("PUT", "/api/admin/draw-settings"),
@@ -150,7 +153,7 @@ def test_non_admin_cannot_preview_or_execute_reset(signed_in):
     assert client.post(
         "/api/admin/season-reset",
         headers={"X-CSRF-Token": csrf},
-        json={"confirmation": CONFIRMATION_TEXT},
+        json={"confirmation": CONFIRMATION_TEXT, "operation_id": RESET_OPERATION_ID},
     ).status_code == 403
 
 
@@ -160,12 +163,18 @@ def test_reset_requires_csrf_and_exact_confirmation_without_changing_data(admin_
 
     assert client.post(
         "/api/admin/season-reset",
-        json={"confirmation": CONFIRMATION_TEXT},
+        json={"confirmation": CONFIRMATION_TEXT, "operation_id": RESET_OPERATION_ID},
     ).status_code == 403
+    missing_operation = client.post(
+        "/api/admin/season-reset",
+        headers={"X-CSRF-Token": csrf},
+        json={"confirmation": CONFIRMATION_TEXT},
+    )
+    assert missing_operation.status_code == 422
     wrong = client.post(
         "/api/admin/season-reset",
         headers={"X-CSRF-Token": csrf},
-        json={"confirmation": "시즌 초기화"},
+        json={"confirmation": "시즌 초기화", "operation_id": RESET_OPERATION_ID},
     )
     assert wrong.status_code == 400
     with factory() as db:
@@ -192,7 +201,7 @@ def test_admin_preview_and_execute_preserve_session_and_settings(admin_signed_in
     reset = client.post(
         "/api/admin/season-reset",
         headers={"X-CSRF-Token": csrf},
-        json={"confirmation": CONFIRMATION_TEXT},
+        json={"confirmation": CONFIRMATION_TEXT, "operation_id": RESET_OPERATION_ID},
     )
     assert reset.status_code == 200
     payload = reset.json()
@@ -217,6 +226,52 @@ def test_admin_preview_and_execute_preserve_session_and_settings(admin_signed_in
         assert len(audits) == 1
         assert audits[0].id == payload["audit_id"]
         assert json.loads(audits[0].details_json)["grant"] == payload["grant"]
+
+
+def test_api_retry_replays_committed_reset_without_touching_new_progress(
+    admin_signed_in,
+    monkeypatch,
+):
+    from bandi_cards.routes import admin_reset
+
+    client, factory, admin_id, csrf = admin_signed_in
+    _seed_api_season(factory, admin_id)
+    recorder = BroadcastRecorder()
+    monkeypatch.setattr(admin_reset, "manager", recorder, raising=False)
+    request_body = {
+        "confirmation": CONFIRMATION_TEXT,
+        "operation_id": "season-reset-lost-response-0001",
+    }
+
+    first = client.post(
+        "/api/admin/season-reset",
+        headers={"X-CSRF-Token": csrf},
+        json=request_body,
+    )
+    assert first.status_code == 200
+
+    with factory() as db:
+        card_id = db.scalar(select(Card.id).order_by(Card.id))
+        db.add(Inventory(user_id=admin_id, card_id=card_id, quantity=1))
+        db.commit()
+
+    replay = client.post(
+        "/api/admin/season-reset",
+        headers={"X-CSRF-Token": csrf},
+        json=request_body,
+    )
+
+    assert replay.status_code == 200
+    assert replay.json() == {**first.json(), "replayed": True}
+    assert recorder.messages == [
+        {
+            "type": "season.reset",
+            "operation_id": "season-reset-lost-response-0001",
+        }
+    ]
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(Inventory)) == 1
+        assert db.scalar(select(func.count()).select_from(AdminAudit)) == 1
 
 
 def test_reset_restarts_player_progress_and_gameplay_remains_available(admin_signed_in):
@@ -256,7 +311,7 @@ def test_reset_restarts_player_progress_and_gameplay_remains_available(admin_sig
     reset = client.post(
         "/api/admin/season-reset",
         headers={"X-CSRF-Token": csrf},
-        json={"confirmation": CONFIRMATION_TEXT},
+        json={"confirmation": CONFIRMATION_TEXT, "operation_id": RESET_OPERATION_ID},
     )
 
     assert reset.status_code == 200
@@ -344,7 +399,7 @@ def test_new_discord_user_after_reset_gets_current_daily_and_signup_bonus(
     reset = client.post(
         "/api/admin/season-reset",
         headers={"X-CSRF-Token": csrf},
-        json={"confirmation": CONFIRMATION_TEXT},
+        json={"confirmation": CONFIRMATION_TEXT, "operation_id": RESET_OPERATION_ID},
     )
     assert reset.status_code == 200
 
@@ -404,7 +459,7 @@ def test_invalid_preserved_configuration_returns_422_without_deleting(admin_sign
     reset = client.post(
         "/api/admin/season-reset",
         headers={"X-CSRF-Token": csrf},
-        json={"confirmation": CONFIRMATION_TEXT},
+        json={"confirmation": CONFIRMATION_TEXT, "operation_id": RESET_OPERATION_ID},
     )
     assert reset.status_code == 422
     with factory() as db:
@@ -419,10 +474,10 @@ def test_overlapping_reset_maps_to_conflict(monkeypatch):
         entered = asyncio.Event()
         release = asyncio.Event()
 
-        async def held_reset(_factory, _admin_id):
+        async def held_reset(_factory, _admin_id, _operation_id):
             entered.set()
             await release.wait()
-            return {"completed": True}
+            return {"completed": True, "replayed": False}
 
         monkeypatch.setattr(admin_reset, "_complete_reset_transaction", held_reset)
         request = SimpleNamespace(
@@ -436,7 +491,10 @@ def test_overlapping_reset_maps_to_conflict(monkeypatch):
         admin = SimpleNamespace(id=123)
         first = asyncio.create_task(
             admin_reset.reset_season(
-                admin_reset.SeasonResetBody(confirmation=CONFIRMATION_TEXT),
+                admin_reset.SeasonResetBody(
+                    confirmation=CONFIRMATION_TEXT,
+                    operation_id=RESET_OPERATION_ID,
+                ),
                 request,
                 admin,
             )
@@ -445,14 +503,17 @@ def test_overlapping_reset_maps_to_conflict(monkeypatch):
 
         with pytest.raises(HTTPException) as caught:
             await admin_reset.reset_season(
-                admin_reset.SeasonResetBody(confirmation=CONFIRMATION_TEXT),
+                admin_reset.SeasonResetBody(
+                    confirmation=CONFIRMATION_TEXT,
+                    operation_id=RESET_OPERATION_ID,
+                ),
                 request,
                 admin,
             )
         assert caught.value.status_code == 409
 
         release.set()
-        assert await first == {"completed": True}
+        assert await first == {"completed": True, "replayed": False}
 
     asyncio.run(scenario())
 
@@ -464,7 +525,7 @@ def test_repeated_request_cancellation_waits_for_database_worker(monkeypatch):
     worker_entered = threading.Event()
     release_worker = threading.Event()
 
-    def held_commit(_factory, _admin_id):
+    def held_commit(_factory, _admin_id, _operation_id):
         worker_entered.set()
         release_worker.wait(timeout=5)
         return {"completed": True}
@@ -476,7 +537,11 @@ def test_repeated_request_cancellation_waits_for_database_worker(monkeypatch):
 
         async def request() -> dict:
             async with coordinator.reset():
-                return await admin_reset._complete_reset_transaction(object(), 123)
+                return await admin_reset._complete_reset_transaction(
+                    object(),
+                    123,
+                    RESET_OPERATION_ID,
+                )
 
         task = asyncio.create_task(request())
         assert await asyncio.to_thread(worker_entered.wait, 2)
@@ -564,11 +629,13 @@ def test_committed_reset_broadcasts_one_exact_completion_event(admin_signed_in, 
     response = client.post(
         "/api/admin/season-reset",
         headers={"X-CSRF-Token": csrf},
-        json={"confirmation": CONFIRMATION_TEXT},
+        json={"confirmation": CONFIRMATION_TEXT, "operation_id": RESET_OPERATION_ID},
     )
 
     assert response.status_code == 200
-    assert recorder.messages == [{"type": "season.reset"}]
+    assert recorder.messages == [
+        {"type": "season.reset", "operation_id": RESET_OPERATION_ID}
+    ]
     assert recorder.reset_states == [False]
 
 
@@ -589,8 +656,8 @@ def test_stalled_reset_broadcast_times_out_without_reopening_maintenance(monkeyp
                 self.cancelled = True
                 raise
 
-    async def completed_reset(_factory, _admin_id):
-        return {"completed": True}
+    async def completed_reset(_factory, _admin_id, _operation_id):
+        return {"completed": True, "replayed": False}
 
     async def scenario() -> None:
         coordinator = SeasonResetCoordinator()
@@ -609,14 +676,17 @@ def test_stalled_reset_broadcast_times_out_without_reopening_maintenance(monkeyp
 
         result = await asyncio.wait_for(
             admin_reset.reset_season(
-                admin_reset.SeasonResetBody(confirmation=CONFIRMATION_TEXT),
+                admin_reset.SeasonResetBody(
+                    confirmation=CONFIRMATION_TEXT,
+                    operation_id=RESET_OPERATION_ID,
+                ),
                 request,
                 SimpleNamespace(id=123),
             ),
             timeout=0.2,
         )
 
-        assert result == {"completed": True}
+        assert result == {"completed": True, "replayed": False}
         assert broadcaster.started.is_set() is True
         assert broadcaster.cancelled is True
         assert coordinator.is_resetting is False
@@ -632,7 +702,7 @@ def test_rolled_back_reset_does_not_broadcast_completion(admin_signed_in, monkey
     recorder = BroadcastRecorder()
     monkeypatch.setattr(admin_reset, "manager", recorder, raising=False)
 
-    def fail_during_reset(db, actor_id):
+    def fail_during_reset(db, actor_id, _operation_id):
         db.add(
             AdminAudit(
                 admin_id=actor_id,
@@ -651,7 +721,7 @@ def test_rolled_back_reset_does_not_broadcast_completion(admin_signed_in, monkey
         client.post(
             "/api/admin/season-reset",
             headers={"X-CSRF-Token": csrf},
-            json={"confirmation": CONFIRMATION_TEXT},
+            json={"confirmation": CONFIRMATION_TEXT, "operation_id": RESET_OPERATION_ID},
         )
 
     assert recorder.messages == []
@@ -676,11 +746,13 @@ def test_broadcast_failure_is_logged_without_reverting_committed_reset(
         response = client.post(
             "/api/admin/season-reset",
             headers={"X-CSRF-Token": csrf},
-            json={"confirmation": CONFIRMATION_TEXT},
+            json={"confirmation": CONFIRMATION_TEXT, "operation_id": RESET_OPERATION_ID},
         )
 
     assert response.status_code == 200
-    assert recorder.messages == [{"type": "season.reset"}]
+    assert recorder.messages == [
+        {"type": "season.reset", "operation_id": RESET_OPERATION_ID}
+    ]
     assert "Season reset broadcast failed" in caplog.text
     assert "broadcast unavailable" in caplog.text
     with factory() as db:

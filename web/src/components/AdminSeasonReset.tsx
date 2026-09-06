@@ -1,5 +1,9 @@
 import { useState } from "react";
 import { api } from "../api";
+import {
+  clearPendingSeasonResetOperation,
+  getPendingSeasonResetOperation,
+} from "../seasonResetOperation";
 import type { SeasonResetPreview, SeasonResetResult } from "../types";
 
 const CONFIRMATION_TEXT = "영호 가챠 시즌 초기화";
@@ -59,13 +63,14 @@ export function AdminSeasonReset({ onCompleted }: { onCompleted: (result: Season
 
   async function executeReset() {
     if (busy || confirmation !== CONFIRMATION_TEXT) return;
+    const operationId = getPendingSeasonResetOperation();
     setBusy(true);
     setError("");
     let result: SeasonResetResult;
     try {
       result = await api<SeasonResetResult>("/api/admin/season-reset", {
         method: "POST",
-        body: JSON.stringify({ confirmation: CONFIRMATION_TEXT }),
+        body: JSON.stringify({ confirmation: CONFIRMATION_TEXT, operation_id: operationId }),
       }, true);
     } catch (caught) {
       setError(errorMessage(caught));
@@ -73,6 +78,7 @@ export function AdminSeasonReset({ onCompleted }: { onCompleted: (result: Season
     } finally {
       setBusy(false);
     }
+    clearPendingSeasonResetOperation(operationId);
     onCompleted(result);
   }
 

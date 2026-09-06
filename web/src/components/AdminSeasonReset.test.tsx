@@ -1,10 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "../api";
+import { api, idempotencyKey } from "../api";
+import { SEASON_RESET_OPERATION_STORAGE_KEY } from "../seasonResetOperation";
 import type { SeasonResetPreview, SeasonResetResult } from "../types";
 import { AdminSeasonReset } from "./AdminSeasonReset";
 
-vi.mock("../api", () => ({ api: vi.fn() }));
+vi.mock("../api", () => ({
+  api: vi.fn(),
+  idempotencyKey: vi.fn(() => "season-reset-test-operation"),
+}));
 
 const preview: SeasonResetPreview = {
   delete_counts: {
@@ -58,6 +62,8 @@ const result: SeasonResetResult = {
   },
   completed_at: "2026-09-06T05:00:00+00:00",
   audit_id: "audit-1",
+  operation_id: "season-reset-test-operation",
+  replayed: false,
 };
 
 function deferred<T>() {
@@ -80,6 +86,8 @@ describe("AdminSeasonReset", () => {
 
   beforeEach(() => {
     vi.mocked(api).mockReset();
+    vi.mocked(idempotencyKey).mockReset().mockReturnValue("season-reset-test-operation");
+    localStorage.clear();
   });
 
   it("keeps destructive controls hidden and does not fetch until preview is requested", async () => {
@@ -179,12 +187,92 @@ describe("AdminSeasonReset", () => {
     expect(vi.mocked(api).mock.calls.filter(call => call[0] === "/api/admin/season-reset")).toHaveLength(1);
     expect(api).toHaveBeenCalledWith("/api/admin/season-reset", {
       method: "POST",
-      body: JSON.stringify({ confirmation: "영호 가챠 시즌 초기화" }),
+      body: JSON.stringify({
+        confirmation: "영호 가챠 시즌 초기화",
+        operation_id: "season-reset-test-operation",
+      }),
     }, true);
 
     operation.resolve(result);
     await waitFor(() => expect(onCompleted).toHaveBeenCalledTimes(1));
     expect(onCompleted).toHaveBeenCalledWith(result);
+    expect(localStorage.getItem(SEASON_RESET_OPERATION_STORAGE_KEY)).toBeNull();
+  });
+
+  it("reuses the same operation ID after a failed request and clears it only after success", async () => {
+    const onCompleted = await loadPreview();
+    vi.mocked(api)
+      .mockRejectedValueOnce(new Error("연결이 끊어졌습니다."))
+      .mockResolvedValueOnce(result);
+    fireEvent.change(screen.getByLabelText("확인 문구"), { target: { value: "영호 가챠 시즌 초기화" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "시즌 초기화 실행" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("연결이 끊어졌습니다.");
+    expect(localStorage.getItem(SEASON_RESET_OPERATION_STORAGE_KEY)).toBe("season-reset-test-operation");
+
+    fireEvent.click(screen.getByRole("button", { name: "시즌 초기화 실행" }));
+
+    await waitFor(() => expect(onCompleted).toHaveBeenCalledWith(result));
+    const resetRequests = vi.mocked(api).mock.calls.filter(call => call[0] === "/api/admin/season-reset");
+    expect(resetRequests).toHaveLength(2);
+    expect(resetRequests.map(call => JSON.parse(String(call[1]?.body)).operation_id)).toEqual([
+      "season-reset-test-operation",
+      "season-reset-test-operation",
+    ]);
+    expect(idempotencyKey).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(SEASON_RESET_OPERATION_STORAGE_KEY)).toBeNull();
+  });
+
+  it("reuses a persisted pending operation ID on a fresh mount", async () => {
+    localStorage.setItem(SEASON_RESET_OPERATION_STORAGE_KEY, "season-reset-from-previous-page");
+    const onCompleted = await loadPreview();
+    vi.mocked(api).mockResolvedValueOnce(result);
+    fireEvent.change(screen.getByLabelText("확인 문구"), { target: { value: "영호 가챠 시즌 초기화" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "시즌 초기화 실행" }));
+
+    await waitFor(() => expect(onCompleted).toHaveBeenCalledWith(result));
+    expect(api).toHaveBeenCalledWith("/api/admin/season-reset", {
+      method: "POST",
+      body: JSON.stringify({
+        confirmation: "영호 가챠 시즌 초기화",
+        operation_id: "season-reset-from-previous-page",
+      }),
+    }, true);
+    expect(idempotencyKey).not.toHaveBeenCalled();
+    expect(localStorage.getItem(SEASON_RESET_OPERATION_STORAGE_KEY)).toBeNull();
+  });
+
+  it("keeps the operation ID in memory when localStorage is unavailable", async () => {
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    try {
+      const onCompleted = await loadPreview();
+      vi.mocked(api)
+        .mockRejectedValueOnce(new Error("연결이 끊어졌습니다."))
+        .mockResolvedValueOnce(result);
+      fireEvent.change(screen.getByLabelText("확인 문구"), { target: { value: "영호 가챠 시즌 초기화" } });
+
+      fireEvent.click(screen.getByRole("button", { name: "시즌 초기화 실행" }));
+      await screen.findByRole("alert");
+      fireEvent.click(screen.getByRole("button", { name: "시즌 초기화 실행" }));
+
+      await waitFor(() => expect(onCompleted).toHaveBeenCalledWith(result));
+      const resetRequests = vi.mocked(api).mock.calls.filter(call => call[0] === "/api/admin/season-reset");
+      expect(resetRequests.map(call => JSON.parse(String(call[1]?.body)).operation_id)).toEqual([
+        "season-reset-test-operation",
+        "season-reset-test-operation",
+      ]);
+      expect(idempotencyKey).toHaveBeenCalledTimes(1);
+    } finally {
+      getItem.mockRestore();
+      setItem.mockRestore();
+    }
   });
 
   it("keeps the preview visible and reports the server error when execution fails", async () => {

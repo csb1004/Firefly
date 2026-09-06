@@ -20,6 +20,7 @@ from bandi_cards.models import (
     DrawWallet,
     FiveStarEvent,
     Inventory,
+    SeasonResetReceipt,
     User,
 )
 from bandi_cards.services.season_reset import (
@@ -129,6 +130,34 @@ def test_postgres_lock_rollback_and_foreign_key_reset(postgres_factory):
         assert [wallet.bonus_tickets for wallet in wallets] == [6, 6]
         audits = db.scalars(select(AdminAudit)).all()
         assert [(audit.id, audit.action) for audit in audits] == [(result["audit_id"], "season.reset")]
+
+
+def test_postgres_receipts_survive_later_resets_and_prevent_stale_reexecution(postgres_factory):
+    admin_id = _seed_postgres_season(postgres_factory)
+    with postgres_factory() as db:
+        card_id = db.scalar(select(Card.id).order_by(Card.id))
+        first = execute_season_reset(db, admin_id, "postgres-reset-first-0001")
+        db.commit()
+
+    with postgres_factory() as db:
+        db.add(Inventory(user_id=admin_id, card_id=card_id, quantity=1))
+        db.commit()
+    with postgres_factory() as db:
+        execute_season_reset(db, admin_id, "postgres-reset-second-0001")
+        db.commit()
+
+    with postgres_factory() as db:
+        db.add(Inventory(user_id=admin_id, card_id=card_id, quantity=3))
+        db.commit()
+    with postgres_factory() as db:
+        replay = execute_season_reset(db, admin_id, "postgres-reset-first-0001")
+        db.commit()
+
+    assert replay == {**first, "replayed": True}
+    with postgres_factory() as db:
+        assert db.scalar(select(Inventory.quantity)) == 3
+        assert db.scalar(select(func.count()).select_from(SeasonResetReceipt)) == 2
+        assert db.scalar(select(func.count()).select_from(AdminAudit)) == 1
 
 
 def test_postgres_table_lock_contention_fails_fast_without_mutation(postgres_factory):

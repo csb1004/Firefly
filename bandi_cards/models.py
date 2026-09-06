@@ -402,6 +402,15 @@ class AdminAudit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class SeasonResetReceipt(Base):
+    __tablename__ = "season_reset_receipts"
+
+    operation_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    admin_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    result_json: Mapped[str] = mapped_column(Text)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ImageCleanup(Base):
     __tablename__ = "image_cleanup"
 

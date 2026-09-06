@@ -9,6 +9,7 @@ import { ActiveSetModal, ActiveSetSummary, SetEffectList } from "./components/Se
 import { DiscardControls } from "./components/DiscardControls";
 import { AdminCardControls, type CardEditValues } from "./components/AdminCardControls";
 import { AdminSeasonReset } from "./components/AdminSeasonReset";
+import { clearPendingSeasonResetOperation } from "./seasonResetOperation";
 import { DrawHistoryPage } from "./components/DrawHistory";
 import type { Card, Catalog, Collection, DrawStatus, SeasonResetResult, SetDefinition, TradeRoom, User } from "./types";
 
@@ -226,12 +227,15 @@ export default function App() {
     });
   };
   const applySeasonReset = (result?: SeasonResetResult) => {
+    if (result) clearPendingSeasonResetOperation(result.operation_id);
     const now = Date.now();
     const lastReset = lastSeasonResetAt.current;
     const alreadyApplied = lastReset !== 0 && now - lastReset < 5_000;
     if (!alreadyApplied) lastSeasonResetAt.current = now;
     setResetNotice(current => result
-      ? `시즌 초기화 완료 · ${result.grant.granted_users}명에게 ${result.grant.total_tickets.toLocaleString()}장 지급`
+      ? result.replayed
+        ? `이전 시즌 초기화 완료 결과를 확인했습니다 · ${new Date(result.completed_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}`
+        : `시즌 초기화 완료 · ${result.grant.granted_users}명에게 ${result.grant.total_tickets.toLocaleString()}장 지급`
       : alreadyApplied ? current : "새 시즌이 시작되었습니다.");
     if (alreadyApplied) return;
     setInvite(undefined);
@@ -253,6 +257,7 @@ export default function App() {
     let retryDelay = 500;
     const onMessage = (message: any) => {
       if (message.type === "season.reset") {
+        clearPendingSeasonResetOperation(message.operation_id);
         applySeasonReset();
         return;
       }

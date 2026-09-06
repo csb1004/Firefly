@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime
 
 from fastapi import HTTPException
@@ -27,6 +28,7 @@ from ..models import (
     NotificationOutbox,
     ProbabilityAudit,
     RaritySetting,
+    SeasonResetReceipt,
     TradeOffer,
     TradeRequest,
     TradeRoom,
@@ -100,7 +102,8 @@ def _acquire_postgres_locks(db: Session) -> None:
                 "trade_offers, trade_requests, trade_rooms, gifts, discard_events, "
                 "inventory, catalog_unlocks, draw_states, daily_draw_allowances, "
                 "draw_wallets, websocket_tickets, notification_outbox, "
-                "probability_audit, admin_audit IN ACCESS EXCLUSIVE MODE NOWAIT"
+                "probability_audit, admin_audit, season_reset_receipts "
+                "IN ACCESS EXCLUSIVE MODE NOWAIT"
             )
         )
     except DBAPIError as exc:
@@ -172,16 +175,15 @@ def _append_reset_audit(
     db: Session,
     *,
     admin_id: int,
+    operation_id: str,
     completed_at: datetime,
-    details: dict,
 ) -> AdminAudit:
-    completed_at_text = completed_at.isoformat()
     audit = AdminAudit(
         admin_id=admin_id,
         action="season.reset",
         target_type="season",
-        target_id=completed_at_text,
-        details_json=json.dumps(details, ensure_ascii=False, sort_keys=True),
+        target_id=operation_id,
+        details_json="{}",
         created_at=completed_at,
     )
     db.add(audit)
@@ -189,8 +191,28 @@ def _append_reset_audit(
     return audit
 
 
-def execute_season_reset(db: Session, admin_id: int) -> dict:
+def _load_reset_receipt(db: Session, operation_id: str) -> dict | None:
+    receipt = db.get(SeasonResetReceipt, operation_id)
+    if receipt is None:
+        return None
+    try:
+        result = json.loads(receipt.result_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return {**result, "replayed": True} if isinstance(result, dict) else None
+
+
+def execute_season_reset(
+    db: Session,
+    admin_id: int,
+    operation_id: str | None = None,
+) -> dict:
+    operation_id = operation_id or str(uuid.uuid4())
     _acquire_postgres_locks(db)
+    replayed = _load_reset_receipt(db, operation_id)
+    if replayed is not None:
+        return replayed
+
     setting = _load_and_validate_configuration(db)
     snapshot = _impact_snapshot(db, setting, grant_key="granted_users")
     completed_at = utcnow()
@@ -208,15 +230,34 @@ def execute_season_reset(db: Session, admin_id: int) -> dict:
     audit = _append_reset_audit(
         db,
         admin_id=admin_id,
+        operation_id=operation_id,
         completed_at=completed_at,
-        details={
-            "delete_counts": snapshot["delete_counts"],
-            "grant": snapshot["grant"],
-            "preserved": snapshot["preserved"],
-        },
     )
-    return {
+    result = {
         **snapshot,
         "completed_at": completed_at.isoformat(),
         "audit_id": audit.id,
+        "operation_id": operation_id,
+        "replayed": False,
     }
+    audit.details_json = json.dumps(
+        {
+            "operation_id": operation_id,
+            "delete_counts": snapshot["delete_counts"],
+            "grant": snapshot["grant"],
+            "preserved": snapshot["preserved"],
+            "result": result,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    db.add(
+        SeasonResetReceipt(
+            operation_id=operation_id,
+            admin_id=admin_id,
+            result_json=json.dumps(result, ensure_ascii=False, sort_keys=True),
+            completed_at=completed_at,
+        )
+    )
+    db.flush()
+    return result
