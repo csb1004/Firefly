@@ -136,3 +136,40 @@ export type AdminCollectionState = {
   total_yp: number;
   cards: Array<Card & { quantity: number; reserved_quantity: number; unlocked: boolean }>;
 };
+
+export type SeasonResetPreserved = {
+  users: number;
+  cards: number;
+  card_sets: number;
+  rarity_settings: number;
+  image_cleanup: number;
+  draw_settings: {
+    daily_draws: number;
+    new_user_bonus_tickets: number;
+  };
+};
+
+export type SeasonResetPreview = {
+  delete_counts: Record<string, number>;
+  summary: {
+    inventory_copies: number;
+    trade_records: number;
+    audit_records: number;
+  };
+  preserved: SeasonResetPreserved;
+  grant: {
+    eligible_users: number;
+    tickets_per_user: number;
+    total_tickets: number;
+  };
+};
+
+export type SeasonResetResult = Omit<SeasonResetPreview, "grant"> & {
+  grant: {
+    granted_users: number;
+    tickets_per_user: number;
+    total_tickets: number;
+  };
+  completed_at: string;
+  audit_id: string;
+};

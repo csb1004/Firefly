@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, idempotencyKey, openRealtime } from "./api";
 import { CardTile, Stars } from "./components/CardTile";
 import { ImageCropper } from "./components/ImageCropper";
@@ -8,8 +8,9 @@ import { AdminSetManager } from "./components/AdminSetManager";
 import { ActiveSetModal, ActiveSetSummary, SetEffectList } from "./components/SetEffectInfo";
 import { DiscardControls } from "./components/DiscardControls";
 import { AdminCardControls, type CardEditValues } from "./components/AdminCardControls";
+import { AdminSeasonReset } from "./components/AdminSeasonReset";
 import { DrawHistoryPage } from "./components/DrawHistory";
-import type { Card, Catalog, Collection, DrawStatus, SetDefinition, TradeRoom, User } from "./types";
+import type { Card, Catalog, Collection, DrawStatus, SeasonResetResult, SetDefinition, TradeRoom, User } from "./types";
 
 type FeedItem = { id: string; drawn_at: string; user_id: number; username: string; display_name: string; card_id: string; card_name: string };
 
@@ -31,13 +32,14 @@ function Warning({ onDone }: { onDone: () => void }) {
   return <main className="center-panel"><div className="brand-mark">!</div><h1 className="welcome-title">시작하기 전에</h1><p>반디와 공유하는 서버가 없거나 Discord DM을 막아두면 선물·거래 알림을 받지 못할 수 있어요. 사이트 기능과 획득한 카드는 그대로 유지됩니다.</p>{error && <p className="error">{error}</p>}<button className="primary-button" onClick={accept}>확인하고 시작</button></main>;
 }
 
-function Shell({ me, children, feed, invite }: { me: User; children: React.ReactNode; feed: FeedItem[]; invite?: TradeRoom }) {
+function Shell({ me, children, feed, invite, seasonEpoch, resetNotice, onDismissResetNotice }: { me: User; children: React.ReactNode; feed: FeedItem[]; invite?: TradeRoom; seasonEpoch: number; resetNotice: string; onDismissResetNotice: () => void }) {
   return <div className="app-shell">
     <header><button className="logo" onClick={() => navigate("/")}><span>✦</span> 영호 가챠</button><nav>
       <button onClick={() => navigate("/")}>뽑기</button><button onClick={() => navigate("/draw-history")}>기록</button><button onClick={() => navigate("/collection")}>컬렉션</button><button onClick={() => navigate("/catalog")}>도감</button><button onClick={() => navigate("/ranking")}>랭킹</button><button onClick={() => navigate("/search")}>검색</button><button onClick={() => navigate("/settings")}>설정</button>{me.is_admin && <button onClick={() => navigate("/admin")}>관리</button>}
     </nav><button className="avatar-button" onClick={() => navigate(`/profile/${me.id}`)}><img src={me.avatar_url} alt="" />{me.display_name}</button></header>
+    {resetNotice && <div className="season-reset-notice" role="status"><span>{resetNotice}</span><button aria-label="시즌 초기화 알림 닫기" onClick={onDismissResetNotice}>×</button></div>}
     {invite && invite.status === "invited" && invite.invitee_id === me.id && <div className="invite-banner"><span>새 거래 초대가 도착했습니다.</span><button onClick={() => navigate(`/trade/${invite.id}`)}>확인</button></div>}
-    <main className="content">{children}</main>
+    <main className="content" key={seasonEpoch}>{children}</main>
     <footer><div className="footer-title"><strong>최근 5성</strong><button onClick={()=>navigate("/five-stars")}>전체 기록</button></div><div className="feed-strip">{feed.length ? feed.map(item => <div className="feed-item" key={item.id}><time>{new Date(item.drawn_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</time><button onClick={() => navigate(`/profile/${item.user_id}`)}>{item.display_name}</button><button onClick={() => navigate(`/card/${item.card_id}`)}>{item.card_name}</button></div>) : <span>아직 5성 기록이 없습니다.</span>}</div></footer>
   </div>;
 }
@@ -167,7 +169,7 @@ function DrawTicketAdmin() {
   return <section className="admin-ticket-section"><div className="section-title"><div><p className="eyebrow">DRAW CONTROL</p><h2>뽑기권 관리</h2></div></div>{message&&<p className="notice">{message}</p>}<div className="admin-ticket-grid"><div className="panel ticket-settings"><div className="ticket-setting-block"><h3>매일 기본 지급</h3><p>모든 플레이어에게 오전 5시 기준으로 적용됩니다. 신규 사용자도 가입한 날부터 같은 수량을 받습니다.</p><label><input type="number" min="0" max="100" value={dailyDraws} onChange={e=>setDailyDraws(Number(e.target.value))}/><span>회</span></label></div><div className="ticket-setting-block"><h3>신규 사용자 혜택</h3><p>Discord 계정으로 처음 가입할 때만 추가 뽑기권으로 한 번 지급됩니다.</p><label><input type="number" min="0" max="10000" value={newUserBonusTickets} onChange={e=>setNewUserBonusTickets(Number(e.target.value))}/><span>장</span></label></div><button onClick={saveDaily}>자동 지급 설정 저장</button></div><div className="panel player-ticket-panel"><h3>플레이어별 관리</h3><form className="ticket-search" onSubmit={search}><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="사용자명 또는 Discord ID" required/><button>검색</button></form>{users.length>0&&<div className="ticket-search-results">{users.map(user=><button key={user.id} onClick={()=>selectUser(user)}><img src={user.avatar_url} alt=""/><span><b>{user.display_name}</b><small>@{user.username} · {user.discord_id}</small></span></button>)}</div>}{selected&&<div className="selected-ticket-user"><div className="ticket-user-head"><img src={selected.user.avatar_url} alt=""/><span><b>{selected.user.display_name}</b><small>@{selected.user.username}</small></span></div><div className="ticket-stats"><span>총 사용 가능<b>{selected.draws_remaining}회</b></span><span>오늘 기본분<b>{selected.daily_remaining}회</b></span><span>추가권<b>{selected.bonus_tickets}장</b></span></div><div className="ticket-actions"><label><input type="number" min="1" max="10000" value={grantAmount} onChange={e=>setGrantAmount(Number(e.target.value))}/><span>장</span></label><button onClick={grant}>추가권 지급</button><button className="danger" onClick={resetToday}>오늘 사용량 초기화</button></div></div>}</div></div></section>;
 }
 
-function AdminPage() {
+function AdminPage({ onSeasonReset }: { onSeasonReset: (result: SeasonResetResult) => void }) {
   const [cards, setCards] = useState<Card[]>([]);
   const [prob, setProb] = useState<Record<string, number>>({ "1":45,"2":30,"3":19.3,"4":5.1,"5":0.6 });
   const [message, setMessage] = useState("");
@@ -202,13 +204,37 @@ function AdminPage() {
   }
   return <>
     <section><p className="eyebrow">SPECIAL USER CONTROL</p><h1>관리자 센터</h1><DrawTicketAdmin/><AdminCollectionManager/><AdminSetManager cards={cards}/><div className="section-title admin-card-heading"><div><p className="eyebrow">CARD CONTROL</p><h2>카드 관리</h2></div></div>{message && <p className="notice">{message}</p>}<div className="admin-grid"><form className="panel form-grid" onSubmit={create}><h2>새 카드</h2><label>이름<input name="name" required maxLength={100}/></label><label>등급<select name="rarity">{[1,2,3,4,5].map(v=><option key={v} value={v}>{v}성</option>)}</select></label><label>YP<input name="yp" type="number" min="0" required/></label><label>가중치<input name="weight" type="number" min="0.000001" step="any"/></label><label>이미지<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file=event.target.files?.[0]; if(file)setCropTarget({file}); event.target.value=""; }}/><small className={newImage ? "image-ready" : ""}>{newImage ? `✓ 3:4 자르기 완료 · ${newImage.name}` : "선택 후 확대·이동하여 3:4로 자릅니다."}</small></label><input type="hidden" name="active" value="true"/><button className="primary-button">카드 추가</button></form><div className="panel"><h2>등급 확률</h2>{[1,2,3,4,5].map(r => <label className="prob-input" key={r}><Stars rarity={r}/><input type="number" step="0.0001" value={prob[String(r)] ?? 0} onChange={e => setProb({...prob,[String(r)]:Number(e.target.value)})}/><span>%</span></label>)}<button onClick={saveProb}>확률 저장</button></div></div><div className="admin-card-list">{cards.map(card => <div className="admin-card-item" key={card.id}><CardTile card={card} compact/><AdminCardControls card={card} open={managedCardId===card.id} onToggle={()=>setManagedCardId(managedCardId===card.id?undefined:card.id)} onSave={values=>edit(card,values)} onToggleActive={()=>toggle(card)} onImage={file=>setCropTarget({file,card})} onRemoved={async()=>{setManagedCardId(undefined);await load();}} onError={setMessage}/></div>)}</div></section>
+    <AdminSeasonReset onCompleted={onSeasonReset}/>
     {cropTarget && <ImageCropper file={cropTarget.file} onCancel={()=>setCropTarget(undefined)} onConfirm={finishCrop}/>}
   </>;
 }
 
 export default function App() {
-  const [me, setMe] = useState<User | null | undefined>(); const [path, setPath] = useState(location.pathname); const [feed, setFeed] = useState<FeedItem[]>([]); const [invite, setInvite] = useState<TradeRoom>();
+  const [me, setMe] = useState<User | null | undefined>();
+  const [path, setPath] = useState(location.pathname);
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [invite, setInvite] = useState<TradeRoom>();
+  const [seasonEpoch, setSeasonEpoch] = useState(0);
+  const [resetNotice, setResetNotice] = useState("");
+  const lastSeasonResetAt = useRef(0);
   const refresh = () => api<User>("/api/auth/me").then(setMe).catch(() => setMe(null));
+  const applySeasonReset = (result?: SeasonResetResult) => {
+    const now = Date.now();
+    const lastReset = lastSeasonResetAt.current;
+    const alreadyApplied = lastReset !== 0 && now - lastReset < 5_000;
+    if (!alreadyApplied) lastSeasonResetAt.current = now;
+    setResetNotice(current => result
+      ? `시즌 초기화 완료 · ${result.grant.granted_users}명에게 ${result.grant.total_tickets.toLocaleString()}장 지급`
+      : alreadyApplied ? current : "새 시즌이 시작되었습니다.");
+    if (alreadyApplied) return;
+    setInvite(undefined);
+    setFeed([]);
+    if (location.pathname !== "/") history.replaceState({}, "", "/");
+    setPath("/");
+    setSeasonEpoch(value => value + 1);
+    void refresh();
+    void api<{ items: FeedItem[] }>("/api/feed/five-stars").then(data => setFeed(data.items)).catch(() => {});
+  };
   useEffect(() => { const handler=()=>setPath(location.pathname); addEventListener("popstate",handler); refresh(); return()=>removeEventListener("popstate",handler); }, []);
   useEffect(() => {
     if (!me?.warning_acknowledged) return;
@@ -218,6 +244,10 @@ export default function App() {
     let stopped = false;
     let retryDelay = 500;
     const onMessage = (message: any) => {
+      if (message.type === "season.reset") {
+        applySeasonReset();
+        return;
+      }
       if (message.type === "trade.invited") setInvite(message.room);
       if (message.room?.id) window.dispatchEvent(new CustomEvent("trade-room-update", { detail: message.room }));
     };
@@ -250,6 +280,6 @@ export default function App() {
   if (me === null) return <Login/>;
   if (!me.warning_acknowledged) return <Warning onDone={refresh}/>;
   let page: React.ReactNode = <DrawPage/>;
-  if(path==="/draw-history") page=<DrawHistoryPage onCard={cardId=>navigate(`/card/${cardId}`)}/>; else if(path==="/collection") page=<CollectionPage/>; else if(path==="/catalog") page=<CatalogPage/>; else if(path==="/sets") page=<SetArchivePage/>; else if(path==="/ranking") page=<RankingPage/>; else if(path==="/search") page=<SearchPage/>; else if(path==="/settings") page=<SettingsPage me={me} refresh={refresh}/>; else if(path==="/five-stars") page=<FiveStarHistoryPage/>; else if(path==="/admin" && me.is_admin) page=<AdminPage/>; else if(path.startsWith("/profile/")) page=<ProfilePage me={me} userId={Number(path.split("/").pop())}/>; else if(path.startsWith("/trade/")) page=<TradePage me={me} roomId={path.split("/").pop()!}/>; else if(path.startsWith("/card/")) page=<CardDetailPage cardId={path.split("/").pop()!}/>;
-  return <Shell me={me} feed={feed} invite={invite}>{page}</Shell>;
+  if(path==="/draw-history") page=<DrawHistoryPage onCard={cardId=>navigate(`/card/${cardId}`)}/>; else if(path==="/collection") page=<CollectionPage/>; else if(path==="/catalog") page=<CatalogPage/>; else if(path==="/sets") page=<SetArchivePage/>; else if(path==="/ranking") page=<RankingPage/>; else if(path==="/search") page=<SearchPage/>; else if(path==="/settings") page=<SettingsPage me={me} refresh={refresh}/>; else if(path==="/five-stars") page=<FiveStarHistoryPage/>; else if(path==="/admin" && me.is_admin) page=<AdminPage onSeasonReset={applySeasonReset}/>; else if(path.startsWith("/profile/")) page=<ProfilePage me={me} userId={Number(path.split("/").pop())}/>; else if(path.startsWith("/trade/")) page=<TradePage me={me} roomId={path.split("/").pop()!}/>; else if(path.startsWith("/card/")) page=<CardDetailPage cardId={path.split("/").pop()!}/>;
+  return <Shell me={me} feed={feed} invite={invite} seasonEpoch={seasonEpoch} resetNotice={resetNotice} onDismissResetNotice={()=>setResetNotice("")}>{page}</Shell>;
 }
