@@ -357,3 +357,98 @@ def test_card_mutations_and_websocket_ticket_return_503_during_reset(signed_in):
     assert draw.status_code == 503
     assert draw.json()["detail"] == "시즌 초기화가 진행 중입니다. 잠시 후 다시 시도해주세요."
     assert socket_ticket.status_code == 503
+
+
+class BroadcastRecorder:
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.messages: list[dict] = []
+        self.error = error
+
+    async def broadcast_all(self, message: dict) -> None:
+        self.messages.append(message)
+        if self.error is not None:
+            raise self.error
+
+
+def test_committed_reset_broadcasts_one_exact_completion_event(admin_signed_in, monkeypatch):
+    from bandi_cards.routes import admin_reset
+
+    client, factory, admin_id, csrf = admin_signed_in
+    _seed_api_season(factory, admin_id)
+    recorder = BroadcastRecorder()
+    monkeypatch.setattr(admin_reset, "manager", recorder, raising=False)
+
+    response = client.post(
+        "/api/admin/season-reset",
+        headers={"X-CSRF-Token": csrf},
+        json={"confirmation": CONFIRMATION_TEXT},
+    )
+
+    assert response.status_code == 200
+    assert recorder.messages == [{"type": "season.reset"}]
+
+
+def test_rolled_back_reset_does_not_broadcast_completion(admin_signed_in, monkeypatch):
+    from bandi_cards.routes import admin_reset
+
+    client, factory, admin_id, csrf = admin_signed_in
+    _seed_api_season(factory, admin_id)
+    recorder = BroadcastRecorder()
+    monkeypatch.setattr(admin_reset, "manager", recorder, raising=False)
+
+    def fail_during_reset(db, actor_id):
+        db.add(
+            AdminAudit(
+                admin_id=actor_id,
+                action="uncommitted.reset",
+                target_type="season",
+                target_id=None,
+                details_json="{}",
+            )
+        )
+        db.flush()
+        raise RuntimeError("forced reset rollback")
+
+    monkeypatch.setattr(admin_reset, "execute_season_reset", fail_during_reset)
+
+    with pytest.raises(RuntimeError, match="forced reset rollback"):
+        client.post(
+            "/api/admin/season-reset",
+            headers={"X-CSRF-Token": csrf},
+            json={"confirmation": CONFIRMATION_TEXT},
+        )
+
+    assert recorder.messages == []
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(Inventory)) == 1
+        assert [audit.action for audit in db.scalars(select(AdminAudit)).all()] == ["old.admin.action"]
+
+
+def test_broadcast_failure_is_logged_without_reverting_committed_reset(
+    admin_signed_in,
+    monkeypatch,
+    caplog,
+):
+    from bandi_cards.routes import admin_reset
+
+    client, factory, admin_id, csrf = admin_signed_in
+    _seed_api_season(factory, admin_id)
+    recorder = BroadcastRecorder(error=RuntimeError("broadcast unavailable"))
+    monkeypatch.setattr(admin_reset, "manager", recorder, raising=False)
+
+    with caplog.at_level("ERROR", logger="bandi_cards.routes.admin_reset"):
+        response = client.post(
+            "/api/admin/season-reset",
+            headers={"X-CSRF-Token": csrf},
+            json={"confirmation": CONFIRMATION_TEXT},
+        )
+
+    assert response.status_code == 200
+    assert recorder.messages == [{"type": "season.reset"}]
+    assert "Season reset broadcast failed" in caplog.text
+    assert "broadcast unavailable" in caplog.text
+    with factory() as db:
+        audits = db.scalars(select(AdminAudit)).all()
+        assert len(audits) == 1
+        assert audits[0].action == "season.reset"
+        assert audits[0].id == response.json()["audit_id"]

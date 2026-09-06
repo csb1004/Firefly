@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import User
+from ..realtime.connection_manager import manager
 from ..season_reset import SeasonResetAlreadyRunning
 from ..security import require_admin, require_admin_csrf
 from ..services.season_reset import (
@@ -20,6 +22,7 @@ from ..services.season_reset import (
 
 
 router = APIRouter(prefix="/api/admin/season-reset", tags=["admin season reset"])
+logger = logging.getLogger(__name__)
 
 
 class SeasonResetBody(BaseModel):
@@ -70,10 +73,15 @@ async def reset_season(
     coordinator = request.app.state.season_reset_coordinator
     try:
         async with coordinator.reset():
-            return await _complete_reset_transaction(
+            result = await _complete_reset_transaction(
                 request.app.state.session_factory,
                 admin.id,
             )
+            try:
+                await manager.broadcast_all({"type": "season.reset"})
+            except Exception:
+                logger.exception("Season reset broadcast failed")
+            return result
     except (SeasonResetAlreadyRunning, SeasonResetLockUnavailable) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, "시즌 초기화가 이미 진행 중입니다.") from exc
     except SeasonResetConfigurationInvalid as exc:

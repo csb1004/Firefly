@@ -44,5 +44,8 @@ class ConnectionManager:
     async def send_many(self, user_ids: list[int], message: dict) -> None:
         await asyncio.gather(*(self.send(user_id, message) for user_id in set(user_ids)))
 
+    async def broadcast_all(self, message: dict) -> None:
+        await self.send_many(list(self.connections), message)
+
 
 manager = ConnectionManager()
