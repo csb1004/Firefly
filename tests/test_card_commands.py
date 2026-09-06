@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from bandi_cards.models import Card, Inventory, User
+from bandi_cards.services.season_reset import execute_season_reset
 from firefly import commands
 
 
@@ -60,6 +61,51 @@ def test_ranking_embed_guides_unregistered_user_to_login(web_db, monkeypatch):
 
     assert fields["내 순위"] == "아직 가입하지 않았어. 영호 가챠에 로그인해줘!"
     assert "https://cards.example" in embed.description
+
+
+def test_ranking_embed_keeps_existing_users_at_zero_after_season_reset(web_db, monkeypatch):
+    card_commands = _card_commands_module()
+    monkeypatch.setattr(card_commands, "CARD_SITE_URL", "https://cards.example")
+
+    with web_db() as db:
+        users = [
+            User(discord_id="2001", username="alpha", global_name="알파"),
+            User(discord_id="2002", username="beta", global_name="베타"),
+        ]
+        cards = [
+            Card(
+                name=f"시즌 보존 카드 {rarity}",
+                rarity=rarity,
+                yp=rarity * 100,
+                image_key=f"cards/season-{rarity}.webp",
+            )
+            for rarity in range(1, 6)
+        ]
+        db.add_all([*users, *cards])
+        db.flush()
+        db.add_all(
+            [
+                Inventory(user_id=users[0].id, card_id=cards[4].id, quantity=3),
+                Inventory(user_id=users[1].id, card_id=cards[2].id, quantity=2),
+            ]
+        )
+        db.commit()
+        admin_id = users[0].id
+
+    with web_db() as db:
+        execute_season_reset(db, admin_id=admin_id)
+        db.commit()
+
+    embed = card_commands.create_ranking_embed("2002", session_factory=web_db)
+    fields = {field.name: field.value for field in embed.fields}
+
+    assert embed.url == "https://cards.example/ranking"
+    assert embed.description.splitlines() == [
+        "1. 알파 (@alpha) — 0 YP",
+        "2. 베타 (@beta) — 0 YP",
+    ]
+    assert fields["내 순위"] == "2위 · 0 YP"
+    assert fields["전체 랭킹"] == "https://cards.example/ranking"
 
 
 def _run_text_command(command_text, monkeypatch):
