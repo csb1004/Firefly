@@ -190,6 +190,38 @@ describe("season reset realtime behavior", () => {
     expect(pushSpy).not.toHaveBeenCalled();
   });
 
+  it("does not expose discard controls in a player's collection", async () => {
+    const baseApi = vi.mocked(api).getMockImplementation()!;
+    vi.mocked(api).mockImplementation((path, options, csrf) => {
+      if (path === "/api/collection/me") {
+        return Promise.resolve({
+          user_id: 1,
+          total_yp: 500,
+          base_yp: 500,
+          fixed_bonus: 0,
+          percent_yp: 0,
+          active_sets: [],
+          cards: [{
+            id: "owned-card",
+            name: "보유 카드",
+            rarity: 5,
+            yp: 500,
+            image_url: "/owned.webp",
+            quantity: 2,
+            available_quantity: 2,
+          }],
+        });
+      }
+      return baseApi(path, options, csrf);
+    });
+
+    await startAt("/collection");
+
+    expect(await screen.findByText("보유 카드")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /카드 정리/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "변화 확인" })).not.toBeInTheDocument();
+  });
+
   it("ignores an initial five-star feed response that resolves after the season reset refresh", async () => {
     const initialFeed = deferred<{ items: typeof oldFeed[] }>();
     const baseApi = vi.mocked(api).getMockImplementation()!;

@@ -15,7 +15,6 @@ from .routes.admin_sets import router as admin_sets_router
 from .routes.admin_reset import router as admin_reset_router
 from .routes.auth import router as auth_router
 from .routes.cards import router as cards_router
-from .routes.collections import router as collections_router
 from .routes.draws import router as draws_router
 from .routes.gifts import router as gifts_router
 from .routes.sets import router as sets_router
@@ -45,7 +44,6 @@ def create_app() -> FastAPI:
     app.include_router(admin_sets_router)
     app.include_router(admin_reset_router)
     app.include_router(cards_router)
-    app.include_router(collections_router)
     app.include_router(draws_router)
     app.include_router(gifts_router)
     app.include_router(sets_router)

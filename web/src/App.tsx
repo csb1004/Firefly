@@ -6,7 +6,6 @@ import { Reveal, sortCardsByRarity } from "./components/Reveal";
 import { AdminCollectionManager } from "./components/AdminCollectionManager";
 import { AdminSetManager } from "./components/AdminSetManager";
 import { ActiveSetModal, ActiveSetSummary, SetEffectList } from "./components/SetEffectInfo";
-import { DiscardControls } from "./components/DiscardControls";
 import { AdminCardControls, type CardEditValues } from "./components/AdminCardControls";
 import { AdminSeasonReset } from "./components/AdminSeasonReset";
 import { clearPendingSeasonResetOperation } from "./seasonResetOperation";
@@ -77,7 +76,7 @@ function CollectionPage({ userId }: { userId?: number }) {
   const [error, setError] = useState("");
   const load = () => api<Collection>(userId ? `/api/users/${userId}/collection` : "/api/collection/me").then(setData).catch(e => setError(e.message));
   useEffect(() => { load(); if (!userId) api<SetDefinition[]>("/api/sets").then(setSets).catch(e => setError(e.message)); }, [userId]);
-  return <section><div className="section-title"><div><p className="eyebrow">ARCHIVE</p><h1>컬렉션</h1></div><div className="collection-summary-actions"><strong className="yp-total">{data?.total_yp.toLocaleString() ?? 0} YP</strong>{!userId && <button className="set-info-button" aria-label="적용 중인 세트 효과 정보" onClick={() => setShowSetInfo(true)}>i</button>}</div></div>{data?.base_yp !== undefined && <div className="yp-breakdown"><span>기본 {data.base_yp.toLocaleString()}</span><span>고정 효과 +{data.fixed_bonus?.toLocaleString()} YP</span><span>대상 % 효과 +{data.percent_yp?.toLocaleString()} YP</span>{data.active_sets?.map(name => <b key={name}>✦ {name}</b>)}</div>}{error && <p className="error">{error}</p>}<div className="card-grid">{data?.cards.map(card => <div className="collection-card" key={card.id}><CardTile card={card} onClick={() => navigate(`/card/${card.id}`)}/>{!userId && <DiscardControls card={card} onDiscarded={load} onError={setError}/>}</div>)}</div>{data?.cards.length === 0 && <div className="empty">아직 보유한 카드가 없습니다. 도감 해금 기록은 유지됩니다.</div>}{showSetInfo && <ActiveSetModal sets={sets} activeSetNames={data?.active_sets ?? []} totalYp={data?.total_yp ?? 0} onClose={() => setShowSetInfo(false)}/>}</section>;
+  return <section><div className="section-title"><div><p className="eyebrow">ARCHIVE</p><h1>컬렉션</h1></div><div className="collection-summary-actions"><strong className="yp-total">{data?.total_yp.toLocaleString() ?? 0} YP</strong>{!userId && <button className="set-info-button" aria-label="적용 중인 세트 효과 정보" onClick={() => setShowSetInfo(true)}>i</button>}</div></div>{data?.base_yp !== undefined && <div className="yp-breakdown"><span>기본 {data.base_yp.toLocaleString()}</span><span>고정 효과 +{data.fixed_bonus?.toLocaleString()} YP</span><span>대상 % 효과 +{data.percent_yp?.toLocaleString()} YP</span>{data.active_sets?.map(name => <b key={name}>✦ {name}</b>)}</div>}{error && <p className="error">{error}</p>}<div className="card-grid">{data?.cards.map(card => <CardTile card={card} key={card.id} onClick={() => navigate(`/card/${card.id}`)}/>)}</div>{data?.cards.length === 0 && <div className="empty">아직 보유한 카드가 없습니다. 도감 해금 기록은 유지됩니다.</div>}{showSetInfo && <ActiveSetModal sets={sets} activeSetNames={data?.active_sets ?? []} totalYp={data?.total_yp ?? 0} onClose={() => setShowSetInfo(false)}/>}</section>;
 }
 
 function CatalogPage() {

@@ -90,7 +90,7 @@ def test_discard_last_copy_preserves_catalog_unlock_and_is_idempotent(web_db):
         assert same.id == event.id
 
 
-def test_discard_and_admin_collection_routes(admin_signed_in):
+def test_admin_collection_routes(admin_signed_in):
     client, factory, admin_id, csrf = admin_signed_in
     with factory() as db:
         target = User(discord_id="managed-user", username="managed", warning_acknowledged=True)
@@ -117,6 +117,23 @@ def test_discard_and_admin_collection_routes(admin_signed_in):
     )
     assert locked.status_code == 200
     assert next(item for item in locked.json()["cards"] if item["id"] == card_id)["unlocked"] is False
+
+    removed = client.put(
+        f"/api/admin/users/{target_id}/inventory/{card_id}",
+        json={"quantity": 0},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert removed.status_code == 200
+    assert next(item for item in removed.json()["cards"] if item["id"] == card_id)["quantity"] == 0
+
+
+def test_player_discard_routes_are_not_exposed():
+    from bandi_cards.app import create_app
+
+    paths = create_app().openapi()["paths"]
+
+    assert "/api/collection/discard" not in paths
+    assert "/api/collection/discard/preview" not in paths
 
 
 def test_admin_can_create_configurable_set(admin_signed_in):

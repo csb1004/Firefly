@@ -51,7 +51,6 @@ GUARDED_ROUTES = {
     ("PUT", "/api/admin/cards/{card_id}"),
     ("PUT", "/api/admin/probabilities"),
     ("DELETE", "/api/admin/cards/{card_id}"),
-    ("POST", "/api/collection/discard"),
     ("POST", "/api/draw"),
     ("POST", "/api/draw/ten"),
     ("POST", "/api/gifts"),
@@ -68,7 +67,6 @@ UNGUARDED_MUTATING_ROUTES = {
     ("POST", "/api/auth/logout"),
     ("POST", "/api/me/warning"),
     ("PUT", "/api/me/settings"),
-    ("POST", "/api/collection/discard/preview"),
     ("POST", "/api/gifts/preview"),
     ("POST", "/api/admin/season-reset"),
 }
