@@ -2,6 +2,7 @@ import asyncio
 import json
 import threading
 from contextlib import contextmanager
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -13,12 +14,24 @@ from bandi_cards.models import (
     AdminAudit,
     Card,
     CatalogUnlock,
+    DrawHistory,
     DrawSetting,
+    DrawState,
     DrawWallet,
+    FiveStarEvent,
     Inventory,
+    NotificationOutbox,
+    OAuthAttempt,
+    TradeRoom,
     User,
+    utcnow,
 )
+from bandi_cards.security import token_hash
+from bandi_cards.services.discord_oauth import DiscordProfile
+from bandi_cards.services.draws import draw_ticket_status, logical_draw_day
+from bandi_cards.services.gifts import send_gift
 from bandi_cards.services.season_reset import CONFIRMATION_TEXT
+from bandi_cards.services.trades import accept_invite, accept_offer, create_trade, set_offer
 
 
 GUARDED_ROUTES = {
@@ -204,6 +217,172 @@ def test_admin_preview_and_execute_preserve_session_and_settings(admin_signed_in
         assert len(audits) == 1
         assert audits[0].id == payload["audit_id"]
         assert json.loads(audits[0].details_json)["grant"] == payload["grant"]
+
+
+def test_reset_restarts_player_progress_and_gameplay_remains_available(admin_signed_in):
+    client, factory, admin_id, csrf = admin_signed_in
+    player_id = _seed_api_season(factory, admin_id, daily_draws=10, bonus_tickets=20)
+    with factory() as db:
+        player = db.get(User, player_id)
+        player.accepts_gifts = True
+        player.accepts_trades = True
+        five_star = db.scalar(select(Card).where(Card.rarity == 5))
+        old_draw = DrawHistory(
+            user_id=admin_id,
+            card_id=five_star.id,
+            card_name=five_star.name,
+            card_rarity=five_star.rarity,
+            card_yp=five_star.yp,
+            draw_day=logical_draw_day(),
+            ticket_source="daily",
+            idempotency_key="before-season-reset",
+        )
+        db.add(old_draw)
+        db.flush()
+        db.add_all(
+            [
+                DrawState(user_id=admin_id, pulls_since_four_plus=6, pulls_since_five=73),
+                FiveStarEvent(draw_id=old_draw.id, user_id=admin_id, card_id=five_star.id),
+                TradeRoom(inviter_id=admin_id, invitee_id=player_id),
+                NotificationOutbox(
+                    recipient_discord_id=player.discord_id,
+                    kind="before_reset_marker",
+                    payload='{"old":true}',
+                ),
+            ]
+        )
+        db.commit()
+
+    reset = client.post(
+        "/api/admin/season-reset",
+        headers={"X-CSRF-Token": csrf},
+        json={"confirmation": CONFIRMATION_TEXT},
+    )
+
+    assert reset.status_code == 200
+    assert client.get("/api/auth/me").json()["id"] == admin_id
+    assert client.get("/api/collection/me").json()["cards"] == []
+    catalog = client.get("/api/catalog").json()
+    assert (catalog["owned_count"], catalog["total_count"]) == (0, 5)
+    history = client.get("/api/draw/history").json()
+    assert history["total"] == 0
+    assert history["summary"] == {"total_draws": 0, "four_remaining": 10, "five_remaining": 90}
+    assert client.get("/api/feed/five-stars").json()["items"] == []
+    assert [item["total_yp"] for item in client.get("/api/rankings").json()["items"]] == [0, 0]
+    assert client.get("/api/draw/status").json() == {
+        "eligible": True,
+        "draws_remaining": 30,
+        "daily_remaining": 10,
+        "bonus_tickets": 20,
+        "four_remaining": 10,
+        "five_remaining": 90,
+    }
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(TradeRoom)) == 0
+        assert db.scalar(select(func.count()).select_from(NotificationOutbox)) == 0
+
+    ten = client.post(
+        "/api/draw/ten",
+        headers={"X-CSRF-Token": csrf},
+        json={"idempotency_key": "post-reset-ten"},
+    )
+    single = client.post(
+        "/api/draw",
+        headers={"X-CSRF-Token": csrf},
+        json={"idempotency_key": "post-reset-single"},
+    )
+
+    assert ten.status_code == 200
+    assert len(ten.json()["cards"]) == 10
+    assert single.status_code == 200
+    assert client.get("/api/draw/history").json()["total"] == 11
+
+    with factory() as db:
+        gift_inventory = db.scalars(
+            select(Inventory)
+            .where(Inventory.user_id == admin_id, Inventory.quantity >= 3)
+            .order_by(Inventory.quantity.desc(), Inventory.card_id)
+        ).first()
+        assert gift_inventory is not None
+        card_id = gift_inventory.card_id
+
+        _gift, _preview, repeated = send_gift(
+            db,
+            admin_id,
+            player_id,
+            card_id,
+            1,
+            "post-reset-gift",
+        )
+        assert repeated is False
+
+        room = create_trade(db, admin_id, player_id)
+        accept_invite(db, room.id, player_id)
+        set_offer(db, room.id, admin_id, card_id, 1)
+        set_offer(db, room.id, player_id, card_id, 1)
+        _room, first_completed = accept_offer(db, room.id, admin_id)
+        completed_room, second_completed = accept_offer(db, room.id, player_id)
+
+        assert first_completed is False
+        assert second_completed is True
+        assert completed_room.status == "completed"
+        assert sorted(db.scalars(select(NotificationOutbox.kind)).all()) == [
+            "gift_received",
+            "trade_completed",
+            "trade_completed",
+            "trade_invite",
+        ]
+
+
+def test_new_discord_user_after_reset_gets_current_daily_and_signup_bonus(
+    admin_signed_in,
+    monkeypatch,
+):
+    client, factory, admin_id, csrf = admin_signed_in
+    _seed_api_season(factory, admin_id, daily_draws=10, bonus_tickets=20)
+
+    reset = client.post(
+        "/api/admin/season-reset",
+        headers={"X-CSRF-Token": csrf},
+        json={"confirmation": CONFIRMATION_TEXT},
+    )
+    assert reset.status_code == 200
+
+    async def fake_exchange(_code, _verifier):
+        return DiscordProfile(
+            id="post-reset-new-user",
+            username="newbie",
+            global_name="신규 사용자",
+            avatar=None,
+        )
+
+    monkeypatch.setattr("bandi_cards.routes.auth.exchange_code", fake_exchange)
+    with factory() as db:
+        db.add(
+            OAuthAttempt(
+                state_hash=token_hash("post-reset-state"),
+                verifier="verifier",
+                expires_at=utcnow() + timedelta(minutes=5),
+            )
+        )
+        db.commit()
+
+    callback = client.get(
+        "/api/auth/discord/callback",
+        params={"code": "code", "state": "post-reset-state"},
+        follow_redirects=False,
+    )
+
+    assert callback.status_code == 307
+    with factory() as db:
+        newcomer = db.scalar(select(User).where(User.discord_id == "post-reset-new-user"))
+        assert newcomer is not None
+        assert draw_ticket_status(db, newcomer.id) == {
+            "eligible": True,
+            "draws_remaining": 30,
+            "daily_remaining": 10,
+            "bonus_tickets": 20,
+        }
 
 
 def test_invalid_preserved_configuration_returns_422_without_deleting(admin_signed_in):
