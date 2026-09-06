@@ -5,6 +5,7 @@ from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -39,6 +40,7 @@ from .probabilities import base_probabilities, validate_probability_configuratio
 CONFIRMATION_TEXT = "영호 가챠 시즌 초기화"
 ADVISORY_LOCK_NAMESPACE = 1947147369
 ADVISORY_LOCK_OPERATION = 1
+POSTGRES_LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
 
 
 class SeasonResetLockUnavailable(RuntimeError):
@@ -90,16 +92,21 @@ def _acquire_postgres_locks(db: Session) -> None:
     )
     if not locked:
         raise SeasonResetLockUnavailable
-    db.execute(text("LOCK TABLE users, draw_settings IN SHARE MODE"))
-    db.execute(
-        text(
-            "LOCK TABLE five_star_events, draw_history, draw_batches, "
-            "trade_offers, trade_requests, trade_rooms, gifts, discard_events, "
-            "inventory, catalog_unlocks, draw_states, daily_draw_allowances, "
-            "draw_wallets, websocket_tickets, notification_outbox, "
-            "probability_audit, admin_audit IN ACCESS EXCLUSIVE MODE"
+    try:
+        db.execute(text("LOCK TABLE users, draw_settings IN SHARE MODE NOWAIT"))
+        db.execute(
+            text(
+                "LOCK TABLE five_star_events, draw_history, draw_batches, "
+                "trade_offers, trade_requests, trade_rooms, gifts, discard_events, "
+                "inventory, catalog_unlocks, draw_states, daily_draw_allowances, "
+                "draw_wallets, websocket_tickets, notification_outbox, "
+                "probability_audit, admin_audit IN ACCESS EXCLUSIVE MODE NOWAIT"
+            )
         )
-    )
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) == POSTGRES_LOCK_NOT_AVAILABLE_SQLSTATE:
+            raise SeasonResetLockUnavailable from exc
+        raise
 
 
 def _row_count(db: Session, model) -> int:

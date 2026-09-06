@@ -1,8 +1,11 @@
 import os
+import threading
+import time
 from datetime import date
+from queue import Queue
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
@@ -126,3 +129,45 @@ def test_postgres_lock_rollback_and_foreign_key_reset(postgres_factory):
         assert [wallet.bonus_tickets for wallet in wallets] == [6, 6]
         audits = db.scalars(select(AdminAudit)).all()
         assert [(audit.id, audit.action) for audit in audits] == [(result["audit_id"], "season.reset")]
+
+
+def test_postgres_table_lock_contention_fails_fast_without_mutation(postgres_factory):
+    admin_id = _seed_postgres_season(postgres_factory)
+    blocker = postgres_factory()
+    outcome: Queue[tuple[BaseException | None, float]] = Queue()
+    finished = threading.Event()
+
+    def attempt_reset() -> None:
+        with postgres_factory() as db:
+            started_at = time.monotonic()
+            error = None
+            try:
+                execute_season_reset(db, admin_id)
+            except BaseException as exc:  # Captured for assertion in the test thread.
+                error = exc
+            finally:
+                db.rollback()
+                outcome.put((error, time.monotonic() - started_at))
+                finished.set()
+
+    try:
+        blocker.execute(text("LOCK TABLE inventory IN ACCESS EXCLUSIVE MODE"))
+        reset_thread = threading.Thread(target=attempt_reset, daemon=True)
+        reset_thread.start()
+        completed_while_locked = finished.wait(timeout=1.5)
+    finally:
+        blocker.rollback()
+        blocker.close()
+
+    reset_thread.join(timeout=5)
+    assert completed_while_locked, "season reset waited on a conflicting table lock"
+    assert not reset_thread.is_alive()
+    error, elapsed = outcome.get_nowait()
+    assert isinstance(error, SeasonResetLockUnavailable)
+    assert elapsed < 1.5
+
+    with postgres_factory() as db:
+        assert db.scalar(select(func.count()).select_from(Inventory)) == 1
+        assert db.scalar(select(func.count()).select_from(DrawHistory)) == 1
+        assert db.get(DrawWallet, admin_id).bonus_tickets == 99
+        assert db.scalar(select(func.count()).select_from(AdminAudit)) == 1

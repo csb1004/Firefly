@@ -2,9 +2,11 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import func, inspect, select
+from sqlalchemy.exc import OperationalError
 
 from bandi_cards.models import (
     AdminAudit,
@@ -467,6 +469,42 @@ def test_lock_unavailable_changes_nothing(web_db, monkeypatch):
         db.rollback()
 
     assert _snapshot_models(web_db) == before
+
+
+class _PostgresLockSession:
+    def __init__(self, execute_error: OperationalError):
+        self.execute_error = execute_error
+
+    def get_bind(self):
+        return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+    def scalar(self, *_args, **_kwargs):
+        return True
+
+    def execute(self, *_args, **_kwargs):
+        raise self.execute_error
+
+
+def _postgres_operational_error(sqlstate: str) -> OperationalError:
+    original = RuntimeError("postgres failure")
+    original.sqlstate = sqlstate
+    return OperationalError("LOCK TABLE inventory", {}, original)
+
+
+def test_postgres_table_lock_unavailable_is_mapped_to_reset_lock_error():
+    db_error = _postgres_operational_error("55P03")
+
+    with pytest.raises(SeasonResetLockUnavailable):
+        season_reset._acquire_postgres_locks(_PostgresLockSession(db_error))
+
+
+def test_postgres_non_lock_database_error_is_not_hidden():
+    db_error = _postgres_operational_error("XX000")
+
+    with pytest.raises(OperationalError) as raised:
+        season_reset._acquire_postgres_locks(_PostgresLockSession(db_error))
+
+    assert raised.value is db_error
 
 
 @pytest.mark.parametrize("operation", [preview_season_reset, execute_season_reset])
