@@ -12,6 +12,7 @@ from .routes.accounts import router as accounts_router
 from .routes.admin_draws import router as admin_draws_router
 from .routes.admin_collections import router as admin_collections_router
 from .routes.admin_sets import router as admin_sets_router
+from .routes.admin_reset import router as admin_reset_router
 from .routes.auth import router as auth_router
 from .routes.cards import router as cards_router
 from .routes.collections import router as collections_router
@@ -20,6 +21,7 @@ from .routes.gifts import router as gifts_router
 from .routes.sets import router as sets_router
 from .routes.trades import router as trades_router
 from .services.trades import cancel_all_active_rooms
+from .season_reset import SeasonResetCoordinator
 
 
 @asynccontextmanager
@@ -35,11 +37,13 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Youngho Gacha", version="0.1.0", lifespan=lifespan)
     app.state.session_factory = SessionLocal
+    app.state.season_reset_coordinator = SeasonResetCoordinator()
     app.include_router(auth_router)
     app.include_router(accounts_router)
     app.include_router(admin_draws_router)
     app.include_router(admin_collections_router)
     app.include_router(admin_sets_router)
+    app.include_router(admin_reset_router)
     app.include_router(cards_router)
     app.include_router(collections_router)
     app.include_router(draws_router)
