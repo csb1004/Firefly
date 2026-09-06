@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..models import DrawWallet, OAuthAttempt, User, WebSession, WebSocketTicket, as_utc, utcnow
+from ..season_reset import track_season_mutation
 from ..security import (
     ABSOLUTE_TIMEOUT,
     SESSION_COOKIE,
@@ -146,6 +147,7 @@ def logout(
 @router.post("/websocket-ticket")
 def websocket_ticket(
     context: AuthContext = Depends(require_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ) -> dict:
     raw = random_token()

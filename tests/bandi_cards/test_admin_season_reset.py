@@ -1,10 +1,12 @@
 import asyncio
 import json
 import threading
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi.routing import APIRoute
 from sqlalchemy import func, select
 
 from bandi_cards.models import (
@@ -17,6 +19,72 @@ from bandi_cards.models import (
     User,
 )
 from bandi_cards.services.season_reset import CONFIRMATION_TEXT
+
+
+GUARDED_ROUTES = {
+    ("POST", "/api/auth/websocket-ticket"),
+    ("PUT", "/api/admin/draw-settings"),
+    ("POST", "/api/admin/users/{user_id}/draw-tickets/grant"),
+    ("POST", "/api/admin/users/{user_id}/draw-tickets/reset-today"),
+    ("PUT", "/api/admin/users/{user_id}/inventory/{card_id}"),
+    ("PUT", "/api/admin/users/{user_id}/catalog/{card_id}"),
+    ("POST", "/api/admin/sets"),
+    ("PUT", "/api/admin/sets/{set_id}"),
+    ("DELETE", "/api/admin/sets/{set_id}"),
+    ("POST", "/api/admin/cards"),
+    ("PUT", "/api/admin/cards/{card_id}"),
+    ("PUT", "/api/admin/probabilities"),
+    ("DELETE", "/api/admin/cards/{card_id}"),
+    ("POST", "/api/collection/discard"),
+    ("POST", "/api/draw"),
+    ("POST", "/api/draw/ten"),
+    ("POST", "/api/gifts"),
+    ("POST", "/api/trades/invite"),
+    ("POST", "/api/trades/{room_id}/accept-invite"),
+    ("PUT", "/api/trades/{room_id}/offer"),
+    ("POST", "/api/trades/{room_id}/request"),
+    ("POST", "/api/trades/{room_id}/accept"),
+    ("POST", "/api/trades/{room_id}/cancel"),
+}
+
+UNGUARDED_MUTATING_ROUTES = {
+    ("POST", "/api/auth/csrf"),
+    ("POST", "/api/auth/logout"),
+    ("POST", "/api/me/warning"),
+    ("PUT", "/api/me/settings"),
+    ("POST", "/api/collection/discard/preview"),
+    ("POST", "/api/gifts/preview"),
+    ("POST", "/api/admin/season-reset"),
+}
+
+
+@contextmanager
+def _held_reset(coordinator):
+    entered = threading.Event()
+    release = threading.Event()
+    errors = []
+
+    def hold() -> None:
+        async def scenario() -> None:
+            async with coordinator.reset():
+                entered.set()
+                await asyncio.to_thread(release.wait)
+
+        try:
+            asyncio.run(scenario())
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    assert entered.wait(timeout=2)
+    try:
+        yield
+    finally:
+        release.set()
+        thread.join(timeout=2)
+    assert thread.is_alive() is False
+    assert errors == []
 
 
 def _seed_api_season(factory, admin_id: int, *, daily_draws: int = 3, bonus_tickets: int = 7) -> int:
@@ -248,3 +316,44 @@ def test_repeated_request_cancellation_waits_for_database_worker(monkeypatch):
         assert coordinator.is_resetting is False
 
     asyncio.run(scenario())
+
+
+def test_every_resettable_mutation_route_has_the_maintenance_guard(web_client):
+    from bandi_cards.season_reset import track_season_mutation
+
+    guarded = set()
+    unguarded = set()
+    routes = []
+    for route in web_client.app.routes:
+        included_router = getattr(route, "original_router", None)
+        routes.extend(included_router.routes if included_router is not None else [route])
+    for route in routes:
+        if not isinstance(route, APIRoute):
+            continue
+        has_guard = any(dependency.call is track_season_mutation for dependency in route.dependant.dependencies)
+        target = guarded if has_guard else unguarded
+        for method in route.methods or ():
+            target.add((method, route.path))
+
+    assert GUARDED_ROUTES <= guarded
+    assert UNGUARDED_MUTATING_ROUTES <= unguarded
+
+
+def test_card_mutations_and_websocket_ticket_return_503_during_reset(signed_in):
+    client, _factory, _user_id, csrf = signed_in
+    client.post("/api/me/warning", headers={"X-CSRF-Token": csrf})
+
+    with _held_reset(client.app.state.season_reset_coordinator):
+        draw = client.post(
+            "/api/draw",
+            headers={"X-CSRF-Token": csrf},
+            json={"idempotency_key": "maintenance-draw"},
+        )
+        socket_ticket = client.post(
+            "/api/auth/websocket-ticket",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert draw.status_code == 503
+    assert draw.json()["detail"] == "시즌 초기화가 진행 중입니다. 잠시 후 다시 시도해주세요."
+    assert socket_ticket.status_code == 503

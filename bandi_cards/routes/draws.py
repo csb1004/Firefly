@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Card, DrawHistory, DrawState, FiveStarEvent, Inventory, User
+from ..season_reset import track_season_mutation
 from ..security import require_csrf_user, require_ready_user
 from ..services.card_assets import asset_store
 from ..services.discord_oauth import avatar_url
@@ -88,7 +89,12 @@ def draw_history(
 
 
 @router.post("/draw")
-def draw(body: DrawBody, user: User = Depends(require_csrf_user), db: Session = Depends(get_db)) -> dict:
+def draw(
+    body: DrawBody,
+    user: User = Depends(require_csrf_user),
+    _reset_guard: None = Depends(track_season_mutation),
+    db: Session = Depends(get_db),
+) -> dict:
     try:
         result = perform_draw(db, user.id, body.idempotency_key)
     except IntegrityError as exc:
@@ -108,7 +114,12 @@ def draw(body: DrawBody, user: User = Depends(require_csrf_user), db: Session = 
 
 
 @router.post("/draw/ten")
-def draw_ten(body: DrawBody, user: User = Depends(require_csrf_user), db: Session = Depends(get_db)) -> dict:
+def draw_ten(
+    body: DrawBody,
+    user: User = Depends(require_csrf_user),
+    _reset_guard: None = Depends(track_season_mutation),
+    db: Session = Depends(get_db),
+) -> dict:
     try:
         batch = perform_draw_batch(db, user.id, body.idempotency_key, count=10)
     except IntegrityError as exc:

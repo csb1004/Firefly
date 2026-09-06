@@ -1,7 +1,11 @@
+import asyncio
+import threading
+from contextlib import contextmanager
 from datetime import timedelta
 
 import pytest
 from fastapi import HTTPException
+from starlette.websockets import WebSocketDisconnect
 
 from bandi_cards.models import Card, Inventory, TradeRoom, User, WebSocketTicket, utcnow
 from bandi_cards.security import random_token, token_hash
@@ -14,6 +18,29 @@ from bandi_cards.services.trades import (
     restore_user_rooms,
     set_offer,
 )
+
+
+@contextmanager
+def held_reset(coordinator):
+    entered = threading.Event()
+    release = threading.Event()
+
+    def hold() -> None:
+        async def scenario() -> None:
+            async with coordinator.reset():
+                entered.set()
+                await asyncio.to_thread(release.wait)
+
+        asyncio.run(scenario())
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    assert entered.wait(timeout=2)
+    try:
+        yield
+    finally:
+        release.set()
+        thread.join(timeout=2)
 
 
 def trade_setup(db):
@@ -119,3 +146,33 @@ def test_websocket_ticket_is_single_use(web_client, web_db):
 
     with web_db() as db:
         assert db.get(WebSocketTicket, token_hash(raw)).consumed_at is not None
+
+
+def test_websocket_handshake_closes_with_1013_during_reset(web_client):
+    with held_reset(web_client.app.state.season_reset_coordinator):
+        with pytest.raises(WebSocketDisconnect) as caught:
+            with web_client.websocket_connect("/ws?ticket=unused"):
+                pass
+    assert caught.value.code == 1013
+
+
+def test_open_websocket_does_not_hold_the_reset_coordinator(web_client, web_db):
+    raw = random_token()
+    with web_db() as db:
+        user = User(discord_id="open-socket-user", username="open_socket", warning_acknowledged=True)
+        db.add(user)
+        db.flush()
+        db.add(
+            WebSocketTicket(
+                token_hash=token_hash(raw),
+                user_id=user.id,
+                expires_at=utcnow() + timedelta(seconds=60),
+            )
+        )
+        db.commit()
+
+    with web_client.websocket_connect(f"/ws?ticket={raw}") as websocket:
+        websocket.receive_json()
+        with held_reset(web_client.app.state.season_reset_coordinator):
+            websocket.send_json({"type": "ping"})
+            assert websocket.receive_json() == {"type": "pong"}

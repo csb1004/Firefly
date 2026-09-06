@@ -25,6 +25,7 @@ from ..models import (
     TradeRoom,
     User,
 )
+from ..season_reset import track_season_mutation
 from ..security import require_admin, require_admin_csrf, require_ready_user
 from ..services.card_assets import asset_store
 from ..services.probabilities import base_probabilities, card_probabilities, validate_probability_configuration
@@ -105,6 +106,7 @@ async def create_card(
     crop_height: float | None = Form(default=None),
     image: UploadFile = File(),
     admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ) -> dict:
     if db.scalar(select(Card).where(func.lower(Card.name) == name.strip().lower())):
@@ -128,6 +130,7 @@ async def update_card(
     active: bool = Form(default=True),
     image: UploadFile | None = File(default=None),
     admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ) -> dict:
     card = db.get(Card, card_id)
@@ -179,6 +182,7 @@ class ProbabilityBody(BaseModel):
 def update_probabilities(
     body: ProbabilityBody,
     admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ) -> dict:
     values = {int(key): float(value) for key, value in body.probabilities.items()}
@@ -214,6 +218,7 @@ def permanently_delete_card(
     card_id: str,
     body: DeleteCardBody,
     admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ):
     card = db.get(Card, card_id)

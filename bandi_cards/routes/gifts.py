@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import User
+from ..season_reset import track_season_mutation
 from ..security import require_csrf_user, require_ready_user
 from ..services.card_assets import asset_store
 from ..services.gifts import preview_gift, send_gift
@@ -52,6 +53,7 @@ def gift_preview(
 def gift_send(
     body: GiftBody,
     sender: User = Depends(require_csrf_user),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ) -> dict:
     gift, preview, repeated = send_gift(

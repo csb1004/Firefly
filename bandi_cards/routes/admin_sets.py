@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import AdminAudit, Card, CardSet, CardSetMember, SetEffect, SetEffectBonusTargetCard, SetEffectTargetCard, User
+from ..season_reset import track_season_mutation
 from ..security import require_admin, require_admin_csrf
 
 
@@ -141,7 +142,12 @@ def list_sets(_: User = Depends(require_admin), db: Session = Depends(get_db)) -
 
 
 @router.post("", status_code=201)
-def create_set(body: SetBody, admin: User = Depends(require_admin_csrf), db: Session = Depends(get_db)) -> dict:
+def create_set(
+    body: SetBody,
+    admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
+    db: Session = Depends(get_db),
+) -> dict:
     validate_body(db, body)
     card_set = CardSet(name=body.name.strip(), active=body.active)
     db.add(card_set)
@@ -153,7 +159,13 @@ def create_set(body: SetBody, admin: User = Depends(require_admin_csrf), db: Ses
 
 
 @router.put("/{set_id}")
-def update_set(set_id: str, body: SetBody, admin: User = Depends(require_admin_csrf), db: Session = Depends(get_db)) -> dict:
+def update_set(
+    set_id: str,
+    body: SetBody,
+    admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
+    db: Session = Depends(get_db),
+) -> dict:
     card_set = db.scalar(select(CardSet).where(CardSet.id == set_id).with_for_update())
     if card_set is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "세트를 찾을 수 없습니다.")
@@ -165,7 +177,12 @@ def update_set(set_id: str, body: SetBody, admin: User = Depends(require_admin_c
 
 
 @router.delete("/{set_id}", status_code=204)
-def delete_set(set_id: str, admin: User = Depends(require_admin_csrf), db: Session = Depends(get_db)):
+def delete_set(
+    set_id: str,
+    admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
+    db: Session = Depends(get_db),
+):
     card_set = db.get(CardSet, set_id)
     if card_set is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "세트를 찾을 수 없습니다.")

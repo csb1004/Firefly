@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import AdminAudit, DailyDrawAllowance, DrawHistory, DrawSetting, DrawWallet, User
+from ..season_reset import track_season_mutation
 from ..security import require_admin, require_admin_csrf
 from ..services.draws import daily_draw_limit, draw_ticket_status, logical_draw_day, new_user_bonus_limit
 from .accounts import public_user
@@ -39,6 +40,7 @@ def get_draw_settings(_: User = Depends(require_admin), db: Session = Depends(ge
 def update_draw_settings(
     body: DailyDrawsBody,
     admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ) -> dict:
     setting = db.scalar(select(DrawSetting).where(DrawSetting.id == 1).with_for_update())
@@ -81,6 +83,7 @@ def grant_draw_tickets(
     user_id: int,
     body: GrantTicketsBody,
     admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ) -> dict:
     user = db.scalar(select(User).where(User.id == user_id).with_for_update())
@@ -108,6 +111,7 @@ def grant_draw_tickets(
 def reset_user_draws_today(
     user_id: int,
     admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ) -> dict:
     user = db.scalar(select(User).where(User.id == user_id).with_for_update())

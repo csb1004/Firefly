@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import AdminAudit, Card, CatalogUnlock, Inventory, User
+from ..season_reset import track_season_mutation
 from ..security import require_admin, require_admin_csrf
 from ..services.inventory import unlock_card
 from ..services.set_effects import effective_yp
@@ -62,6 +63,7 @@ def set_inventory_quantity(
     card_id: str,
     body: QuantityBody,
     admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ) -> dict:
     user = require_user(db, user_id, lock=True)
@@ -94,6 +96,7 @@ def set_catalog_unlock(
     card_id: str,
     body: UnlockBody,
     admin: User = Depends(require_admin_csrf),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ) -> dict:
     user = require_user(db, user_id, lock=True)

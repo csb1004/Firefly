@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..db import SessionLocal, get_db
 from ..models import TradeRoom, User, WebSocketTicket, as_utc, utcnow
 from ..realtime.connection_manager import manager
+from ..season_reset import SeasonResetInProgress, track_season_mutation
 from ..security import require_csrf_user, require_ready_user, token_hash
 from ..services.trades import (
     accept_invite,
@@ -44,6 +45,10 @@ class RequestBody(BaseModel):
     message: str | None = Field(default=None, max_length=200)
 
 
+class InvalidWebSocketTicket(RuntimeError):
+    """Raised when a websocket ticket cannot be consumed."""
+
+
 async def broadcast_room(db: Session, room: TradeRoom, event: str = "trade.updated") -> None:
     await manager.send_many(participants(room), {"type": event, "room": room_payload(db, room)})
 
@@ -58,6 +63,7 @@ async def invite_trade(
     body: InviteBody,
     inviter: User = Depends(require_csrf_user),
     db: Session = Depends(get_db),
+    _season_mutation: None = Depends(track_season_mutation),
 ) -> dict:
     if not manager.is_online(body.invitee_id):
         raise HTTPException(status.HTTP_409_CONFLICT, "온라인 사용자만 거래에 초대할 수 있습니다.")
@@ -73,21 +79,38 @@ def get_trade(room_id: str, user: User = Depends(require_ready_user), db: Sessio
 
 
 @router.post("/api/trades/{room_id}/accept-invite")
-async def trade_accept_invite(room_id: str, user: User = Depends(require_csrf_user), db: Session = Depends(get_db)) -> dict:
+async def trade_accept_invite(
+    room_id: str,
+    user: User = Depends(require_csrf_user),
+    db: Session = Depends(get_db),
+    _season_mutation: None = Depends(track_season_mutation),
+) -> dict:
     room = accept_invite(db, room_id, user.id)
     await broadcast_room(db, room)
     return room_payload(db, room)
 
 
 @router.put("/api/trades/{room_id}/offer")
-async def trade_offer(room_id: str, body: OfferBody, user: User = Depends(require_csrf_user), db: Session = Depends(get_db)) -> dict:
+async def trade_offer(
+    room_id: str,
+    body: OfferBody,
+    user: User = Depends(require_csrf_user),
+    db: Session = Depends(get_db),
+    _season_mutation: None = Depends(track_season_mutation),
+) -> dict:
     room = set_offer(db, room_id, user.id, body.card_id, body.quantity)
     await broadcast_room(db, room)
     return room_payload(db, room)
 
 
 @router.post("/api/trades/{room_id}/request")
-async def trade_request(room_id: str, body: RequestBody, user: User = Depends(require_csrf_user), db: Session = Depends(get_db)) -> dict:
+async def trade_request(
+    room_id: str,
+    body: RequestBody,
+    user: User = Depends(require_csrf_user),
+    db: Session = Depends(get_db),
+    _season_mutation: None = Depends(track_season_mutation),
+) -> dict:
     add_request(db, room_id, user.id, card_id=body.card_id, quantity=body.quantity, message=body.message)
     room = db.get(TradeRoom, room_id)
     await broadcast_room(db, room)
@@ -95,27 +118,49 @@ async def trade_request(room_id: str, body: RequestBody, user: User = Depends(re
 
 
 @router.post("/api/trades/{room_id}/accept")
-async def trade_accept(room_id: str, user: User = Depends(require_csrf_user), db: Session = Depends(get_db)) -> dict:
+async def trade_accept(
+    room_id: str,
+    user: User = Depends(require_csrf_user),
+    db: Session = Depends(get_db),
+    _season_mutation: None = Depends(track_season_mutation),
+) -> dict:
     room, completed = accept_offer(db, room_id, user.id)
     await broadcast_room(db, room, "trade.completed" if completed else "trade.updated")
     return room_payload(db, room)
 
 
 @router.post("/api/trades/{room_id}/cancel")
-async def trade_cancel(room_id: str, user: User = Depends(require_csrf_user), db: Session = Depends(get_db)) -> dict:
+async def trade_cancel(
+    room_id: str,
+    user: User = Depends(require_csrf_user),
+    db: Session = Depends(get_db),
+    _season_mutation: None = Depends(track_season_mutation),
+) -> dict:
     room = cancel_trade(db, room_id, user.id)
     await broadcast_room(db, room, "trade.cancelled")
     return room_payload(db, room)
 
 
-async def expire_disconnect(user_id: int, factory) -> None:
+async def expire_disconnect(user_id: int, factory, coordinator) -> None:
     try:
         await asyncio.sleep(15)
-        with factory() as db:
-            room_ids = cancel_user_rooms(db, user_id)
-            for room_id in room_ids:
-                room = db.get(TradeRoom, room_id)
-                await broadcast_room(db, room, "trade.cancelled")
+        notifications = []
+        try:
+            async with coordinator.mutation():
+                with factory() as db:
+                    room_ids = cancel_user_rooms(db, user_id)
+                    for room_id in room_ids:
+                        room = db.get(TradeRoom, room_id)
+                        notifications.append(
+                            (
+                                participants(room),
+                                {"type": "trade.cancelled", "room": room_payload(db, room)},
+                            )
+                        )
+        except SeasonResetInProgress:
+            return
+        for user_ids, message in notifications:
+            await manager.send_many(user_ids, message)
     except asyncio.CancelledError:
         return
     finally:
@@ -131,18 +176,30 @@ async def realtime_socket(websocket: WebSocket, ticket: str):
         await websocket.close(code=1008)
         return
     factory = getattr(websocket.app.state, "session_factory", SessionLocal)
-    with factory() as db:
-        record = db.get(WebSocketTicket, token_hash(ticket))
-        if record is None or record.consumed_at is not None or as_utc(record.expires_at) <= utcnow():
-            await websocket.close(code=1008)
-            return
-        record.consumed_at = utcnow()
-        user_id = record.user_id
-        db.commit()
+    coordinator = websocket.app.state.season_reset_coordinator
+    try:
+        async with coordinator.mutation():
+            with factory() as db:
+                record = db.get(WebSocketTicket, token_hash(ticket))
+                if record is None or record.consumed_at is not None or as_utc(record.expires_at) <= utcnow():
+                    raise InvalidWebSocketTicket
+                record.consumed_at = utcnow()
+                user_id = record.user_id
+                db.commit()
+    except SeasonResetInProgress:
+        await websocket.close(code=1013)
+        return
+    except InvalidWebSocketTicket:
+        await websocket.close(code=1008)
+        return
     was_offline = await manager.connect(user_id, websocket)
     if was_offline:
-        with factory() as db:
-            restore_user_rooms(db, user_id, manager.is_online)
+        try:
+            async with coordinator.mutation():
+                with factory() as db:
+                    restore_user_rooms(db, user_id, manager.is_online)
+        except SeasonResetInProgress:
+            pass
     await manager.send(user_id, {"type": "presence.ready", "user_id": user_id})
     try:
         while True:
@@ -153,6 +210,13 @@ async def realtime_socket(websocket: WebSocket, ticket: str):
         pass
     finally:
         if manager.disconnect(user_id, websocket):
-            with factory() as db:
-                mark_user_reconnecting(db, user_id)
-            manager.disconnect_tasks[user_id] = asyncio.create_task(expire_disconnect(user_id, factory))
+            try:
+                async with coordinator.mutation():
+                    with factory() as db:
+                        mark_user_reconnecting(db, user_id)
+            except SeasonResetInProgress:
+                pass
+            else:
+                manager.disconnect_tasks[user_id] = asyncio.create_task(
+                    expire_disconnect(user_id, factory, coordinator)
+                )

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import User
+from ..season_reset import track_season_mutation
 from ..security import require_csrf_user, require_ready_user
 from ..services.inventory import discard_card, preview_discard
 
@@ -48,6 +49,7 @@ def discard_preview(
 def discard(
     body: DiscardBody,
     user: User = Depends(require_csrf_user),
+    _reset_guard: None = Depends(track_season_mutation),
     db: Session = Depends(get_db),
 ) -> dict:
     event, repeated = discard_card(db, user.id, body.card_id, body.quantity, body.idempotency_key)
