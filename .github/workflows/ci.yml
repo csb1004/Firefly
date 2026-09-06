@@ -8,6 +8,20 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: youngho_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d youngho_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,6 +33,7 @@ jobs:
         env:
           CARD_SESSION_SECRET: ci-test-session-secret
           CARD_SECURE_COOKIES: "false"
+          TEST_POSTGRES_URL: postgresql+psycopg://postgres:postgres@localhost:5432/youngho_test
 
   frontend:
     runs-on: ubuntu-latest
