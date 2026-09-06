@@ -23,6 +23,7 @@ from ..services.season_reset import (
 
 router = APIRouter(prefix="/api/admin/season-reset", tags=["admin season reset"])
 logger = logging.getLogger(__name__)
+RESET_BROADCAST_TIMEOUT_SECONDS = 3.0
 
 
 class SeasonResetBody(BaseModel):
@@ -77,12 +78,16 @@ async def reset_season(
                 request.app.state.session_factory,
                 admin.id,
             )
-            try:
-                await manager.broadcast_all({"type": "season.reset"})
-            except Exception:
-                logger.exception("Season reset broadcast failed")
-            return result
     except (SeasonResetAlreadyRunning, SeasonResetLockUnavailable) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, "시즌 초기화가 이미 진행 중입니다.") from exc
     except SeasonResetConfigurationInvalid as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+
+    try:
+        await asyncio.wait_for(
+            manager.broadcast_all({"type": "season.reset"}),
+            timeout=RESET_BROADCAST_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        logger.exception("Season reset broadcast failed")
+    return result

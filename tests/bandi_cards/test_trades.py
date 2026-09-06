@@ -2,13 +2,16 @@ import asyncio
 import threading
 from contextlib import contextmanager
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from starlette.websockets import WebSocketDisconnect
 
 from bandi_cards.models import Card, Inventory, TradeRoom, User, WebSocketTicket, utcnow
+from bandi_cards.realtime.connection_manager import ConnectionManager
 from bandi_cards.security import random_token, token_hash
+from bandi_cards.season_reset import SeasonResetCoordinator
 from bandi_cards.services.trades import (
     accept_invite,
     accept_offer,
@@ -64,6 +67,52 @@ def trade_setup(db):
 def negotiating_room(db, first, second):
     room = create_trade(db, first.id, second.id)
     return accept_invite(db, room.id, second.id)
+
+
+def socket_ticket(web_db, *, discord_id: str) -> tuple[str, int]:
+    raw = random_token()
+    with web_db() as db:
+        user = User(discord_id=discord_id, username=discord_id, warning_acknowledged=True)
+        db.add(user)
+        db.flush()
+        db.add(
+            WebSocketTicket(
+                token_hash=token_hash(raw),
+                user_id=user.id,
+                expires_at=utcnow() + timedelta(seconds=60),
+            )
+        )
+        db.commit()
+        return raw, user.id
+
+
+class ControlledWebSocket:
+    def __init__(self, coordinator: SeasonResetCoordinator) -> None:
+        self.app = SimpleNamespace(
+            state=SimpleNamespace(
+                season_reset_coordinator=coordinator,
+            )
+        )
+        self.headers: dict[str, str] = {}
+        self.accept_started = asyncio.Event()
+        self.accept_release = asyncio.Event()
+        self.receive_release = asyncio.Event()
+        self.closed: list[int] = []
+        self.sent: list[dict] = []
+
+    async def accept(self) -> None:
+        self.accept_started.set()
+        await self.accept_release.wait()
+
+    async def close(self, code: int) -> None:
+        self.closed.append(code)
+
+    async def send_json(self, message: dict) -> None:
+        self.sent.append(message)
+
+    async def receive_json(self) -> dict:
+        await self.receive_release.wait()
+        raise WebSocketDisconnect(code=1000)
 
 
 def test_offer_reservation_blocks_other_rooms_and_cancel_releases(web_db):
@@ -146,6 +195,72 @@ def test_websocket_ticket_is_single_use(web_client, web_db):
 
     with web_db() as db:
         assert db.get(WebSocketTicket, token_hash(raw)).consumed_at is not None
+
+
+def test_websocket_ticket_consume_and_registration_are_one_reset_guard(web_db, monkeypatch):
+    from bandi_cards.routes import trades
+
+    raw, user_id = socket_ticket(web_db, discord_id="guarded-handshake-user")
+
+    async def scenario() -> None:
+        coordinator = SeasonResetCoordinator()
+        local_manager = ConnectionManager()
+        websocket = ControlledWebSocket(coordinator)
+        websocket.app.state.session_factory = web_db
+        monkeypatch.setattr(trades, "manager", local_manager)
+
+        socket_task = asyncio.create_task(trades.realtime_socket(websocket, raw))
+        await asyncio.wait_for(websocket.accept_started.wait(), timeout=0.2)
+        reset_entered = asyncio.Event()
+        online_during_reset: list[bool] = []
+
+        async def reset() -> None:
+            async with coordinator.reset():
+                online_during_reset.append(local_manager.is_online(user_id))
+                reset_entered.set()
+                await local_manager.broadcast_all({"type": "season.reset"})
+
+        reset_task = asyncio.create_task(reset())
+        try:
+            await asyncio.sleep(0)
+            assert reset_entered.is_set() is False
+
+            websocket.accept_release.set()
+            await asyncio.wait_for(reset_entered.wait(), timeout=0.2)
+            await reset_task
+            assert online_during_reset == [True]
+            assert {"type": "season.reset"} in websocket.sent
+        finally:
+            websocket.accept_release.set()
+            websocket.receive_release.set()
+            await asyncio.gather(socket_task, reset_task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_stalled_websocket_accept_times_out_and_closes_without_registration(web_db, monkeypatch):
+    from bandi_cards.routes import trades
+
+    raw, user_id = socket_ticket(web_db, discord_id="stalled-handshake-user")
+
+    async def scenario() -> None:
+        coordinator = SeasonResetCoordinator()
+        local_manager = ConnectionManager()
+        local_manager.accept_timeout_seconds = 0.01
+        websocket = ControlledWebSocket(coordinator)
+        websocket.app.state.session_factory = web_db
+        monkeypatch.setattr(trades, "manager", local_manager)
+
+        await asyncio.wait_for(trades.realtime_socket(websocket, raw), timeout=0.2)
+
+        assert websocket.accept_started.is_set() is True
+        assert websocket.closed == [1013]
+        assert local_manager.is_online(user_id) is False
+        assert user_id not in local_manager.connections
+        async with coordinator.reset():
+            assert coordinator.is_resetting is True
+
+    asyncio.run(scenario())
 
 
 def test_websocket_handshake_closes_with_1013_during_reset(web_client):

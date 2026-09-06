@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, get_db
 from ..models import TradeRoom, User, WebSocketTicket, as_utc, utcnow
-from ..realtime.connection_manager import manager
+from ..realtime.connection_manager import WebSocketAcceptTimeout, manager
 from ..season_reset import SeasonResetInProgress, track_season_mutation
 from ..security import require_csrf_user, require_ready_user, token_hash
 from ..services.trades import (
@@ -28,6 +28,7 @@ from ..services.trades import (
 
 
 router = APIRouter(tags=["live trades"])
+WEBSOCKET_CLOSE_TIMEOUT_SECONDS = 1.0
 
 
 class InviteBody(BaseModel):
@@ -47,6 +48,16 @@ class RequestBody(BaseModel):
 
 class InvalidWebSocketTicket(RuntimeError):
     """Raised when a websocket ticket cannot be consumed."""
+
+
+async def close_socket(websocket: WebSocket, code: int) -> None:
+    try:
+        await asyncio.wait_for(
+            websocket.close(code=code),
+            timeout=WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        pass
 
 
 async def broadcast_room(db: Session, room: TradeRoom, event: str = "trade.updated") -> None:
@@ -173,7 +184,7 @@ async def realtime_socket(websocket: WebSocket, ticket: str):
     from ..config import settings
 
     if origin and origin.rstrip("/") != settings.public_url:
-        await websocket.close(code=1008)
+        await close_socket(websocket, 1008)
         return
     factory = getattr(websocket.app.state, "session_factory", SessionLocal)
     coordinator = websocket.app.state.season_reset_coordinator
@@ -186,13 +197,16 @@ async def realtime_socket(websocket: WebSocket, ticket: str):
                 record.consumed_at = utcnow()
                 user_id = record.user_id
                 db.commit()
+            was_offline = await manager.connect(user_id, websocket)
     except SeasonResetInProgress:
-        await websocket.close(code=1013)
+        await close_socket(websocket, 1013)
         return
     except InvalidWebSocketTicket:
-        await websocket.close(code=1008)
+        await close_socket(websocket, 1008)
         return
-    was_offline = await manager.connect(user_id, websocket)
+    except WebSocketAcceptTimeout:
+        await close_socket(websocket, 1013)
+        return
     if was_offline:
         try:
             async with coordinator.mutation():

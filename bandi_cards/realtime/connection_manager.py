@@ -6,17 +6,26 @@ from collections import defaultdict
 from fastapi import WebSocket
 
 
+class WebSocketAcceptTimeout(RuntimeError):
+    """Raised when a websocket cannot finish its handshake promptly."""
+
+
 class ConnectionManager:
     def __init__(self):
         self.connections: dict[int, set[WebSocket]] = defaultdict(set)
         self.disconnect_tasks: dict[int, asyncio.Task] = {}
+        self.accept_timeout_seconds = 3.0
+        self.send_timeout_seconds = 2.0
 
     async def connect(self, user_id: int, websocket: WebSocket) -> bool:
+        try:
+            await asyncio.wait_for(websocket.accept(), timeout=self.accept_timeout_seconds)
+        except TimeoutError as exc:
+            raise WebSocketAcceptTimeout from exc
         task = self.disconnect_tasks.pop(user_id, None)
         if task:
             task.cancel()
-        was_offline = not self.connections[user_id]
-        await websocket.accept()
+        was_offline = not self.connections.get(user_id)
         self.connections[user_id].add(websocket)
         return was_offline
 
@@ -32,14 +41,21 @@ class ConnectionManager:
         return bool(self.connections.get(user_id))
 
     async def send(self, user_id: int, message: dict) -> None:
-        dead = []
-        for websocket in tuple(self.connections.get(user_id, ())):
+        async def send_one(websocket: WebSocket) -> WebSocket | None:
             try:
-                await websocket.send_json(message)
+                await asyncio.wait_for(
+                    websocket.send_json(message),
+                    timeout=self.send_timeout_seconds,
+                )
             except Exception:
-                dead.append(websocket)
+                return websocket
+            return None
+
+        sockets = tuple(self.connections.get(user_id, ()))
+        dead = await asyncio.gather(*(send_one(websocket) for websocket in sockets))
         for websocket in dead:
-            self.disconnect(user_id, websocket)
+            if websocket is not None:
+                self.disconnect(user_id, websocket)
 
     async def send_many(self, user_ids: list[int], message: dict) -> None:
         await asyncio.gather(*(self.send(user_id, message) for user_id in set(user_ids)))

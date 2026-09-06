@@ -539,12 +539,16 @@ def test_card_mutations_and_websocket_ticket_return_503_during_reset(signed_in):
 
 
 class BroadcastRecorder:
-    def __init__(self, *, error: Exception | None = None) -> None:
+    def __init__(self, *, coordinator=None, error: Exception | None = None) -> None:
         self.messages: list[dict] = []
+        self.reset_states: list[bool] = []
+        self.coordinator = coordinator
         self.error = error
 
     async def broadcast_all(self, message: dict) -> None:
         self.messages.append(message)
+        if self.coordinator is not None:
+            self.reset_states.append(self.coordinator.is_resetting)
         if self.error is not None:
             raise self.error
 
@@ -554,7 +558,7 @@ def test_committed_reset_broadcasts_one_exact_completion_event(admin_signed_in, 
 
     client, factory, admin_id, csrf = admin_signed_in
     _seed_api_season(factory, admin_id)
-    recorder = BroadcastRecorder()
+    recorder = BroadcastRecorder(coordinator=client.app.state.season_reset_coordinator)
     monkeypatch.setattr(admin_reset, "manager", recorder, raising=False)
 
     response = client.post(
@@ -565,6 +569,59 @@ def test_committed_reset_broadcasts_one_exact_completion_event(admin_signed_in, 
 
     assert response.status_code == 200
     assert recorder.messages == [{"type": "season.reset"}]
+    assert recorder.reset_states == [False]
+
+
+def test_stalled_reset_broadcast_times_out_without_reopening_maintenance(monkeypatch):
+    from bandi_cards.routes import admin_reset
+    from bandi_cards.season_reset import SeasonResetCoordinator
+
+    class StalledBroadcast:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.cancelled = False
+
+        async def broadcast_all(self, _message: dict) -> None:
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    async def completed_reset(_factory, _admin_id):
+        return {"completed": True}
+
+    async def scenario() -> None:
+        coordinator = SeasonResetCoordinator()
+        broadcaster = StalledBroadcast()
+        request = SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(
+                    season_reset_coordinator=coordinator,
+                    session_factory=object(),
+                )
+            )
+        )
+        monkeypatch.setattr(admin_reset, "_complete_reset_transaction", completed_reset)
+        monkeypatch.setattr(admin_reset, "manager", broadcaster)
+        monkeypatch.setattr(admin_reset, "RESET_BROADCAST_TIMEOUT_SECONDS", 0.01, raising=False)
+
+        result = await asyncio.wait_for(
+            admin_reset.reset_season(
+                admin_reset.SeasonResetBody(confirmation=CONFIRMATION_TEXT),
+                request,
+                SimpleNamespace(id=123),
+            ),
+            timeout=0.2,
+        )
+
+        assert result == {"completed": True}
+        assert broadcaster.started.is_set() is True
+        assert broadcaster.cancelled is True
+        assert coordinator.is_resetting is False
+
+    asyncio.run(scenario())
 
 
 def test_rolled_back_reset_does_not_broadcast_completion(admin_signed_in, monkeypatch):
